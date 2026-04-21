@@ -4,10 +4,9 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// The frontend talks to the epghub API server (Hono, default :3000).
-// That server re-exports the recording core's capabilities and adds TVDB.
-// Mirakurun and the legacy EPGStation HTTP surface are consumed server-side,
-// never from the browser.
+// The frontend talks to the EPGHub API server (Hono, default :3000).
+// Mirakurun and TVDB are consumed server-side; the browser never touches
+// them directly.
 const API = process.env.EPGHUB_API_URL ?? 'http://localhost:3000';
 
 // Expose package.json version at build time as a replacement constant so
@@ -26,6 +25,12 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': { target: API, changeOrigin: true, rewrite: (p) => p.replace(/^\/api/, '') },
+      // Pass through the server's OpenAPI surface so users can hit
+      // http://localhost:5173/docs (the same origin as the UI) instead of
+      // having to know the :3000 backend port.
+      '/docs': { target: API, changeOrigin: true },
+      '/openapi.json': { target: API, changeOrigin: true },
+      '/openapi.yaml': { target: API, changeOrigin: true },
     },
   },
   test: {
