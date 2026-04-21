@@ -2,7 +2,12 @@
 // Rules lives in Agenda.tsx
 
 import { useEffect, useState } from 'react';
-import type { CSSProperties, MouseEvent as ReactMouseEvent, ReactNode } from 'react';
+import type {
+  CSSProperties,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+  ReactNode,
+} from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { pushModalToUrl } from '../lib/modalUrl';
 import { Icon } from './Icon';
@@ -29,6 +34,8 @@ import type {
   ApiGpuEncoder,
   ApiGpuProbeResult,
   ApiGpuStatus,
+  ApiSystemStatus,
+  ApiTunerState,
 } from '../api/epghub';
 
 // ============ SHARED ============
@@ -2311,204 +2318,342 @@ const GpuEncodeSection = ({ pushToast }: GpuEncodeSectionProps) => {
   );
 };
 
-export const SettingsPage = ({ pushToast }: SettingsPageProps = {}) => (
-  <div className="page settings-page">
-    <PageHead title="設定" desc="録画・保存・シリーズ連携・通知の設定。" />
-    <MaintenanceSection pushToast={pushToast} />
-    <ChannelSourcesSection pushToast={pushToast} />
-    <GpuEncodeSection pushToast={pushToast} />
-    <SettingsSection
-      title="シリーズ連携 (TVDB)"
-      desc="シリーズをTVDBと自動で照合し、シーズン・話数を整理します。"
-    >
-      <SettingRow label="TVDB APIキー" value="••••••••••3f4a" action="再発行" />
-      <SettingRow
-        label="自動マッチング"
-        value="有効 (信頼度80%以上)"
-        action="変更"
-      />
-      <SettingRow
-        label="未マッチ時の動作"
-        value="キーワードルールとして保存"
-        action="変更"
-      />
-    </SettingsSection>
-    <SettingsSection
-      title="録画・エンコード"
-      desc="デフォルトの録画設定とエンコードプリセット。"
-    >
-      <SettingRow label="デフォルト品質" value="1080i" action="変更" />
-      <SettingRow
-        label="エンコードプリセット"
-        value="H.265 1080p / Opus"
-        action="変更"
-      />
-      <SettingRow label="エンコード優先度" value="低 (録画優先)" action="変更" />
-      <SettingRow label="前/後マージン" value="0秒 / 30秒" action="変更" />
-    </SettingsSection>
-    <SettingsSection
-      title="ストレージ"
-      desc="録画ファイルの保存先と自動整理ポリシー。"
-    >
-      <SettingRow
-        label="録画先"
-        value="/mnt/nas/recordings"
-        action="変更"
-        mono
-      />
-      <SettingRow
-        label="使用容量"
-        value="5.42 / 8.0 TB (67%)"
-        action="詳細"
-      />
-      <SettingRow label="自動削除" value="視聴済み90日後" action="変更" />
-    </SettingsSection>
-    <SettingsSection
-      title="チューナー"
-      desc="Mirakurunが検出した受信デバイス。OSに見える順に一覧されます。"
-    >
-      <TunerSetup />
-    </SettingsSection>
-  </div>
-);
+// Settings tabs. Flat list rendered in a left rail — grouped by subtle
+// dividers rather than headings so the nav stays quiet. Order follows the
+// typical "setup → operate → maintain" flow.
+type SettingsTabKey =
+  | 'channels'
+  | 'tuners'
+  | 'recording'
+  | 'storage'
+  | 'maintenance';
 
-// Tuner setup — Plex-inspired "scanning for hardware" flow + per-device list
-interface TunerEntry {
-  ch: string;
-  type: string;
-  state: 'recording' | 'idle';
-  program: string | null;
-  signal: number;
+interface SettingsTabDef {
+  key: SettingsTabKey;
+  icon: IconName;
+  label: string;
+  group: 'input' | 'record' | 'system';
 }
 
-interface TunerDevice {
-  id: string;
-  name: string;
-  bus: string;
-  firmware: string;
-  tuners: TunerEntry[];
-}
-
-const TUNER_DEVICES: TunerDevice[] = [
-  {
-    id: 'px-w3u4-1',
-    name: 'PLEX PX-W3U4',
-    bus: 'USB',
-    firmware: '2.1.0',
-    tuners: [
-      { ch: 'T0', type: 'GR', state: 'recording', program: '大相撲春巡業 中継', signal: 28.4 },
-      { ch: 'T1', type: 'GR', state: 'idle', program: null, signal: 27.9 },
-      { ch: 'S0', type: 'BS', state: 'idle', program: null, signal: 17.2 },
-      { ch: 'S1', type: 'BS', state: 'idle', program: null, signal: 17.0 },
-    ],
-  },
-  {
-    id: 'pt3-1',
-    name: 'Earthsoft PT3',
-    bus: 'PCIe',
-    firmware: '1.0.0',
-    tuners: [
-      { ch: 'T0', type: 'GR', state: 'idle', program: null, signal: 29.1 },
-      { ch: 'T1', type: 'GR', state: 'idle', program: null, signal: 28.7 },
-      { ch: 'S0', type: 'BS/CS', state: 'idle', program: null, signal: 18.1 },
-      { ch: 'S1', type: 'BS/CS', state: 'idle', program: null, signal: 17.8 },
-    ],
-  },
+const SETTINGS_TABS: SettingsTabDef[] = [
+  { key: 'channels',    icon: 'tv',        label: 'チャンネル',       group: 'input' },
+  { key: 'tuners',      icon: 'tuner',     label: 'チューナー',       group: 'input' },
+  { key: 'recording',   icon: 'rec',       label: '録画・エンコード', group: 'record' },
+  { key: 'storage',     icon: 'disk',      label: 'ストレージ',       group: 'record' },
+  { key: 'maintenance', icon: 'lightning', label: 'メンテナンス',     group: 'system' },
 ];
 
-const TunerSetup = () => {
-  const [scanning, setScanning] = useState(false);
-  const totalTuners = TUNER_DEVICES.reduce((s, d) => s + d.tuners.length, 0);
-  const inUse = TUNER_DEVICES.reduce(
-    (s, d) => s + d.tuners.filter((t) => t.state !== 'idle').length,
-    0
-  );
+const GROUP_LABELS: Record<SettingsTabDef['group'], string> = {
+  input: '受信',
+  record: '録画',
+  system: 'システム',
+};
+
+const isSettingsTabKey = (v: string | null): v is SettingsTabKey =>
+  !!v && SETTINGS_TABS.some((t) => t.key === v);
+
+export const SettingsPage = ({ pushToast }: SettingsPageProps = {}) => {
+  const [params, setParams] = useSearchParams();
+  const raw = params.get('tab');
+  const active: SettingsTabKey = isSettingsTabKey(raw) ? raw : 'channels';
+
+  const setTab = (key: SettingsTabKey) => {
+    const next = new URLSearchParams(params);
+    if (key === 'channels') next.delete('tab');
+    else next.set('tab', key);
+    setParams(next, { replace: true });
+  };
+
+  // Render tabs with a group heading inserted before the first item of
+  // each group. Keeps the nav structured without a wrapper element per group.
+  const navItems: ReactNode[] = [];
+  let lastGroup: SettingsTabDef['group'] | null = null;
+  for (const tab of SETTINGS_TABS) {
+    if (tab.group !== lastGroup) {
+      navItems.push(
+        <div key={`h-${tab.group}`} className="settings-nav-heading">
+          {GROUP_LABELS[tab.group]}
+        </div>
+      );
+      lastGroup = tab.group;
+    }
+    navItems.push(
+      <button
+        key={tab.key}
+        type="button"
+        data-tab={tab.key}
+        className={`settings-nav-item ${tab.key === active ? 'active' : ''}`}
+        onClick={() => setTab(tab.key)}
+        aria-current={tab.key === active ? 'page' : undefined}
+      >
+        <Icon name={tab.icon} size={14} />
+        <span>{tab.label}</span>
+      </button>
+    );
+  }
+
+  const handleNavKey = (e: ReactKeyboardEvent<HTMLElement>) => {
+    const i = SETTINGS_TABS.findIndex((t) => t.key === active);
+    let nextIdx: number | null = null;
+    if (e.key === 'ArrowDown') nextIdx = (i + 1) % SETTINGS_TABS.length;
+    else if (e.key === 'ArrowUp') nextIdx = (i - 1 + SETTINGS_TABS.length) % SETTINGS_TABS.length;
+    else if (e.key === 'Home') nextIdx = 0;
+    else if (e.key === 'End') nextIdx = SETTINGS_TABS.length - 1;
+    if (nextIdx === null) return;
+    e.preventDefault();
+    const nextKey = SETTINGS_TABS[nextIdx].key;
+    setTab(nextKey);
+    // Focus the newly-active button so subsequent arrow presses keep flowing.
+    // Rendering is synchronous after setParams, so the node exists by the next tick.
+    requestAnimationFrame(() => {
+      const el = e.currentTarget.querySelector<HTMLButtonElement>(
+        `button[data-tab="${nextKey}"]`
+      );
+      el?.focus();
+    });
+  };
 
   return (
-    <div className="tuner-setup">
-      <div className="tuner-summary">
-        <div>
-          <div className="tuner-summary-main">
-            <span className="tuner-count">
-              <span className="tuner-count-num">{TUNER_DEVICES.length}</span>{' '}
-              台のデバイス
+    <div className="page settings-page">
+      <PageHead title="設定" desc="受信ソース・録画・シリーズ連携・運用ジョブの設定。" />
+      <div className="settings-layout">
+        <nav className="settings-nav" aria-label="設定カテゴリ" onKeyDown={handleNavKey}>
+          {navItems}
+        </nav>
+        <div key={active} className="settings-pane">
+          {active === 'channels' && <ChannelSourcesSection pushToast={pushToast} />}
+
+          {active === 'tuners' && <TunerSection pushToast={pushToast} />}
+
+          {active === 'recording' && <GpuEncodeSection pushToast={pushToast} />}
+
+          {active === 'storage' && <StorageSection pushToast={pushToast} />}
+
+          {active === 'maintenance' && <MaintenanceSection pushToast={pushToast} />}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// -----------------------------------------------------------------
+// Tuner section — pulls the real tuner summary from /tuners, which
+// Mirakurun populates. Response is already aggregated per broadcast
+// type ({ type: 'GR'|'BS'|'CS'|'SKY', total, inUse }), so we render a
+// per-type row with usage ratio. Per-device details aren't exposed by
+// the backend, so we intentionally don't try to fake them.
+// -----------------------------------------------------------------
+
+interface TunerSectionProps {
+  pushToast?: (msg: string, kind?: 'ok' | 'err') => void;
+}
+
+const TUNER_TYPE_LABELS: Record<'GR' | 'BS' | 'CS' | 'SKY', string> = {
+  GR: '地上波',
+  BS: 'BS',
+  CS: 'CS',
+  SKY: 'SKY',
+};
+
+const TunerSection = ({ pushToast }: TunerSectionProps) => {
+  const [tuners, setTuners] = useState<ApiTunerState[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const rows = await api.tuners.list();
+      setTuners(rows);
+      setErr(null);
+    } catch (e) {
+      setErr((e as Error).message);
+      pushToast?.(`チューナー取得失敗: ${(e as Error).message}`, 'err');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const totalTuners = (tuners ?? []).reduce((s, t) => s + t.total, 0);
+  const inUseTotal = (tuners ?? []).reduce((s, t) => s + t.inUse, 0);
+
+  return (
+    <SettingsSection
+      title="チューナー"
+      desc="Mirakurun が検出した受信デバイスの合計。同時録画数は合計チューナー数が上限です。"
+    >
+      <div className="tuner-summary-row">
+        <div className="tuner-summary-main">
+          {tuners ? (
+            <>
+              <span>
+                <span className="tuner-count-num">{totalTuners}</span> チューナー
+              </span>
+              <span className="tuner-count-sep">·</span>
+              <span className="tuner-count-inuse">{inUseTotal} 使用中</span>
+            </>
+          ) : (
+            <span style={{ color: 'var(--fg-subtle)' }}>
+              {loading ? '読み込み中…' : '取得に失敗しました'}
             </span>
-            <span className="tuner-count-sep">·</span>
-            <span>
-              <span className="tuner-count-num">{totalTuners}</span> チューナー
-            </span>
-            <span className="tuner-count-sep">·</span>
-            <span className="tuner-count-inuse">{inUse} 使用中</span>
-          </div>
-          <div className="tuner-summary-sub">
-            Mirakurun経由で検出されたチューナー。同時録画可能数は合計チューナー数が上限です。
-          </div>
+          )}
         </div>
         <button
-          className="btn btn-sm"
-          onClick={() => {
-            setScanning(true);
-            setTimeout(() => setScanning(false), 2400);
-          }}
+          className="btn btn-sm ghost"
+          onClick={() => void load()}
+          disabled={loading}
         >
-          {scanning ? '検索中…' : 'デバイスを再検索'}
+          {loading ? '更新中…' : '再取得'}
         </button>
       </div>
 
-      {scanning && (
-        <div className="tuner-scan">
-          <span className="tuner-scan-dot" />
-          新しいハードウェアを検索しています… 見つからない場合も引き続きスキャンします。
+      {err && !tuners && (
+        <div className="settings-empty-row">取得に失敗: {err}</div>
+      )}
+
+      {tuners && tuners.length === 0 && (
+        <div className="settings-empty-row">
+          チューナーが検出されていません。Mirakurun の接続設定を確認してください。
         </div>
       )}
 
-      {TUNER_DEVICES.map((d) => (
-        <div key={d.id} className="tuner-device">
-          <div className="tuner-device-head">
-            <div>
-              <div className="tuner-device-name">{d.name}</div>
-              <div className="tuner-device-meta">
-                {d.bus} · ファームウェア {d.firmware} · ID {d.id}
-              </div>
-            </div>
-            <span className="tuner-device-status on">
-              <span className="dot" />
-              接続中
-            </span>
-          </div>
-          <div className="tuner-list">
-            {d.tuners.map((t) => (
-              <div key={t.ch} className={`tuner-item ${t.state}`}>
-                <span className="tuner-ch">{t.ch}</span>
-                <span className="tuner-type">{t.type}</span>
-                <span className="tuner-state">
-                  {t.state === 'recording' && (
-                    <>
-                      <span className="rec-dot" />
-                      録画中
-                    </>
-                  )}
-                  {t.state === 'idle' && (
-                    <span style={{ color: 'var(--fg-subtle)' }}>待機</span>
-                  )}
+      {tuners && tuners.length > 0 && (
+        <div className="tuner-type-list">
+          {tuners.map((t) => {
+            const pct = t.total === 0 ? 0 : Math.round((t.inUse / t.total) * 100);
+            return (
+              <div key={t.type} className="tuner-type-row">
+                <span className="tuner-type-label">{TUNER_TYPE_LABELS[t.type]}</span>
+                <div className="tuner-type-meter">
+                  <div
+                    className="tuner-type-meter-fill"
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+                <span className="tuner-type-count">
+                  <span className="tuner-type-inuse">{t.inUse}</span>
+                  <span className="tuner-type-sep">/</span>
+                  <span>{t.total}</span>
                 </span>
-                <span className="tuner-program">{t.program || '—'}</span>
-                <span className="tuner-signal">{t.signal.toFixed(1)} dB</span>
               </div>
-            ))}
-          </div>
+            );
+          })}
         </div>
-      ))}
+      )}
+    </SettingsSection>
+  );
+};
 
-      <div className="tuner-empty-hint">
-        接続してもデバイスが表示されない場合は、
-        <a href="#" onClick={(e) => e.preventDefault()}>
-          Mirakurunのログ
-        </a>
-        を確認してください。対応ハードウェア: PX-W3U4 / PX-Q3U4 / PT3 / PLEX
-        DTV02A-1T1S-U。
+// -----------------------------------------------------------------
+// Storage section — wires /system.storage (statfs on RECORDING_DIR) so
+// the UI reflects the real filesystem. The recording-dir path itself
+// and the auto-sweep threshold come from env vars (RECORDING_DIR /
+// DISK_SWEEP_MIN_FREE_GB) and aren't exposed via the admin API, so we
+// don't surface them here.
+// -----------------------------------------------------------------
+
+interface StorageSectionProps {
+  pushToast?: (msg: string, kind?: 'ok' | 'err') => void;
+}
+
+function formatBytes(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  let i = 0;
+  let v = n;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  // Use 2 decimals above MB, 1 below.
+  const digits = i >= 3 ? 2 : i >= 2 ? 1 : 0;
+  return `${v.toFixed(digits)} ${units[i]}`;
+}
+
+const StorageSection = ({ pushToast }: StorageSectionProps) => {
+  const [status, setStatus] = useState<ApiSystemStatus | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const s = await api.system.status();
+      setStatus(s);
+      setErr(null);
+    } catch (e) {
+      setErr((e as Error).message);
+      pushToast?.(`ストレージ取得失敗: ${(e as Error).message}`, 'err');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const total = status?.storage.totalBytes ?? 0;
+  const used = status?.storage.usedBytes ?? 0;
+  const pct = total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0;
+  const tone = pct >= 90 ? 'warn' : pct >= 70 ? 'caution' : 'ok';
+
+  return (
+    <SettingsSection
+      title="ストレージ"
+      desc="録画先ファイルシステムの容量。保存先パスと自動整理のしきい値は環境変数 (RECORDING_DIR / DISK_SWEEP_MIN_FREE_GB) で設定します。"
+    >
+      <div className="storage-meter-row">
+        <div className="storage-meter-head">
+          {status ? (
+            <>
+              <span className="storage-used">{formatBytes(used)}</span>
+              <span className="storage-sep">/</span>
+              <span className="storage-total">{formatBytes(total)}</span>
+              <span className={`storage-pct tone-${tone}`}>{pct}%</span>
+            </>
+          ) : (
+            <span style={{ color: 'var(--fg-subtle)' }}>
+              {loading ? '読み込み中…' : '取得に失敗しました'}
+            </span>
+          )}
+          <button
+            className="btn btn-sm ghost"
+            onClick={() => void load()}
+            disabled={loading}
+            style={{ marginLeft: 'auto' }}
+          >
+            {loading ? '更新中…' : '再取得'}
+          </button>
+        </div>
+        {status && (
+          <div className="storage-meter">
+            <div
+              className={`storage-meter-fill tone-${tone}`}
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        )}
       </div>
-    </div>
+
+      {err && !status && (
+        <div className="settings-empty-row">取得に失敗: {err}</div>
+      )}
+
+      {status && (
+        <div className="storage-meta-row">
+          <span>ビルド {status.version}</span>
+          <span className="tuner-count-sep">·</span>
+          <span>本日の残り予約 {status.upcomingReserves} 件</span>
+          <span className="tuner-count-sep">·</span>
+          <span>基準日 {status.today}</span>
+        </div>
+      )}
+    </SettingsSection>
   );
 };
 
@@ -2567,9 +2712,27 @@ function syncedLabel(iso: string | undefined): string {
   return `更新 ${h}時間前`;
 }
 
+const VALID_GENRE_KEYS = new Set<string>(CATEGORIES.map((c) => c.key));
+
 export const DiscoverPage = ({ existingSeriesIds, onAdded, onRemove }: DiscoverPageProps) => {
-  const [, setSearchParams] = useSearchParams();
-  const [cat, setCat] = useState<ApiRankingGenre>('all');
+  const [searchParams, setSearchParams] = useSearchParams();
+  // The selected category is URL-state (`?genre=drama`, `?genre=anime`, …)
+  // so the Discover page is shareable and bookmarkable per genre. Missing
+  // or unknown values fall back to the "総合" default.
+  const rawGenre = searchParams.get('genre');
+  const cat: ApiRankingGenre =
+    rawGenre && VALID_GENRE_KEYS.has(rawGenre) ? (rawGenre as ApiRankingGenre) : 'all';
+  const setCat = (next: ApiRankingGenre) => {
+    setSearchParams(
+      (prev) => {
+        const p = new URLSearchParams(prev);
+        if (next === 'all') p.delete('genre');
+        else p.set('genre', next);
+        return p;
+      },
+      { replace: false },
+    );
+  };
   const [items, setItems] = useState<ApiRankingItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
