@@ -48,7 +48,9 @@ services:
       - epghub-recordings:/var/lib/epghub/recordings
       - epghub-tvdb-cache:/var/lib/epghub/tvdb-cache
     ports:
-      - "3000:3000"
+      # EPGStation の 2 番目のポート (8889) + 1. 直接 API を叩きたい場合向け。
+      # UI・Swagger UI は app (8889) 経由でも届くので普段は参照しなくて良い。
+      - "8890:3000"
 
   app:
     image: ghcr.io/${EPGHUB_IMAGE_OWNER:-sammrai}/epghub-app:${EPGHUB_TAG:-latest}
@@ -59,7 +61,9 @@ services:
     depends_on:
       - server
     ports:
-      - "5173:80"
+      # EPGStation の UI ポート (8888) + 1. UI, /api/*, /docs, /openapi.* を
+      # すべてこのポートで受ける (nginx が server:3000 に proxy する)。
+      - "8889:80"
 
 volumes:
   epghub-pg-data:
