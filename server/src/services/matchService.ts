@@ -658,9 +658,25 @@ class DbMatchService implements MatchService {
         this.pool.run(async () => {
           const group = byNormalized.get(key);
           const ids = group?.ids ?? [];
+          const allowMovie = group?.hasMovieGenre ?? false;
           try {
-            const hits = await tvdbService.search(key);
-            const best = pickBest(hits, key, { allowMovie: group?.hasMovieGenre ?? false });
+            let hits = await tvdbService.search(key);
+            let scoreKey = key;
+            let best = pickBest(hits, scoreKey, { allowMovie });
+            // Documentary-style shows often come out of normalization as
+            // "<show name> <episode subtitle>" separated by a single
+            // space (e.g. "ブラタモリ 国宝犬山城"). When the full string
+            // misses, retry the search against just the leading token —
+            // that's the show name. Guarded to tokens of 3+ chars so we
+            // don't blow up matches on stop-words.
+            if (!best) {
+              const head = key.split(/\s+/)[0] ?? '';
+              if (head.length >= 3 && head !== key) {
+                hits = await tvdbService.search(head);
+                scoreKey = head;
+                best = pickBest(hits, scoreKey, { allowMovie });
+              }
+            }
             if (best) {
               const episodes = best.type === 'series'
                 ? await tvdbService.getSeriesEpisodes(best.id)
