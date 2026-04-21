@@ -834,6 +834,7 @@ export function App() {
         open={searchOpen}
         onClose={() => setSearchOpen(false)}
         onPick={handleSearchPick}
+        channels={channels}
       />
 
       <div className="toast-wrap">
