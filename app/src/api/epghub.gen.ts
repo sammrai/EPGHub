@@ -1815,6 +1815,57 @@ export interface paths {
         };
         trace?: never;
     };
+    "/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * グローバル検索
+         * @description 番組 / TVDB シリーズ / チャンネル / ルール / 録画を横断して部分一致検索する。各セクション毎に上限件数で絞って返す。q が空ならすべて空配列。
+         */
+        get: {
+            parameters: {
+                query: {
+                    q: string;
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description グループ化された検索結果 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SearchResult"];
+                    };
+                };
+                /** @description 内部エラー */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2453,6 +2504,22 @@ export interface components {
         GpuSettingsPatch: {
             enabled?: boolean;
             preferred?: components["schemas"]["GpuEncoder"] & (string | null);
+        };
+        SearchResult: {
+            /** @description 検索クエリ (正規化済み) */
+            q: string;
+            /** @description 全セクション合算ヒット件数 */
+            total: number;
+            /** @description タイトル/説明/出演者 (extended) に一致する番組。未来寄りに並ぶ */
+            programs: components["schemas"]["Program"][];
+            /** @description TVDB シリーズ/映画カタログに一致するエントリ */
+            series: components["schemas"]["TvdbEntry"][];
+            /** @description 局名・略称・物理番号に一致するチャンネル */
+            channels: components["schemas"]["Channel"][];
+            /** @description ルール名/キーワードに一致する自動予約ルール */
+            rules: components["schemas"]["Rule"][];
+            /** @description 録画済み/録画中のタイトルに一致する録画行 */
+            recordings: components["schemas"]["Recording"][];
         };
     };
     responses: never;

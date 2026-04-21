@@ -1373,6 +1373,48 @@ components:
             - type:
                 - string
                 - "null"
+    SearchResult:
+      type: object
+      properties:
+        q:
+          type: string
+          description: 検索クエリ (正規化済み)
+        total:
+          type: integer
+          description: 全セクション合算ヒット件数
+        programs:
+          type: array
+          items:
+            $ref: "#/components/schemas/Program"
+          description: タイトル/説明/出演者 (extended) に一致する番組。未来寄りに並ぶ
+        series:
+          type: array
+          items:
+            $ref: "#/components/schemas/TvdbEntry"
+          description: TVDB シリーズ/映画カタログに一致するエントリ
+        channels:
+          type: array
+          items:
+            $ref: "#/components/schemas/Channel"
+          description: 局名・略称・物理番号に一致するチャンネル
+        rules:
+          type: array
+          items:
+            $ref: "#/components/schemas/Rule"
+          description: ルール名/キーワードに一致する自動予約ルール
+        recordings:
+          type: array
+          items:
+            $ref: "#/components/schemas/Recording"
+          description: 録画済み/録画中のタイトルに一致する録画行
+      required:
+        - q
+        - total
+        - programs
+        - series
+        - channels
+        - rules
+        - recordings
   parameters: {}
 paths:
   /channels:
@@ -2325,4 +2367,39 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/GpuStatus"
+  /search:
+    get:
+      tags:
+        - search
+      summary: グローバル検索
+      description: 番組 / TVDB シリーズ / チャンネル / ルール / 録画を横断して部分一致検索する。各セクション毎に上限件数で絞って返す。q
+        が空ならすべて空配列。
+      parameters:
+        - schema:
+            type: string
+            description: 検索クエリ (空文字可)
+          required: true
+          name: q
+          in: query
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 25
+            description: セクション毎の最大件数 (1..25, 既定 8)
+          required: false
+          name: limit
+          in: query
+      responses:
+        "200":
+          description: グループ化された検索結果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResult"
+        "500":
+          description: 内部エラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
 webhooks: {}

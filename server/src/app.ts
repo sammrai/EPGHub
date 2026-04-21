@@ -12,6 +12,7 @@ import { tunersRouter } from './routes/tuners.ts';
 import { systemRouter } from './routes/system.ts';
 import { rankingsRouter } from './routes/rankings.ts';
 import { adminRouter } from './routes/admin.ts';
+import { searchRouter } from './routes/search.ts';
 import { recordingService } from './services/recordingService.ts';
 import { scheduleService } from './services/scheduleService.ts';
 
@@ -57,6 +58,7 @@ export function createApp(): OpenAPIHono {
   app.route('/', systemRouter);
   app.route('/', rankingsRouter);
   app.route('/', adminRouter);
+  app.route('/', searchRouter);
 
   app.doc('/openapi.json', DOC_META);
   app.get(

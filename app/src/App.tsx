@@ -15,6 +15,8 @@ import { TimelineView } from './components/Timeline';
 import type { ScrubRange } from './components/Timeline';
 import { AgendaView, RulesPage } from './components/Agenda';
 import { ReserveModal } from './components/Modal';
+import { SearchPalette } from './components/SearchPalette';
+import type { SearchAction } from './components/SearchPalette';
 import {
   DiscoverPage,
   LibraryPage,
@@ -106,11 +108,13 @@ export function App() {
 
   // Infinite-scroll: additional broadcast-days to load past the base.
   // Resets whenever the base day changes.
-  // Default shows a full week so the guide always surfaces the next 7
-  // broadcast days without needing to trigger the infinite-scroll loader.
-  const [daysLoaded, setDaysLoaded] = useState<number>(7);
+  // Infinite-scroll: start with just today + tomorrow so the initial paint
+  // is fast, then extend as the user scrolls toward the bottom. The
+  // day-picker dropdown exposes the full week independently; this only
+  // governs how much EPG data we pull in a single request.
+  const [daysLoaded, setDaysLoaded] = useState<number>(2);
   useEffect(() => {
-    setDaysLoaded(7);
+    setDaysLoaded(2);
   }, [selectedDate]);
 
   // Live-scroll date display (課題#13). Tracks which broadcast day the Grid
@@ -127,8 +131,13 @@ export function App() {
   );
   const schedule = useScheduleRange(dateRange);
   const loadMoreDays = useCallback(() => {
-    setDaysLoaded((n) => Math.min(n + 1, 14));
-  }, []);
+    // Stop growing once the hook signals the last loaded day came back
+    // empty — that's the edge of the broadcaster's EPG window (Mirakurun
+    // typically exposes ~7–8 days). No artificial numeric cap; a large
+    // ceiling guards against a scroll feedback loop only.
+    if (schedule.exhausted) return;
+    setDaysLoaded((n) => Math.min(n + 1, 60));
+  }, [schedule.exhausted]);
 
   const recordingsR = useRecordings();
   const rulesR = useRules();
@@ -151,6 +160,7 @@ export function App() {
   // 13*60=780 → baseDate 18:00 JST。デフォルトで放送日の夕方〜夜を映す。
   const [scrubRange, setScrubRange] = useState<ScrubRange>({ start: 13 * 60, end: 18 * 60 });
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [searchOpen, setSearchOpen] = useState(false);
 
   useEffect(() => localStorage.setItem('epg-layout', layout), [layout]);
   useEffect(() => localStorage.setItem('epg-density', density), [density]);
@@ -519,14 +529,32 @@ export function App() {
   // Keyboard shortcuts
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // ⌘K / Ctrl+K → open global search. Preventing default so Safari's
+      // URL-bar shortcut doesn't eat the keystroke. "/" も最小入力フィールド
+      // でないときだけサーチ起動 (input 内入力時は素通し)。
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setSearchOpen((v) => !v);
+        return;
+      }
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      const inEditable =
+        tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement | null)?.isContentEditable;
+      if (e.key === '/' && !inEditable && !searchOpen) {
+        e.preventDefault();
+        setSearchOpen(true);
+        return;
+      }
       if (e.key === 'Escape' && modalProg) closeModal();
-      if (e.key === '1') setLayout('grid');
-      if (e.key === '2') setLayout('timeline');
-      if (e.key === '3') setLayout('agenda');
+      if (!inEditable) {
+        if (e.key === '1') setLayout('grid');
+        if (e.key === '2') setLayout('timeline');
+        if (e.key === '3') setLayout('agenda');
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [closeModal, modalProg]);
+  }, [closeModal, modalProg, searchOpen]);
 
   const counts = {
     series: rules.filter((r) => r.kind === 'series' && r.enabled).length,
@@ -569,6 +597,32 @@ export function App() {
     rules.flatMap((r) => (r.kind === 'series' && r.tvdb ? [r.tvdb.id] : []))
   );
 
+  // Global search の "選択" を実際の遷移に振り分ける。
+  // - program → 予約モーダルを開く (deep-link 経路と同じ ?modal=<id>)
+  // - series  → ライブラリのそのシリーズ絞り込みに飛ぶ
+  // - channel → 番組表に戻る (BC フィルタで絞り込み)
+  // - rule    → ルール管理画面へ
+  // - recording → ライブラリに飛ぶ (該当 tvdbId があればサブビューへ)
+  const handleSearchPick = useCallback(
+    (action: SearchAction) => {
+      if (action.kind === 'program') {
+        pushModalToUrl(setSearchParams, action.program.id);
+      } else if (action.kind === 'series') {
+        navigate(`/library/${action.entry.id}`);
+      } else if (action.kind === 'channel') {
+        const t = action.channel.type;
+        setBcType(t === 'GR' || t === 'BS' || t === 'CS' ? t : 'all');
+        navigate('/');
+      } else if (action.kind === 'rule') {
+        navigate('/rules');
+      } else if (action.kind === 'recording') {
+        if (action.recording.tvdbId) navigate(`/library/${action.recording.tvdbId}`);
+        else navigate('/library');
+      }
+    },
+    [navigate, setSearchParams, setBcType],
+  );
+
   return (
     <div className="app">
       <Brand />
@@ -579,7 +633,7 @@ export function App() {
           if (idx === null) navigate('/');
           else if (idx === 0) navigate('/library');
         }}
-        onOpenSearch={() => pushToast('検索は準備中です')}
+        onOpenSearch={() => setSearchOpen(true)}
         onCreateRule={() => navigate('/rules')}
       />
       <Sidebar
@@ -626,7 +680,7 @@ export function App() {
                         reservedIds={reservedIds}
                         density={density}
                         baseDate={selectedDate}
-                        daysLoaded={daysLoaded}
+                        daysLoaded={Math.max(1, schedule.loadedDays)}
                         onLoadMore={loadMoreDays}
                         onVisibleDateChange={setDisplayedDate}
                       />
@@ -641,7 +695,7 @@ export function App() {
                         scrubRange={scrubRange}
                         setScrubRange={setScrubRange}
                         baseDate={selectedDate}
-                        daysLoaded={daysLoaded}
+                        daysLoaded={Math.max(1, schedule.loadedDays)}
                         onLoadMore={loadMoreDays}
                         onVisibleDateChange={setDisplayedDate}
                       />
@@ -775,6 +829,12 @@ export function App() {
           }}
         />
       )}
+
+      <SearchPalette
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
+        onPick={handleSearchPick}
+      />
 
       <div className="toast-wrap">
         {toasts.map((t) => (

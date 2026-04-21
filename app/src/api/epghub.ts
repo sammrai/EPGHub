@@ -21,6 +21,7 @@ export type ApiRankingItem = components['schemas']['RankingItem'];
 export type ApiRankingGenre = components['schemas']['RankingGenre'];
 export type ApiAdminRefreshEpgResult = components['schemas']['AdminRefreshEpgResult'];
 export type ApiAdminExpandRulesResult = components['schemas']['AdminExpandRulesResult'];
+export type ApiSearchResult = components['schemas']['SearchResult'];
 export type ApiChannelSource = components['schemas']['ChannelSource'];
 export type ApiChannelSourceKind = components['schemas']['ChannelSourceKind'];
 export type ApiCreateChannelSource = components['schemas']['CreateChannelSource'];
@@ -148,6 +149,13 @@ export const api = {
     list: (genre?: ApiRankingGenre, opts?: ReqOptions) => {
       const qs = genre ? `?genre=${encodeURIComponent(genre)}` : '';
       return req<ApiRankingList>('GET', `/rankings${qs}`, undefined, opts);
+    },
+  },
+  search: {
+    query: (q: string, opts?: ReqOptions & { limit?: number }) => {
+      const qs = new URLSearchParams({ q });
+      if (opts?.limit) qs.set('limit', String(opts.limit));
+      return req<ApiSearchResult>('GET', `/search?${qs}`, undefined, opts);
     },
   },
   admin: {

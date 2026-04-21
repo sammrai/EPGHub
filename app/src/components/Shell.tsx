@@ -150,7 +150,7 @@ export function Header({ page, crumbs, onCrumb, onOpenSearch, onCreateRule }: He
   return (
     <header className="header">
       <div className="header-breadcrumb">
-        <button onClick={() => onCrumb && onCrumb(null)} style={LINK_BTN_STYLE}>EPGStation</button>
+        <button onClick={() => onCrumb && onCrumb(null)} style={LINK_BTN_STYLE}>EPGHub</button>
         <span className="sep">/</span>
         {crumbs && crumbs.length > 0 ? (
           <>
@@ -174,6 +174,7 @@ export function Header({ page, crumbs, onCrumb, onOpenSearch, onCreateRule }: He
         <input readOnly placeholder="番組名・出演者・ジャンル…" />
         <span className="kbd">⌘K</span>
       </div>
+      <div className="header-spacer" />
       <button className="header-btn" onClick={onCreateRule}>
         <Icon name="plus" size={13} /> 新規ルール
       </button>
@@ -188,8 +189,8 @@ export function Brand() {
   return (
     <div className="brand">
       <div className="brand-mark">E</div>
-      <div className="brand-name">EPGStation</div>
-      <div className="brand-sub">v3.2</div>
+      <div className="brand-name">EPGHub</div>
+      <div className="brand-sub">v{__APP_VERSION__}</div>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 // Agenda / list view + Rules page
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
 import { Icon } from './Icon';
 import { toMin, durLabel, MOCK_NOW_MIN, progId, getChannel, seriesCounts } from '../lib/epg';
@@ -69,13 +69,21 @@ export function AgendaView({ programs, channels, onSelect, selectedId, reservedI
     bucket.list.push(p);
   });
   const buckets = Object.values(byKey).sort((a, b) => a.sortKey - b.sortKey);
-  // Detect whether any program straddles a day boundary, so we only add
-  // the date prefix to headers when it's actually needed.
-  const dayKeys = new Set(
-    buckets.map(b => (b.date ? `${b.date.getFullYear()}-${b.date.getMonth()}-${b.date.getDate()}` : 'base'))
-  );
-  const crossesDay = dayKeys.size > 1;
+  // Current epoch-hour (JST or local — Date.getHours above is local, but
+  // sortKey is epoch-hour so a local-vs-UTC offset is absorbed consistently).
+  const nowHourKey = Math.floor(Date.now() / 3_600_000);
   const WEEKDAY_JA = ['日', '月', '火', '水', '木', '金', '土'];
+  const dayKeyOf = (d: Date | null): string =>
+    d ? `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}` : 'base';
+  // Per-bucket date prefix. Only emitted on the first bucket of each new
+  // day (never on the overall first bucket — the date pill above already
+  // shows that day). Eliminates the redundant "4/21 (火)" that used to
+  // appear on every hour within the same day.
+  const datePrefixes = buckets.map((b, i) => {
+    if (i === 0 || !b.date) return '';
+    if (dayKeyOf(b.date) === dayKeyOf(buckets[i - 1].date)) return '';
+    return `${b.date.getMonth() + 1}/${b.date.getDate()} (${WEEKDAY_JA[b.date.getDay()]}) `;
+  });
   const nowMs = Date.now();
 
   const programSort = (a: Program, b: Program): number => {
@@ -85,20 +93,44 @@ export function AgendaView({ programs, channels, onSelect, selectedId, reservedI
     return toMin(a.start) - toMin(b.start);
   };
 
+  // Auto-scroll the first time buckets arrive: jump to the hour containing
+  // (or closest after) "now" so the user lands near live programming
+  // instead of at the top of yesterday's slate.
+  const containerRef = useRef<HTMLDivElement>(null);
+  const didScrollRef = useRef(false);
+  useEffect(() => {
+    if (didScrollRef.current) return;
+    if (buckets.length === 0 || !containerRef.current) return;
+    const nowHour = Math.floor(Date.now() / 3_600_000);
+    const keys = buckets.map((b) => b.sortKey);
+    // Prefer the first bucket whose hour is now-or-later; fall back to the
+    // last bucket when everything is in the past.
+    const targetKey = keys.find((k) => k >= nowHour) ?? keys[keys.length - 1];
+    const el = containerRef.current.querySelector<HTMLElement>(
+      `[data-bucket-key="${targetKey}"]`,
+    );
+    if (el) {
+      el.scrollIntoView({ block: 'start' });
+      didScrollRef.current = true;
+    }
+  }, [buckets.length]);
+
   return (
-    <div className="agenda-view">
-      {buckets.map(bucket => {
-        const { sortKey, hour, date, list: rawList } = bucket;
+    <div className="agenda-view" ref={containerRef}>
+      {buckets.map((bucket, idx) => {
+        const { sortKey, hour, list: rawList } = bucket;
         const list = [...rawList].sort(programSort);
         const hourLabel = String(hour).padStart(2, '0');
-        const datePrefix =
-          crossesDay && date
-            ? `${date.getMonth() + 1}/${date.getDate()} (${WEEKDAY_JA[date.getDay()]}) `
-            : '';
+        const datePrefix = datePrefixes[idx];
         return (
-          <div key={sortKey} className="agenda-hour">
+          <div
+            key={sortKey}
+            className={`agenda-hour${sortKey === nowHourKey ? ' is-now' : ''}`}
+            data-bucket-key={sortKey}
+          >
             <div className="agenda-hour-label">
               {datePrefix}{hourLabel}<span style={{ color: 'var(--fg-subtle)', fontWeight: 400 }}>:00</span>
+              {sortKey === nowHourKey && <span className="agenda-now-tag">NOW</span>}
               <span className="agenda-hour-sub">{list.length}本 · {hour < 12 ? '午前' : hour < 18 ? '午後' : '夜間'}</span>
             </div>
             <div className="agenda-list">
