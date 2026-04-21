@@ -1,0 +1,51 @@
+# epghub server runtime configuration.
+#
+# Copy this file to `config/epghub.yaml` and edit as needed:
+#   cp config/epghub.example.yaml config/epghub.yaml
+#
+# All sections are optional. Values in shell env ($FFMPEG_BIN etc.) still
+# take precedence over what you put here — YAML is the place for settings
+# that outlive a single shell session but don't belong in source control.
+#
+# The file is loaded once at process start, validated with zod, and exposed
+# via `loadConfig()` in src/lib/config.ts. Unknown top-level keys or
+# nested fields are rejected (strict mode) so typos fail loud.
+
+# ---- Recording destination --------------------------------------------
+# Override this when the default .recordings dir under the server root
+# isn't appropriate (shared NAS mount, SSD tier, etc.).
+#recording:
+#  dir: /var/lib/epghub/recordings
+
+# ---- Encode pipeline --------------------------------------------------
+# defaultPreset: name matching an entry in src/recording/encodePresets.ts
+#   (h265-1080p | h264-720p | audio-only).
+# concurrency:   how many encode jobs run in parallel. 1 is safe for
+#   a single-GPU box; bump to 2-4 if you have spare CPU cores.
+#encode:
+#  defaultPreset: h265-1080p
+#  concurrency: 1
+
+# ---- Capacity / disk sweep -------------------------------------------
+# minFreeGb: when free space drops below this, the capacity sweeper
+#   starts evicting oldest unprotected recordings.
+# sweepCron: pg-boss cron expression for the periodic sweep check.
+#   Defaults to hourly if unset.
+#capacity:
+#  minFreeGb: 50
+#  sweepCron: "0 * * * *"
+
+# ---- ffmpeg binaries --------------------------------------------------
+# Point at a custom build (hardware-accelerated, branded, etc.).
+#ffmpeg:
+#  bin: /usr/bin/ffmpeg
+#  probeBin: /usr/bin/ffprobe
+
+# ---- Mirakurun backend ------------------------------------------------
+# url: base URL of the Mirakurun instance that feeds us EPG + streams.
+#   Normally MIRAKURUN_URL in .env is used — this is a fallback for
+#   ops who want it in yaml instead.
+# timeoutMs: per-request timeout for HTTP calls to Mirakurun.
+#mirakurun:
+#  url: http://mirakurun.local:40772
+#  timeoutMs: 10000

@@ -1,0 +1,26 @@
+import type { Recorded } from '../src/schemas/recorded.ts';
+
+const rec = (r: Omit<Recorded, 'state'> & { state?: Recorded['state'] }): Recorded => ({
+  ...r,
+  state: r.state ?? 'ready',
+});
+
+export const RECORDED: Recorded[] = [
+  rec({ id:'r1',  tvdbId:389042, series:'taiga-2026',  season:1,  ep:15,   title:'風の群像',     epTitle:'春風の約束',     ch:'nhk-g', recordedAt:'2026-04-12T20:00:00+09:00', duration:45,  size:4.1,  quality:'1080i', filename:'Kaze.no.Gunzo.S01E15.Haru.Kaze.no.Yakusoku.1080i.mkv', thumb:'t-taiga-15', new:true, state:'encoding', encodeProgress:0.42, encodePreset:'H.265 1080p' }),
+  rec({ id:'r2',  tvdbId:389042, series:'taiga-2026',  season:1,  ep:14,   title:'風の群像',     epTitle:'桜の下で',       ch:'nhk-g', recordedAt:'2026-04-05T20:00:00+09:00', duration:45,  size:4.0,  quality:'1080i', filename:'Kaze.no.Gunzo.S01E14.Sakura.no.Shita.de.1080i.mkv', thumb:'t-taiga-14', state:'queued', encodePreset:'H.265 1080p' }),
+  rec({ id:'r3',  tvdbId:97221,  series:'itteq',       season:18, ep:730,  title:'世界の果てまでイッテQ!', epTitle:'アマゾン奥地の民族', ch:'ntv', recordedAt:'2026-04-12T19:58:00+09:00', duration:54,  size:5.2,  quality:'1080i', filename:'IttekyuQ.S18E730.Amazon.Okuchi.1080i.mkv', thumb:'t-itteq-730' }),
+  rec({ id:'r4',  tvdbId:74917,  series:'sazae',       season:57, ep:2930, title:'サザエさん',   epTitle:'カツオの春休み',  ch:'cx',    recordedAt:'2026-04-12T18:30:00+09:00', duration:24,  size:1.4,  quality:'720p',  filename:'Sazae.san.S57E2930.Katsuo.no.Haruyasumi.720p.mkv', thumb:'t-sazae' }),
+  rec({ id:'r5',  tvdbId:295068, series:'euph-2026',   season:4,  ep:8,    title:'響け!ユーフォニアム', epTitle:'コンクール前夜', ch:'mx', recordedAt:'2026-04-12T18:00:00+09:00', duration:24,  size:1.8,  quality:'1080i', filename:'Hibike.Euphonium.S04E08.Concour.Zenya.1080i.mkv', thumb:'t-euph', new:true }),
+  rec({ id:'r6',  tvdbId:79214,  series:'nhk-special', season:37, ep:2024, title:'NHKスペシャル', epTitle:'戦後80年 証言の記憶', ch:'nhk-g', recordedAt:'2026-04-13T22:00:00+09:00', duration:50,  size:4.6,  quality:'1080i', filename:'NHK.Special.S37E2024.Sengo80.1080i.mkv', thumb:'t-nhksp' }),
+  rec({ id:'r7',  tvdbId:null,   series:null,          season:null, ep:null, title:'プロ野球 「巨人×阪神」', epTitle:null, ch:'nhk-g', recordedAt:'2026-04-13T18:00:00+09:00', duration:180, size:16.4, quality:'1080i', filename:'2026-04-13_18-00_NHK.G_Pro.Yakyu.1080i.mkv', thumb:'t-baseball', ruleMatched:null }),
+  rec({ id:'r8',  tvdbId:258166, series:'doc72h',      season:12, ep:607,  title:'ドキュメント72時間', epTitle:'渋谷スクランブル交差点', ch:'nhk-g', recordedAt:'2026-04-04T22:45:00+09:00', duration:30,  size:2.8, quality:'1080i', filename:'Document.72h.S12E607.Shibuya.Scramble.1080i.mkv', thumb:'t-72h', new:true }),
+  rec({ id:'r9',  tvdbId:428052, series:'kaiju8',      season:2,  ep:10,   title:'怪獣8号',     epTitle:'鳴り響く号令',   ch:'mx',    recordedAt:'2026-04-12T19:00:00+09:00', duration:24,  size:1.9,  quality:'1080i', filename:'Kaiju.No.8.S02E10.Nari.hibiku.Gorei.1080i.mkv', thumb:'t-kaiju8' }),
+  rec({ id:'r10', tvdbId:82118,  series:'darwin',      season:20, ep:741,  title:'ダーウィンが来た!', epTitle:'ニホンザルの春', ch:'nhk-g', recordedAt:'2026-04-12T17:00:00+09:00', duration:30,  size:2.5,  quality:'1080i', filename:'Darwin.ga.Kita.S20E741.Nihonzaru.1080i.mkv', thumb:'t-darwin' }),
+  rec({ id:'r11', tvdbId:84215,  series:'sekai-isan',  season:29, ep:1324, title:'世界遺産',    epTitle:'マチュピチュ再訪', ch:'tbs', recordedAt:'2026-04-12T16:00:00+09:00', duration:30,  size:2.4,  quality:'1080i', filename:'Sekai.Isan.S29E1324.Machu.Picchu.1080i.mkv', thumb:'t-sekai' }),
+  rec({ id:'r12', tvdbId:111161, series:'shawshank',   season:null, ep:null, title:'映画「ショーシャンクの空に」', epTitle:null, ch:'tx', recordedAt:'2026-04-11T21:00:00+09:00', duration:142, size:11.2, quality:'1080i', filename:'The.Shawshank.Redemption.1994.1080i.mkv', thumb:'t-shawshank' }),
+  rec({ id:'r13', tvdbId:86011,  series:'jonetsu',     season:27, ep:1287, title:'情熱大陸',    epTitle:'建築家 隈研吾',  ch:'tbs',   recordedAt:'2026-04-12T22:00:00+09:00', duration:30,  size:2.7,  quality:'1080i', filename:'Jonetsu.Tairiku.S27E1287.Kuma.Kengo.1080i.mkv', thumb:'t-jonetsu' }),
+  rec({ id:'r14', tvdbId:342117, series:'potsun',      season:8,  ep:311,  title:'ポツンと一軒家', epTitle:'長野・北信濃の山奥', ch:'ex', recordedAt:'2026-04-12T17:55:00+09:00', duration:60,  size:5.4,  quality:'1080i', filename:'Potsun.to.Ikken.ya.S08E311.Nagano.1080i.mkv', thumb:'t-potsun' }),
+  rec({ id:'r15', tvdbId:null,   series:null,          season:null, ep:null, title:'プロ野球ニュース', epTitle:null, ch:'cx', recordedAt:'2026-04-18T23:40:00+09:00', duration:30, size:2.6, quality:'1080i', filename:'2026-04-18_23-40_CX_Pro.Yakyu.News.1080i.mkv', thumb:'t-prnews', ruleMatched:'プロ野球' }),
+  rec({ id:'r16', tvdbId:245712, series:'spirited',    season:null, ep:null, title:'金曜ロードショー「千と千尋の神隠し」', epTitle:null, ch:'ntv', recordedAt:'2026-03-28T21:00:00+09:00', duration:125, size:9.8, quality:'1080i', filename:'Spirited.Away.2001.1080i.mkv', thumb:'t-spirited' }),
+  rec({ id:'r17', tvdbId:96283,  series:'tonari-totoro', season:null, ep:null, title:'金曜ロードショー「となりのトトロ」', epTitle:null, ch:'ntv', recordedAt:'2026-02-14T21:00:00+09:00', duration:86, size:6.7, quality:'1080i', filename:'My.Neighbor.Totoro.1988.1080i.mkv', thumb:'t-totoro' }),
+];

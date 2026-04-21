@@ -1,0 +1,8 @@
+node_modules
+dist
+.env
+.env.*
+!.env.example
+# Runtime YAML config — operators copy from epghub.example.yaml and edit
+# locally; never commit the instantiated file.
+config/epghub.yaml

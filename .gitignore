@@ -1,0 +1,26 @@
+.recordings
+EPGStation
+app.zip
+課題.md
+*.png
+
+# dependencies / build outputs
+node_modules/
+dist/
+build/
+.vite/
+
+# test artifacts
+/app/test-results/
+/app/playwright-report/
+/app/playwright/.cache/
+coverage/
+
+# env / local state
+.env
+.env.local
+.env.*.local
+
+# IDE / Claude runtime
+.claude/scheduled_tasks.lock
+**/tsconfig.tsbuildinfo

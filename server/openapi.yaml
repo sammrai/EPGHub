@@ -1,0 +1,2328 @@
+openapi: 3.1.0
+info:
+  version: 0.1.0
+  title: epghub API
+  description: 録画管理 API (epghub). 録画特化・TVDB 連携・視聴機能なし。 スキーマ駆動設計で OpenAPI は zod から自動生成される。
+servers:
+  - url: http://localhost:3000
+    description: dev
+components:
+  schemas:
+    BcType:
+      type: string
+      enum:
+        - GR
+        - BS
+        - CS
+      description: 受信形態
+    Channel:
+      type: object
+      properties:
+        id:
+          type: string
+          example: nhk-g
+        name:
+          type: string
+          example: NHK総合
+        short:
+          type: string
+          example: NHK G
+        number:
+          type: string
+          description: リモコン番号等の表示用番号
+          example: "011"
+        type:
+          $ref: "#/components/schemas/BcType"
+        color:
+          type: string
+          description: UI 上の識別色 (CSS color)
+          example: oklch(0.55 0.12 28)
+      required:
+        - id
+        - name
+        - short
+        - number
+        - type
+        - color
+    ChannelList:
+      type: array
+      items:
+        $ref: "#/components/schemas/Channel"
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+          example: reserve.conflict
+        message:
+          type: string
+          example: 予約時間帯に空きチューナーがありません
+        detail:
+          type: object
+          additionalProperties: {}
+      required:
+        - code
+        - message
+    Genre:
+      type: object
+      properties:
+        key:
+          type: string
+          example: drama
+        label:
+          type: string
+          example: ドラマ
+        dot:
+          type: string
+          description: UI 表示色
+          example: oklch(0.62 0.12 20)
+      required:
+        - key
+        - label
+        - dot
+    TvdbSeries:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 389042
+        slug:
+          type: string
+          example: kaze-no-gunzo
+        title:
+          type: string
+          example: 風の群像
+        titleEn:
+          type: string
+          example: Kaze no Gunzō
+        network:
+          type: string
+        year:
+          type: integer
+        poster:
+          type: string
+          description: ポスター画像識別子 (URL or internal key)
+        matchedBy:
+          type: string
+        type:
+          type: string
+          enum:
+            - series
+        totalSeasons:
+          type: integer
+        currentSeason:
+          type: integer
+        currentEp:
+          type: integer
+        totalEps:
+          type: integer
+        status:
+          type: string
+          enum:
+            - continuing
+            - ended
+      required:
+        - id
+        - slug
+        - title
+        - titleEn
+        - network
+        - year
+        - poster
+        - matchedBy
+        - type
+        - totalSeasons
+        - currentSeason
+        - currentEp
+        - totalEps
+        - status
+    TvdbMovie:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 389042
+        slug:
+          type: string
+          example: kaze-no-gunzo
+        title:
+          type: string
+          example: 風の群像
+        titleEn:
+          type: string
+          example: Kaze no Gunzō
+        network:
+          type: string
+        year:
+          type: integer
+        poster:
+          type: string
+          description: ポスター画像識別子 (URL or internal key)
+        matchedBy:
+          type: string
+        type:
+          type: string
+          enum:
+            - movie
+        runtime:
+          type: integer
+          description: 本編時間(分)
+        director:
+          type: string
+        rating:
+          type: number
+          example: 9.3
+      required:
+        - id
+        - slug
+        - title
+        - titleEn
+        - network
+        - year
+        - poster
+        - matchedBy
+        - type
+        - runtime
+        - director
+        - rating
+    TvdbEntry:
+      oneOf:
+        - $ref: "#/components/schemas/TvdbSeries"
+        - $ref: "#/components/schemas/TvdbMovie"
+      discriminator:
+        propertyName: type
+        mapping:
+          series: "#/components/schemas/TvdbSeries"
+          movie: "#/components/schemas/TvdbMovie"
+    Program:
+      type: object
+      properties:
+        id:
+          type: string
+          example: nhk-g_2026-04-19T20:00
+        ch:
+          type: string
+          example: nhk-g
+        startAt:
+          type: string
+          format: date-time
+          example: 2026-04-19T20:00:00+09:00
+        endAt:
+          type: string
+          format: date-time
+          example: 2026-04-19T20:45:00+09:00
+        title:
+          type: string
+          example: 大河ドラマ「風の群像」第16回
+        genre:
+          $ref: "#/components/schemas/Genre"
+        ep:
+          type:
+            - string
+            - "null"
+          example: "#16"
+        series:
+          type:
+            - string
+            - "null"
+          example: taiga-2026
+        hd:
+          type: boolean
+        desc:
+          type: string
+        extended:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            出演者: 主演:…
+            スタッフ: 脚本:…
+        video:
+          type: string
+          example: 1080i
+        tvdb:
+          $ref: "#/components/schemas/TvdbEntry"
+        tvdbSeason:
+          type:
+            - integer
+            - "null"
+        tvdbEpisode:
+          type:
+            - integer
+            - "null"
+        tvdbEpisodeName:
+          type:
+            - string
+            - "null"
+      required:
+        - id
+        - ch
+        - startAt
+        - endAt
+        - title
+        - genre
+        - ep
+        - series
+    ProgramList:
+      type: array
+      items:
+        $ref: "#/components/schemas/Program"
+    Priority:
+      type: string
+      enum:
+        - high
+        - medium
+        - low
+    Quality:
+      type: string
+      enum:
+        - 1080i
+        - 720p
+    RecordingSource:
+      oneOf:
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - once
+          required:
+            - kind
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - rule
+            ruleId:
+              type: integer
+          required:
+            - kind
+            - ruleId
+        - type: object
+          properties:
+            kind:
+              type: string
+              enum:
+                - series
+            tvdbId:
+              type: integer
+          required:
+            - kind
+            - tvdbId
+    RecordingState:
+      type: string
+      enum:
+        - scheduled
+        - recording
+        - encoding
+        - ready
+        - failed
+        - conflict
+    RecordingDropSummary:
+      type: object
+      properties:
+        errorCnt:
+          type: integer
+          minimum: 0
+        dropCnt:
+          type: integer
+          minimum: 0
+        scramblingCnt:
+          type: integer
+          minimum: 0
+      required:
+        - errorCnt
+        - dropCnt
+        - scramblingCnt
+    Recording:
+      type: object
+      properties:
+        id:
+          type: string
+          example: rec_01HX...
+        programId:
+          type: string
+          example: nhk-g_2026-04-19T20:00
+        ch:
+          type: string
+        title:
+          type: string
+        startAt:
+          type: string
+          format: date-time
+        endAt:
+          type: string
+          format: date-time
+        priority:
+          $ref: "#/components/schemas/Priority"
+        quality:
+          $ref: "#/components/schemas/Quality"
+        keepRaw:
+          type: boolean
+          description: TS (raw) を保持するか
+        marginPre:
+          type: integer
+          description: 開始前マージン(秒)
+          example: 0
+        marginPost:
+          type: integer
+          description: 終了後マージン(秒)
+          example: 30
+        source:
+          $ref: "#/components/schemas/RecordingSource"
+        state:
+          $ref: "#/components/schemas/RecordingState"
+        allocatedTunerIdx:
+          type: integer
+        recordedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        filename:
+          type:
+            - string
+            - "null"
+        size:
+          type:
+            - number
+            - "null"
+          description: ファイルサイズ(GB)
+        duration:
+          type:
+            - integer
+            - "null"
+          description: 録画時間(分)
+        encodeProgress:
+          type: number
+          minimum: 0
+          maximum: 1
+        encodePreset:
+          type:
+            - string
+            - "null"
+        encodeError:
+          type:
+            - string
+            - "null"
+        thumb:
+          type:
+            - string
+            - "null"
+        thumbGenerated:
+          type: boolean
+          description: ffmpeg サムネが生成済みなら true。false の場合 thumb は TVDB ポスター等のフォールバック。
+        protected:
+          type: boolean
+          description: true の行は自動ディスク sweep の対象外。
+        new:
+          type: boolean
+        tvdbId:
+          type:
+            - integer
+            - "null"
+        series:
+          type:
+            - string
+            - "null"
+        season:
+          type:
+            - integer
+            - "null"
+        ep:
+          type:
+            - integer
+            - "null"
+        epTitle:
+          type:
+            - string
+            - "null"
+        ruleMatched:
+          type:
+            - string
+            - "null"
+        originalStartAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        originalEndAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        extendedBySec:
+          type: integer
+        drops:
+          $ref: "#/components/schemas/RecordingDropSummary"
+      required:
+        - id
+        - programId
+        - ch
+        - title
+        - startAt
+        - endAt
+        - priority
+        - quality
+        - keepRaw
+        - marginPre
+        - marginPost
+        - source
+        - state
+    RecordingList:
+      type: array
+      items:
+        $ref: "#/components/schemas/Recording"
+    CreateRecording:
+      type: object
+      properties:
+        programId:
+          type: string
+        priority:
+          allOf:
+            - $ref: "#/components/schemas/Priority"
+            - default: medium
+        quality:
+          allOf:
+            - $ref: "#/components/schemas/Quality"
+            - default: 1080i
+        keepRaw:
+          type: boolean
+          default: false
+        marginPre:
+          type: integer
+          default: 0
+        marginPost:
+          type: integer
+          default: 30
+        source:
+          allOf:
+            - $ref: "#/components/schemas/RecordingSource"
+            - default:
+                kind: once
+        force:
+          type: boolean
+          default: false
+      required:
+        - programId
+    UpdateRecording:
+      type: object
+      properties:
+        priority:
+          $ref: "#/components/schemas/Priority"
+        quality:
+          $ref: "#/components/schemas/Quality"
+        keepRaw:
+          type: boolean
+        marginPre:
+          type: integer
+          minimum: 0
+          maximum: 600
+        marginPost:
+          type: integer
+          minimum: 0
+          maximum: 600
+    RecordingDropPerPid:
+      type: object
+      additionalProperties:
+        type: object
+        properties:
+          err:
+            type: integer
+            minimum: 0
+          drop:
+            type: integer
+            minimum: 0
+          scr:
+            type: integer
+            minimum: 0
+        required:
+          - err
+          - drop
+          - scr
+    RecordingDropLog:
+      type: object
+      properties:
+        recordingId:
+          type: string
+        errorCnt:
+          type: integer
+          minimum: 0
+        dropCnt:
+          type: integer
+          minimum: 0
+        scramblingCnt:
+          type: integer
+          minimum: 0
+        perPid:
+          $ref: "#/components/schemas/RecordingDropPerPid"
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - recordingId
+        - errorCnt
+        - dropCnt
+        - scramblingCnt
+        - perPid
+        - createdAt
+    RecordingEncodeAccepted:
+      type: object
+      properties:
+        recordingId:
+          type: string
+        preset:
+          type: string
+        queued:
+          type: boolean
+          enum:
+            - true
+      required:
+        - recordingId
+        - preset
+        - queued
+    RecordingEncodeRequest:
+      type: object
+      properties:
+        preset:
+          type: string
+          enum:
+            - h265-1080p
+            - h264-720p
+            - audio-only
+            - h265-1080p-nvenc
+            - h264-720p-nvenc
+            - h265-1080p-vaapi
+            - h264-720p-vaapi
+            - h265-1080p-qsv
+            - h264-720p-qsv
+    RuleNextMatch:
+      type:
+        - object
+        - "null"
+      properties:
+        ch:
+          type: string
+        title:
+          type: string
+        at:
+          type: string
+          format: date-time
+      required:
+        - ch
+        - title
+        - at
+    RuleKind:
+      type: string
+      enum:
+        - keyword
+        - series
+    TimeRangeDeny:
+      type: object
+      properties:
+        start:
+          type: string
+          pattern: ^\d{2}:\d{2}$
+          example: 02:00
+        end:
+          type: string
+          pattern: ^\d{2}:\d{2}$
+          example: 05:00
+      required:
+        - start
+        - end
+    Rule:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: 大河ドラマ 風の群像
+        keyword:
+          type: string
+        channels:
+          type: array
+          items:
+            type: string
+          description: 対象チャンネル id
+        enabled:
+          type: boolean
+        matches:
+          type: integer
+          description: これまでの一致件数 (累計)
+        nextMatch:
+          $ref: "#/components/schemas/RuleNextMatch"
+        priority:
+          $ref: "#/components/schemas/Priority"
+        quality:
+          $ref: "#/components/schemas/Quality"
+        skipReruns:
+          type: boolean
+        kind:
+          $ref: "#/components/schemas/RuleKind"
+        tvdb:
+          $ref: "#/components/schemas/TvdbEntry"
+        ngKeywords:
+          type: array
+          items:
+            type: string
+          default: &a1 []
+          description: タイトルにこれらのキーワードが含まれる番組は除外 (傑作選・総集編など)
+          example: &a2
+            - 傑作選
+            - 総集編
+        genreDeny:
+          type: array
+          items:
+            type: string
+          default: &a3 []
+          description: 番組ジャンル key (news/info/…) がここに含まれる番組は除外
+          example: &a4
+            - news
+        timeRangeDeny:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimeRangeDeny"
+          default: &a5 []
+          description: 開始時刻 (JST) がいずれかのレンジ内に入る番組は除外
+      required:
+        - id
+        - name
+        - keyword
+        - channels
+        - enabled
+        - matches
+        - nextMatch
+        - priority
+        - quality
+        - skipReruns
+        - kind
+    RuleList:
+      type: array
+      items:
+        $ref: "#/components/schemas/Rule"
+    RuleExpandSummary:
+      type: object
+      properties:
+        matchedPrograms:
+          type: integer
+        createdRecordings:
+          type: integer
+        conflicts:
+          type: object
+          properties:
+            duplicate:
+              type: integer
+            tunerFull:
+              type: integer
+          required:
+            - duplicate
+            - tunerFull
+      required:
+        - matchedPrograms
+        - createdRecordings
+        - conflicts
+    CreateRule:
+      type: object
+      properties:
+        name:
+          type: string
+        keyword:
+          type: string
+        channels:
+          type: array
+          items:
+            type: string
+          description: 対象チャンネル id
+        enabled:
+          type: boolean
+        priority:
+          $ref: "#/components/schemas/Priority"
+        quality:
+          $ref: "#/components/schemas/Quality"
+        skipReruns:
+          type: boolean
+        kind:
+          $ref: "#/components/schemas/RuleKind"
+        tvdb:
+          $ref: "#/components/schemas/TvdbEntry"
+        ngKeywords:
+          type: array
+          items:
+            type: string
+          default: *a1
+          description: タイトルにこれらのキーワードが含まれる番組は除外 (傑作選・総集編など)
+          example: *a2
+        genreDeny:
+          type: array
+          items:
+            type: string
+          default: *a3
+          description: 番組ジャンル key (news/info/…) がここに含まれる番組は除外
+          example: *a4
+        timeRangeDeny:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimeRangeDeny"
+          default: *a5
+          description: 開始時刻 (JST) がいずれかのレンジ内に入る番組は除外
+      required:
+        - name
+        - keyword
+    UpdateRule:
+      type: object
+      properties:
+        name:
+          type: string
+        keyword:
+          type: string
+        channels:
+          type: array
+          items:
+            type: string
+          description: 対象チャンネル id
+        enabled:
+          type: boolean
+        priority:
+          $ref: "#/components/schemas/Priority"
+        quality:
+          $ref: "#/components/schemas/Quality"
+        skipReruns:
+          type: boolean
+        kind:
+          $ref: "#/components/schemas/RuleKind"
+        tvdb:
+          $ref: "#/components/schemas/TvdbEntry"
+        ngKeywords:
+          type: array
+          items:
+            type: string
+          default: *a1
+          description: タイトルにこれらのキーワードが含まれる番組は除外 (傑作選・総集編など)
+          example: *a2
+        genreDeny:
+          type: array
+          items:
+            type: string
+          default: *a3
+          description: 番組ジャンル key (news/info/…) がここに含まれる番組は除外
+          example: *a4
+        timeRangeDeny:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimeRangeDeny"
+          default: *a5
+          description: 開始時刻 (JST) がいずれかのレンジ内に入る番組は除外
+    TvdbList:
+      type: array
+      items:
+        $ref: "#/components/schemas/TvdbEntry"
+    TvdbCatalog:
+      type: object
+      additionalProperties:
+        $ref: "#/components/schemas/TvdbEntry"
+      description: Program.series キー → TvdbEntry のマップ。UI 側の「この番組のTVDB紐付け」参照で使う。
+    TvdbEpisode:
+      type: object
+      properties:
+        s:
+          type: integer
+          example: 2
+        e:
+          type: integer
+          example: 14
+        aired:
+          type: string
+          example: 2026-04-19
+        name:
+          type: string
+          example: それぞれの春
+      required:
+        - s
+        - e
+    TvdbEpisodeList:
+      type: array
+      items:
+        $ref: "#/components/schemas/TvdbEpisode"
+    TunerState:
+      type: object
+      properties:
+        type:
+          $ref: "#/components/schemas/BcType"
+        total:
+          type: integer
+          minimum: 0
+        inUse:
+          type: integer
+          minimum: 0
+      required:
+        - type
+        - total
+        - inUse
+    TunerList:
+      type: array
+      items:
+        $ref: "#/components/schemas/TunerState"
+    NowRecording:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        ch:
+          type: string
+        startAt:
+          type: string
+          format: date-time
+        endAt:
+          type: string
+          format: date-time
+        progress:
+          type: number
+          minimum: 0
+          maximum: 1
+        series:
+          type:
+            - string
+            - "null"
+        tvdbId:
+          type:
+            - integer
+            - "null"
+      required:
+        - id
+        - title
+        - ch
+        - startAt
+        - endAt
+        - progress
+        - series
+        - tvdbId
+    NowRecordingList:
+      type: array
+      items:
+        $ref: "#/components/schemas/NowRecording"
+    TunerSlotRecording:
+      type: object
+      properties:
+        id:
+          type: string
+        ch:
+          type: string
+        startAt:
+          type: string
+          format: date-time
+        endAt:
+          type: string
+          format: date-time
+        priority:
+          $ref: "#/components/schemas/Priority"
+        title:
+          type: string
+      required:
+        - id
+        - ch
+        - startAt
+        - endAt
+        - priority
+        - title
+    TunerSlot:
+      type: object
+      properties:
+        tunerIdx:
+          type: integer
+          minimum: 0
+        types:
+          type: array
+          items:
+            type: string
+            enum:
+              - GR
+              - BS
+              - CS
+              - SKY
+        recordings:
+          type: array
+          items:
+            $ref: "#/components/schemas/TunerSlotRecording"
+      required:
+        - tunerIdx
+        - types
+        - recordings
+    TunerAllocation:
+      type: object
+      properties:
+        slots:
+          type: array
+          items:
+            $ref: "#/components/schemas/TunerSlot"
+      required:
+        - slots
+    StorageStatus:
+      type: object
+      properties:
+        totalBytes:
+          type: integer
+        usedBytes:
+          type: integer
+      required:
+        - totalBytes
+        - usedBytes
+    SystemStatus:
+      type: object
+      properties:
+        storage:
+          $ref: "#/components/schemas/StorageStatus"
+        upcomingReserves:
+          type: integer
+          description: 本日残り予約件数
+        today:
+          type: string
+          description: 表示基準日 (YYYY-MM-DD)
+          example: 2026-04-19
+        version:
+          type: string
+      required:
+        - storage
+        - upcomingReserves
+        - today
+        - version
+    RankingGenre:
+      type: string
+      enum:
+        - all
+        - movie
+        - drama
+        - sport
+        - anime
+        - music
+        - var
+        - doc
+        - edu
+      example: all
+    RankingItem:
+      type: object
+      properties:
+        rank:
+          type: integer
+          example: 1
+        title:
+          type: string
+        channelName:
+          type:
+            - string
+            - "null"
+          description: 次回放送局 — 放送予定が無いとき null
+        delta:
+          type:
+            - integer
+            - "null"
+          description: 前回順位との差 (正=上昇). 新規エントリは null
+        quote:
+          type:
+            - string
+            - "null"
+          description: 次回放送の番組名など。なければ null
+        nextProgramId:
+          type: string
+          description: 次回放送番組の program id (svc-<serviceId>_<startAtIso>). JCOM
+            側で放送予定を解決できなかった場合は省略
+        tvdb:
+          allOf:
+            - $ref: "#/components/schemas/TvdbEntry"
+            - oneOf:
+                - $ref: "#/components/schemas/TvdbSeries"
+                - $ref: "#/components/schemas/TvdbMovie"
+                - type: "null"
+        syncedAt:
+          type: string
+          format: date-time
+          description: ISO-8601 UTC
+      required:
+        - rank
+        - title
+        - channelName
+        - delta
+        - quote
+        - tvdb
+        - syncedAt
+    RankingList:
+      type: object
+      properties:
+        genre:
+          $ref: "#/components/schemas/RankingGenre"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/RankingItem"
+      required:
+        - genre
+        - items
+    AdminRefreshEpgResult:
+      type: object
+      properties:
+        programsUpserted:
+          type: integer
+          description: Mirakurun から取得して upsert した番組件数
+        tvdbResolved:
+          type: integer
+          description: TVDB 突き合わせで解決できた番組件数
+        tvdbMissed:
+          type: integer
+          description: TVDB 突き合わせで解決できなかった番組件数
+      required:
+        - programsUpserted
+        - tvdbResolved
+        - tvdbMissed
+    AdminExpandRulesResult:
+      type: object
+      properties:
+        matchedPrograms:
+          type: integer
+        createdRecordings:
+          type: integer
+        conflicts:
+          type: object
+          properties:
+            duplicate:
+              type: integer
+            tunerFull:
+              type: integer
+          required:
+            - duplicate
+            - tunerFull
+      required:
+        - matchedPrograms
+        - createdRecordings
+        - conflicts
+    AdminRebuildHistoryResult:
+      type: object
+      properties:
+        inserted:
+          type: integer
+      required:
+        - inserted
+    RecordedHistory:
+      type: object
+      properties:
+        id:
+          type: integer
+        tvdbId:
+          type:
+            - integer
+            - "null"
+        season:
+          type:
+            - integer
+            - "null"
+        episode:
+          type:
+            - integer
+            - "null"
+        normalizedTitle:
+          type:
+            - string
+            - "null"
+        endAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - tvdbId
+        - season
+        - episode
+        - normalizedTitle
+        - endAt
+        - createdAt
+    DiskStatus:
+      type: object
+      properties:
+        totalBytes:
+          type: integer
+          description: ファイルシステムの合計容量
+        usedBytes:
+          type: integer
+          description: 使用中のバイト数
+        freeBytes:
+          type: integer
+          description: 空き容量
+        threshold:
+          type: integer
+          description: この値を下回ると sweep が走る閾値 (bytes)
+      required:
+        - totalBytes
+        - usedBytes
+        - freeBytes
+        - threshold
+    DiskSweepResult:
+      type: object
+      properties:
+        deletedIds:
+          type: array
+          items:
+            type: string
+          description: 削除した recordings.id の一覧 (古い順)
+        freedBytes:
+          type: integer
+          description: 削除で解放した推定バイト数 (recordings.size * GiB)
+      required:
+        - deletedIds
+        - freedBytes
+    DiskSweepBody:
+      type: object
+      properties:
+        minFreeBytes:
+          type: integer
+          exclusiveMinimum: 0
+          description: 閾値のワンショット上書き (bytes)。通常は env DISK_SWEEP_MIN_FREE_GB または総容量の 5%
+            を使うが、強制 sweep や e2e テストで任意の閾値を指定したい場合に送る。
+    EpgLivePollResult:
+      type: object
+      properties:
+        shifted:
+          type: array
+          items:
+            type: string
+          description: endAt がシフトして再スケジュールされた recording の id 一覧
+        touched:
+          type: integer
+          description: 適用した diff アクション数 (bumpProgramRevision + updateEnd 合算)
+      required:
+        - shifted
+        - touched
+    EpgLivePollBody:
+      type: object
+      properties:
+        source:
+          type: string
+          enum:
+            - auto
+            - programs-table
+          description: "'auto' (省略時): MIRAKURUN_URL があれば Mirakurun fetch → diff、なければ
+            programs-table fallback。 'programs-table': Mirakurun を無視し programs
+            テーブルの endAt だけで reserves を同期する (テストで直接 DB を書き換えた場合などに使う)。"
+    ChannelSourceKind:
+      type: string
+      enum:
+        - m3u
+        - mirakurun
+      description: チャンネルソース種別
+    ChannelSource:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: IPTV JP
+        kind:
+          $ref: "#/components/schemas/ChannelSourceKind"
+        url:
+          type: string
+          format: uri
+          example: https://example.com/iptv.m3u
+        enabled:
+          type: boolean
+          example: true
+        lastSyncAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        lastError:
+          type:
+            - string
+            - "null"
+        channelCount:
+          type: integer
+          description: 前回の sync で登録できたチャンネル件数
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - kind
+        - url
+        - enabled
+        - lastSyncAt
+        - lastError
+        - channelCount
+        - createdAt
+    ChannelSourceList:
+      type: array
+      items:
+        $ref: "#/components/schemas/ChannelSource"
+    CreateChannelSource:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          example: IPTV JP
+        kind:
+          $ref: "#/components/schemas/ChannelSourceKind"
+        url:
+          type: string
+          format: uri
+          example: https://example.com/iptv.m3u
+      required:
+        - name
+        - kind
+        - url
+    ChannelSourceSyncResult:
+      type: object
+      properties:
+        channelCount:
+          type: integer
+        error:
+          type: string
+      required:
+        - channelCount
+    GpuEncoder:
+      type: string
+      enum:
+        - h264_nvenc
+        - hevc_nvenc
+        - h264_vaapi
+        - hevc_vaapi
+        - h264_qsv
+        - hevc_qsv
+        - h264_videotoolbox
+        - hevc_videotoolbox
+    GpuProbeDetail:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          description: この encoder が 0.5s テスト encode に成功したか
+        error:
+          type: string
+          description: 失敗時の短い ffmpeg エラー (stderr 末尾 3 行まで)
+      required:
+        - ok
+    GpuProbeResult:
+      type: object
+      properties:
+        available:
+          type: array
+          items:
+            $ref: "#/components/schemas/GpuEncoder"
+          description: ok=true だった encoder の一覧 (details から射影)
+        details:
+          type: object
+          properties:
+            h264_nvenc: &a6
+              $ref: "#/components/schemas/GpuProbeDetail"
+            hevc_nvenc: *a6
+            h264_vaapi: *a6
+            hevc_vaapi: *a6
+            h264_qsv: *a6
+            hevc_qsv: *a6
+            h264_videotoolbox: *a6
+            hevc_videotoolbox: *a6
+          description: 8 encoder 全ての試行結果 (未検出でも key は必ず存在する)
+        probedAt:
+          type: string
+          format: date-time
+          description: probe を走らせた時刻 (ISO-8601)
+      required:
+        - available
+        - details
+        - probedAt
+    GpuStatus:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: 録画エンコード時に GPU プリセットへ自動昇格するか
+        preferred:
+          allOf:
+            - $ref: "#/components/schemas/GpuEncoder"
+            - type:
+                - string
+                - "null"
+              description: enabled=true 時に使う encoder。null なら resolvePreset は何もしない
+        lastProbe:
+          allOf:
+            - $ref: "#/components/schemas/GpuProbeResult"
+            - type:
+                - object
+                - "null"
+              description: 直近の probe 結果。未実行なら null
+      required:
+        - enabled
+        - preferred
+        - lastProbe
+    GpuSettingsPatch:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        preferred:
+          allOf:
+            - $ref: "#/components/schemas/GpuEncoder"
+            - type:
+                - string
+                - "null"
+  parameters: {}
+paths:
+  /channels:
+    get:
+      tags:
+        - channels
+      summary: 放送局一覧
+      description: ユーザーがチューナー設定で有効化した放送局の一覧を返す。
+      responses:
+        "200":
+          description: 放送局の配列
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelList"
+        "500":
+          description: 内部エラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /schedule:
+    get:
+      tags:
+        - schedule
+      summary: 番組表
+      description: "指定された「放送日 (JST 05:00 境界)」の番組を時刻順で返す。放送日 = 日本の番組表慣習 (翌日 05:00
+        までを同じ日付として扱う、例: 4/19 25時=4/20 01:00 JST)。 date 未指定時は現在の放送日、all=1 で全期間。"
+      parameters:
+        - schema:
+            type: string
+            pattern: ^\d{4}-\d{2}-\d{2}$
+            description: YYYY-MM-DD (放送日)。未指定なら今日の放送日
+          required: false
+          name: date
+          in: query
+        - schema:
+            type: string
+            enum:
+              - "0"
+              - "1"
+          required: false
+          name: all
+          in: query
+      responses:
+        "200":
+          description: 番組の配列
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProgramList"
+        "500":
+          description: 内部エラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /programs/{id}:
+    get:
+      tags:
+        - programs
+      summary: 番組1件
+      description: プログラム ID で1件返す。TVDB 紐付け済みなら tvdb フィールドが付く。
+      parameters:
+        - schema:
+            type: string
+            example: nhk-g_2026-04-19T20:00:00.000Z
+          required: true
+          in: path
+          name: id
+      responses:
+        "200":
+          description: 番組
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Program"
+        "404":
+          description: 見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /programs/{id}/tvdb:
+    post:
+      tags:
+        - programs
+      summary: TVDB 手動マッチ
+      description: 番組を指定 TVDB エントリへ手動で紐付ける。同じ正規化タイトルを持つ番組すべてに波及し、title_overrides に
+        user_set=true で記録される (以降 auto matcher は上書きしない)。
+      parameters:
+        - schema:
+            type: string
+            example: nhk-g_2026-04-19T20:00:00.000Z
+          required: true
+          in: path
+          name: id
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tvdbId:
+                  type: integer
+                  example: 188501
+              required:
+                - tvdbId
+      responses:
+        "200":
+          description: 確定した TVDB エントリ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TvdbEntry"
+        "400":
+          description: 不正な TVDB id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: 番組が見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      tags:
+        - programs
+      summary: TVDB マッチ解除
+      description: 番組の TVDB 紐付けを解除する。同じ正規化タイトルの全番組で解除され、title_overrides に tvdbId=null,
+        user_set=true で記録 (auto matcher は以降再紐付けしない)。
+      parameters:
+        - schema:
+            type: string
+            example: nhk-g_2026-04-19T20:00:00.000Z
+          required: true
+          in: path
+          name: id
+      responses:
+        "204":
+          description: 解除完了
+        "404":
+          description: 番組が見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /programs/{id}/tvdb-episode:
+    patch:
+      tags:
+        - programs
+      summary: TVDB 話数 手動設定
+      description: 番組の TVDB シーズン/話数を手動で設定する。自動マッチャーが誤った S/E を割り当てた再放送などに対する per-airing
+        の修正で、同タイトル他番組には波及しない。season/episode のいずれかが null の場合は S/E/名前をクリアする。
+      parameters:
+        - schema:
+            type: string
+            example: nhk-g_2026-04-19T20:00:00.000Z
+          required: true
+          in: path
+          name: id
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                season:
+                  type:
+                    - integer
+                    - "null"
+                  example: 2
+                episode:
+                  type:
+                    - integer
+                    - "null"
+                  example: 14
+              required:
+                - season
+                - episode
+      responses:
+        "200":
+          description: 更新後の番組
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Program"
+        "404":
+          description: 番組が見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /recordings:
+    get:
+      tags:
+        - recordings
+      summary: 録画一覧
+      description: 全 recording 行を返す。?state= でフィルタ可能 (カンマ区切りで複数)。
+      parameters:
+        - schema:
+            type: string
+            description: '返却する recording の state フィルタ。カンマ区切りで複数指定可 (例:
+              "scheduled,recording")。省略時は全件。有効値:
+              scheduled|recording|encoding|ready|failed|conflict'
+            example: scheduled,recording
+          required: false
+          in: query
+          name: state
+      responses:
+        "200":
+          description: recording 配列
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecordingList"
+    post:
+      tags:
+        - recordings
+      summary: 録画作成 (予約)
+      description: "チューナー競合 (409 tuner-full) または既存重複 (409 duplicate) の場合はエラーを返す。
+        force: true で上書き可能。"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRecording"
+      responses:
+        "201":
+          description: recording 作成
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Recording"
+        "404":
+          description: 番組が見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: 競合または重複
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /recordings/{id}:
+    get:
+      tags:
+        - recordings
+      summary: 録画詳細
+      parameters:
+        - schema:
+            type: string
+          required: true
+          in: path
+          name: id
+      responses:
+        "200":
+          description: recording
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Recording"
+        "404":
+          description: 見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    patch:
+      tags:
+        - recordings
+      summary: recording の設定更新
+      description: state=scheduled の recording
+        のみ編集可能。priority/quality/keepRaw/marginPre/marginPost を 部分更新する。margin
+        が変わると pg-boss の RECORD_START/RECORD_STOP を再スケジュールする。
+      parameters:
+        - schema:
+            type: string
+          required: true
+          in: path
+          name: id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateRecording"
+      responses:
+        "200":
+          description: 更新後
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Recording"
+        "404":
+          description: 見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: 編集不可 (scheduled 以外)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      tags:
+        - recordings
+      summary: recording 削除 / キャンセル
+      description: "状態に応じて: scheduled=キャンセル, recording=abort, ready/failed=ファイル削除。
+        いずれも DB 行を削除する。"
+      parameters:
+        - schema:
+            type: string
+          required: true
+          in: path
+          name: id
+      responses:
+        "204":
+          description: 削除成功
+        "404":
+          description: 見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /recordings/{id}/stop:
+    post:
+      tags:
+        - recordings
+      summary: 録画を即時停止
+      description: state=recording のときのみ有効。アクティブな録画パイプを即座に閉じて .part を本ファイルへ rename
+        し、state を encoding または ready に更新する。
+      parameters:
+        - schema:
+            type: string
+          required: true
+          in: path
+          name: id
+      responses:
+        "204":
+          description: 停止成功
+        "404":
+          description: recording が見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: 録画中でない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /recordings/{id}/drops:
+    get:
+      tags:
+        - recordings
+      summary: TS ドロップ統計
+      description: 録画完了時に記録された TS continuity-counter ベースのドロップ／エラー／スクランブル集計を返す。
+      parameters:
+        - schema:
+            type: string
+          required: true
+          in: path
+          name: id
+      responses:
+        "200":
+          description: ドロップ統計
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecordingDropLog"
+        "404":
+          description: 見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /recordings/{id}/encode:
+    post:
+      tags:
+        - recordings
+      summary: 再エンコードを投入
+      description: 指定 preset (省略時は ENCODE_DEFAULT_PRESET) で ffmpeg エンコードを pg-boss
+        のジョブとして投入する。 ready / failed の recording に対して使う。
+      parameters:
+        - schema:
+            type: string
+          required: true
+          in: path
+          name: id
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecordingEncodeRequest"
+      responses:
+        "202":
+          description: キュー投入済み
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RecordingEncodeAccepted"
+        "400":
+          description: preset 未知
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: 見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /rules:
+    get:
+      tags:
+        - rules
+      summary: 録画ルール一覧
+      responses:
+        "200":
+          description: ルール配列
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuleList"
+    post:
+      tags:
+        - rules
+      summary: ルール作成
+      description: 同じ TVDB id に対する series ルールはすでに存在する場合 409 を返す。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateRule"
+      responses:
+        "201":
+          description: ルール作成
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Rule"
+        "409":
+          description: 重複 (同 TVDB の series rule が既存)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /rules/expand:
+    get:
+      tags:
+        - rules
+      summary: ルールを即時展開 (非推奨)
+      deprecated: true
+      description: 非推奨。副作用を伴う操作には POST /admin/expand-rules を使用してください。GET
+        のまま残してあるのは既存ジョブ/ブックマークとの互換のため。
+      responses:
+        "200":
+          description: 展開サマリ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuleExpandSummary"
+  /rules/{id}:
+    patch:
+      tags:
+        - rules
+      summary: ルール更新 (有効化/無効化・属性変更)
+      parameters:
+        - schema:
+            type:
+              - integer
+              - "null"
+            example: 1
+          required: false
+          in: path
+          name: id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateRule"
+      responses:
+        "200":
+          description: 更新後のルール
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Rule"
+        "404":
+          description: 見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    delete:
+      tags:
+        - rules
+      summary: ルール削除
+      parameters:
+        - schema:
+            type:
+              - integer
+              - "null"
+            example: 1
+          required: false
+          in: path
+          name: id
+      responses:
+        "204":
+          description: 削除成功
+        "404":
+          description: 見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /tvdb/search:
+    get:
+      tags:
+        - tvdb
+      summary: TVDB 検索
+      description: シリーズ/映画をタイトルで検索。キーワード未指定時は全件返す (fixture 動作)。
+      parameters:
+        - schema:
+            type: string
+            description: 検索語 (部分一致)
+          required: false
+          name: q
+          in: query
+      responses:
+        "200":
+          description: ヒット一覧
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TvdbList"
+  /tvdb:
+    get:
+      tags:
+        - tvdb
+      summary: TVDB カタログ (series キーでマップ)
+      description: Program.series と一致するキーで TvdbEntry が得られる。Fixture 提供者の実装上、登録済みの紐付けのみ返る。
+      responses:
+        "200":
+          description: カタログ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TvdbCatalog"
+  /tvdb/{id}:
+    get:
+      tags:
+        - tvdb
+      summary: TVDB 詳細 (ID指定)
+      parameters:
+        - schema:
+            type:
+              - integer
+              - "null"
+            example: 389042
+          required: false
+          in: path
+          name: id
+      responses:
+        "200":
+          description: エントリ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TvdbEntry"
+        "404":
+          description: 見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /tvdb/{id}/episodes:
+    get:
+      tags:
+        - tvdb
+      summary: TVDB シリーズのエピソード一覧
+      description: tvdb_entries.episodes にキャッシュされた aired-order エピソード配列を返す。UI
+        の「話数選択」プルダウン向け。キャッシュ未ヒット時は空配列。
+      parameters:
+        - schema:
+            type:
+              - integer
+              - "null"
+            example: 389042
+          required: false
+          in: path
+          name: id
+      responses:
+        "200":
+          description: エピソード一覧
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TvdbEpisodeList"
+  /tuners:
+    get:
+      tags:
+        - tuners
+      summary: チューナー稼働状況
+      responses:
+        "200":
+          description: チューナー配列
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TunerList"
+  /now-recording:
+    get:
+      tags:
+        - tuners
+      summary: 現在録画中の番組
+      responses:
+        "200":
+          description: 録画中配列
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NowRecordingList"
+  /tuners/allocation:
+    get:
+      tags:
+        - tuners
+      summary: 物理チューナーごとの予約割当
+      description: 優先度ベースのアロケータが配置した、物理チューナーごとの予約チェーンを返す。UI のデバッグ/表示用。
+      responses:
+        "200":
+          description: チューナー割当スナップショット
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TunerAllocation"
+  /system:
+    get:
+      tags:
+        - system
+      summary: システムステータス (ストレージ・予約件数・バージョン)
+      responses:
+        "200":
+          description: ステータス
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemStatus"
+  /rankings:
+    get:
+      tags:
+        - rankings
+      summary: 予約ランキング (JCOM由来)
+      description: JCOM TV ガイドの予約ランキングをキャッシュして返す。 `genre` 未指定時は `all`
+        (総合)。3時間ごとに裏でバックグラウンド同期される。
+      parameters:
+        - schema:
+            allOf:
+              - $ref: "#/components/schemas/RankingGenre"
+              - description: "'all' で総合ランキング。未指定時も 'all'。"
+          required: false
+          name: genre
+          in: query
+      responses:
+        "200":
+          description: ランキング (順位昇順)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RankingList"
+        "500":
+          description: 内部エラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /admin/refresh-epg:
+    post:
+      tags:
+        - admin
+      summary: EPG を今すぐ更新
+      description: 通常は pg-boss が 10 分ごとに実行している scheduleService.refresh() +
+        matchService.enrichUnmatched()
+        をその場で同期実行する。完了まで返らないので大規模な番組表取得では数秒〜数十秒かかりうる。
+      responses:
+        "200":
+          description: 更新結果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminRefreshEpgResult"
+  /admin/expand-rules:
+    post:
+      tags:
+        - admin
+      summary: ルールを今すぐ展開
+      description: 全ての有効なルールに対して ruleExpander を即時実行し、マッチする未予約の番組を予約化する。既存の GET
+        /rules/expand と同じ動作だが、副作用のある操作は POST が正式。
+      responses:
+        "200":
+          description: 展開サマリ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminExpandRulesResult"
+  /admin/recorded-history/rebuild:
+    post:
+      tags:
+        - admin
+      summary: 録画履歴を recordings テーブルから再構築
+      description: recordings テーブルの ready/failed 行から recorded_history 行を生成する。既存の tvdb
+        tuple ユニーク制約で重複行は自動的にスキップされる。
+      responses:
+        "200":
+          description: 挿入件数
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminRebuildHistoryResult"
+  /admin/recorded-history:
+    get:
+      tags:
+        - admin
+      summary: 録画履歴を一覧
+      parameters:
+        - schema:
+            type:
+              - integer
+              - "null"
+            description: 指定時はこの TVDB ID に紐づく行のみ返す
+          required: false
+          name: tvdbId
+          in: query
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            description: 上限件数 (デフォルト 200)
+          required: false
+          name: limit
+          in: query
+      responses:
+        "200":
+          description: 履歴行 (createdAt 降順)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RecordedHistory"
+  /admin/capacity:
+    get:
+      tags:
+        - admin
+      summary: ディスク容量と sweep 閾値を取得
+      description: RECORDING_DIR を含むファイルシステムを statfs(2) で調べ、合計・使用・空き容量と disk.sweep
+        が発動する閾値を返す。閾値は env DISK_SWEEP_MIN_FREE_GB が優先、未設定なら total の 5%。
+      responses:
+        "200":
+          description: ディスク容量サマリ
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiskStatus"
+  /admin/capacity/sweep:
+    post:
+      tags:
+        - admin
+      summary: ディスク sweep を今すぐ実行
+      description: 通常 pg-boss が 1 時間ごとに実行している capacityService.sweep() を同期的に走らせる。保護
+        (protected=true) されていない state=ready/failed の行を古い順に削除し、空き容量が
+        閾値を上回ったら停止する。
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DiskSweepBody"
+      responses:
+        "200":
+          description: 削除結果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiskSweepResult"
+  /admin/epg-live/poll:
+    post:
+      tags:
+        - admin
+      summary: EIT live poll を今すぐ実行
+      description: 通常 pg-boss が 1 分ごとに走らせている epgLiveService.pollOnce()
+        を同期実行する。MIRAKURUN_URL が設定されていれば Mirakurun /api/programs を再取得して
+        diff、未設定なら programs テーブルと reserves.endAt の差分だけ同期する。
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EpgLivePollBody"
+      responses:
+        "200":
+          description: poll 結果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EpgLivePollResult"
+  /admin/channel-sources:
+    get:
+      tags:
+        - admin
+      summary: チャンネルソース一覧
+      description: 登録済みの m3u / Mirakurun アップストリームを取得する。
+      responses:
+        "200":
+          description: 登録済みソース (新しい順)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelSourceList"
+    post:
+      tags:
+        - admin
+      summary: チャンネルソースを追加
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateChannelSource"
+      responses:
+        "201":
+          description: 追加した行
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelSource"
+        "400":
+          description: 入力エラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /admin/channel-sources/{id}/sync:
+    post:
+      tags:
+        - admin
+      summary: チャンネルソースを今すぐ同期
+      parameters:
+        - schema:
+            type:
+              - integer
+              - "null"
+          required: false
+          name: id
+          in: path
+      responses:
+        "200":
+          description: sync 結果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelSourceSyncResult"
+        "404":
+          description: 存在しない id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /admin/channel-sources/{id}:
+    delete:
+      tags:
+        - admin
+      summary: チャンネルソースを削除
+      parameters:
+        - schema:
+            type:
+              - integer
+              - "null"
+          required: false
+          name: id
+          in: path
+      responses:
+        "204":
+          description: 削除完了
+        "404":
+          description: 存在しない id
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /admin/gpu/probe:
+    post:
+      tags:
+        - admin
+      summary: ffmpeg で GPU エンコーダを検出
+      description: NVENC / VAAPI / QSV / VideoToolbox の 8 encoder に対し 0.5 秒の null
+        encode を並列実行し、どの encoder が使えるか返す。結果は system_settings.gpu.lastProbe
+        にキャッシュされる。
+      responses:
+        "200":
+          description: probe 結果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GpuProbeResult"
+  /admin/gpu/status:
+    get:
+      tags:
+        - admin
+      summary: 現在の GPU 設定と直近 probe 結果
+      description: "`enabled` / `preferred` / `lastProbe` を返す。UI の Settings
+        画面は初期表示でこれを読み、必要になったタイミングで `/admin/gpu/probe` を叩く。"
+      responses:
+        "200":
+          description: GPU ステータス
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GpuStatus"
+  /admin/gpu/settings:
+    patch:
+      tags:
+        - admin
+      summary: GPU エンコード設定を更新
+      description: enabled/preferred を部分更新する。送らなかった key は変更しない。 preferred を null にすると
+        resolvePreset は CPU プリセットにフォールバックする。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GpuSettingsPatch"
+      responses:
+        "200":
+          description: 更新後のステータス
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GpuStatus"
+webhooks: {}

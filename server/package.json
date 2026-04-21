@@ -1,0 +1,47 @@
+{
+  "name": "epghub-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "test": "npm run test:unit",
+    "test:unit": "node --import tsx --test src/services/matchService.test.ts src/services/recordedHistoryService.test.ts src/services/epgLiveService.test.ts src/services/ruleExpanderExclusions.test.ts src/services/capacityService.test.ts src/services/tunerAllocator.test.ts src/recording/encoder.test.ts src/recording/dropChecker.test.ts",
+    "test:mirakurun": "node --import tsx --test src/integrations/mirakurun/client.test.ts",
+    "test:e2e": "node --import tsx --test src/e2e/api-scenarios.test.ts",
+    "test:golden": "node --import tsx --test src/services/matchService.golden.test.ts",
+    "test:lifecycle": "node --import tsx --test src/recording/recorder.lifecycle.test.ts",
+    "test:plex-naming": "node --import tsx --test src/recording/plexNaming.test.ts",
+    "test:m3u": "node --import tsx --test src/integrations/m3u/parser.test.ts",
+    "test:recording-service": "node --import tsx --test src/services/recordingService.test.ts",
+    "test:gpu-probe": "node --import tsx --test src/services/gpuProbeService.test.ts",
+    "typecheck": "tsc -p . --noEmit",
+    "gen:openapi": "tsx scripts/generate-openapi.ts",
+    "dump:golden-titles": "tsx scripts/dump-title-cases.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "@hono/zod-openapi": "^0.18.3",
+    "@scalar/hono-api-reference": "^0.5.172",
+    "dotenv": "^16.6.1",
+    "drizzle-orm": "^0.36.4",
+    "drizzle-zod": "^0.6.1",
+    "execa": "^9.6.1",
+    "hono": "^4.6.14",
+    "pg-boss": "^10.4.2",
+    "postgres": "^3.4.9",
+    "yaml": "^2.6.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "drizzle-kit": "^0.30.6",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

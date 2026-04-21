@@ -1,0 +1,30 @@
+{
+    "name": "${localWorkspaceFolderBasename}",
+    "image": "mcr.microsoft.com/devcontainers/javascript-node:18-bookworm",
+    "features": {
+        "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {},
+        "ghcr.io/itsmechlark/features/postgresql:1": {},
+        "ghcr.io/devcontainers/features/github-cli:1": {}
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "dbaeumer.vscode-eslint",
+                "eamodio.gitlens",
+                "redhat.vscode-yaml",
+                "syler.sass-indented",
+                "42Crunch.vscode-openapi",
+                "esbenp.prettier-vscode",
+                "Vue.volar"
+            ]
+        }
+    },
+    "forwardPorts": [3000, 5173, 8888],
+    "postCreateCommand": "bash .devcontainer/postCreate.sh",
+    "mounts": [
+        "source=${localEnv:HOME}/.config/gh,target=/home/node/.config/gh,type=bind,consistency=cached",
+        "source=${localEnv:HOME}/.claude,target=/home/node/.claude,type=bind,consistency=cached",
+        "source=${localEnv:HOME}/.claude.json,target=/home/node/.claude.json,type=bind,consistency=cached"
+    ],
+    "remoteUser": "node"
+}
