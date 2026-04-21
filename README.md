@@ -14,5 +14,4 @@
 docker compose up -d
 ```
 
-UI http://localhost:8889 · API docs http://localhost:8889/docs
-（ポートは EPGStation の 8888 系から +1。直接 API を叩く場合は http://localhost:8890）
+UI http://localhost:8890 · API docs http://localhost:8890/docs
