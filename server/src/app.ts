@@ -1,7 +1,6 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
 import { logger } from 'hono/logger';
 import { cors } from 'hono/cors';
-import { apiReference } from '@scalar/hono-api-reference';
 import { channelsRouter } from './routes/channels.ts';
 import { scheduleRouter } from './routes/schedule.ts';
 import { programsRouter } from './routes/programs.ts';
@@ -61,14 +60,7 @@ export function createApp(): OpenAPIHono {
   app.route('/', searchRouter);
 
   app.doc('/openapi.json', DOC_META);
-  app.get(
-    '/docs',
-    apiReference({
-      spec: { url: '/openapi.json' },
-      pageTitle: 'epghub API — Reference',
-    })
-  );
-  app.get('/swagger', (c) => c.html(SWAGGER_HTML));
+  app.get('/docs', (c) => c.html(SWAGGER_HTML));
 
   return app;
 }
@@ -77,7 +69,7 @@ const SWAGGER_HTML = `<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>epghub API — Swagger UI</title>
+    <title>EPGHub API — Swagger UI</title>
     <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
   </head>
   <body>

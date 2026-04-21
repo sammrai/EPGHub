@@ -3,7 +3,7 @@
 録画管理 API サーバ。**Hono + @hono/zod-openapi** によるスキーマ駆動設計。
 
 - zod でリクエスト/レスポンスを定義 → TS 型 / ランタイム validation / OpenAPI を一本化
-- `/openapi.json` と `/docs` (Scalar API Reference) を配信
+- `/openapi.json` と `/docs` (Swagger UI) を配信
 - `npm run gen:openapi` で `openapi.yaml` をリポジトリにコミット可能な成果物として出力
 
 ## 開発
