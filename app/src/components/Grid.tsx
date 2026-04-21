@@ -175,6 +175,7 @@ export function Subheader({ layout, onLayout, filter, setFilter, bcType, setBcTy
     <div className="subheader">
       <div className="date-pill-wrap" ref={pillWrapRef}>
         <button
+          ref={pillBtnRef}
           type="button"
           className={`date-pill${menuOpen ? ' open' : ''}`}
           onClick={() => setMenuOpen((o) => !o)}
@@ -185,8 +186,13 @@ export function Subheader({ layout, onLayout, filter, setFilter, bcType, setBcTy
           <span>{pillLabel}</span>
           <Icon name="chevD" size={11} />
         </button>
-        {menuOpen && (
-          <div className="date-pill-menu" role="listbox">
+        {menuOpen && menuPos && (
+          <div
+            ref={menuRef}
+            className="date-pill-menu"
+            role="listbox"
+            style={{ top: menuPos.top, left: menuPos.left }}
+          >
             {days.map((d) => {
               const selected = d.k === selectedDate;
               return (
@@ -241,14 +247,29 @@ export function Subheader({ layout, onLayout, filter, setFilter, bcType, setBcTy
       <div style={{ flex: 1 }} />
 
       <div className="seg">
-        <button className={`seg-btn ${layout === 'grid' ? 'active' : ''}`} onClick={() => onLayout('grid')}>
-          <Icon name="grid" size={12} /> グリッド
+        <button
+          className={`seg-btn icon-only ${layout === 'grid' ? 'active' : ''}`}
+          onClick={() => onLayout('grid')}
+          title="グリッド"
+          aria-label="グリッド"
+        >
+          <Icon name="grid" size={14} />
         </button>
-        <button className={`seg-btn ${layout === 'timeline' ? 'active' : ''}`} onClick={() => onLayout('timeline')}>
-          <Icon name="timeline" size={12} /> タイムライン
+        <button
+          className={`seg-btn icon-only ${layout === 'timeline' ? 'active' : ''}`}
+          onClick={() => onLayout('timeline')}
+          title="タイムライン"
+          aria-label="タイムライン"
+        >
+          <Icon name="timeline" size={14} />
         </button>
-        <button className={`seg-btn ${layout === 'agenda' ? 'active' : ''}`} onClick={() => onLayout('agenda')}>
-          <Icon name="list" size={12} /> アジェンダ
+        <button
+          className={`seg-btn icon-only ${layout === 'agenda' ? 'active' : ''}`}
+          onClick={() => onLayout('agenda')}
+          title="アジェンダ"
+          aria-label="アジェンダ"
+        >
+          <Icon name="list" size={14} />
         </button>
       </div>
     </div>
