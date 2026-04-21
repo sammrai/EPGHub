@@ -44,6 +44,10 @@ services:
       TVDB_CACHE_DIR: /var/lib/epghub/tvdb-cache
       MIRAKURUN_URL: ${MIRAKURUN_URL:-}
       TVDB_API_KEY: ${TVDB_API_KEY:-}
+      # Deployed stacks start empty by default. Flip to `on` (or unset it
+      # here and keep MIRAKURUN_URL empty) to revive the sample channels /
+      # programs / rules used by the dev UX.
+      EPGHUB_FIXTURES: ${EPGHUB_FIXTURES:-off}
     volumes:
       - epghub-recordings:/var/lib/epghub/recordings
       - epghub-tvdb-cache:/var/lib/epghub/tvdb-cache

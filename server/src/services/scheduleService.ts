@@ -11,6 +11,7 @@ import { channelService } from './channelService.ts';
 import { programService } from './programService.ts';
 import { db } from '../db/client.ts';
 import { channels as channelsTable } from '../db/schema.ts';
+import { useFixtures } from '../config/fixtures.ts';
 
 export interface ScheduleService {
   /** Programs joined with TVDB entry, sourced from the DB. */
@@ -75,7 +76,10 @@ interface LiveFeed {
 async function fetchLiveFeed(): Promise<LiveFeed> {
   const client = createMirakurunClient();
   if (!client) {
-    // Fixtures are dev-only: populate programs table so the UI is non-empty.
+    // No Mirakurun wired up. Load dev fixtures only if they're enabled —
+    // otherwise leave programs/channels empty so the deployed stack starts
+    // clean. Flip EPGHUB_FIXTURES=on (or unset it) to opt back in for dev.
+    if (!useFixtures()) return { channels: [], programs: [] };
     const [{ PROGRAMS }, { SAMPLE_CHANNELS }] = await Promise.all([
       import('../../fixtures/programs.ts'),
       import('../../fixtures/channels.ts'),

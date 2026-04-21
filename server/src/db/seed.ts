@@ -1,21 +1,15 @@
 import { db } from './client.ts';
 import { rules, tvdbEntries } from './schema.ts';
 import { sql } from 'drizzle-orm';
+import { useFixtures } from '../config/fixtures.ts';
 
 // Seed DB tables from fixtures on first boot only (when the table is empty).
-// This keeps dev UX nice (non-empty UI state on a fresh Postgres) without
-// clobbering real data once the user starts editing via the API.
-//
-// Gated on MIRAKURUN_URL being unset: when a real tuner is wired up we
-// don't want fictional rule rows polluting the Rules tab. The TVDB
-// catalog seed is skipped too — the matcher populates tvdb_entries from
-// live searches instead.
-//
-// After the R0 unification we no longer seed fake recorded/recording rows.
-// The dev-side seedDev() in app.ts creates scheduled recordings from
-// fixture programs when needed; that's enough to light up the UI.
+// Gated by `useFixtures()` — enabled in dev (no MIRAKURUN_URL) and skipped
+// when EPGHUB_FIXTURES=off (the docker-compose default) or when Mirakurun
+// is wired up. After the R0 unification we no longer seed fake
+// recorded/recording rows; seedDev() in app.ts covers the recordings UI.
 export async function seedDbIfEmpty(): Promise<void> {
-  if (process.env.MIRAKURUN_URL) return;
+  if (!useFixtures()) return;
   await seedTvdbEntriesIfEmpty();
   await seedRulesIfEmpty();
 }

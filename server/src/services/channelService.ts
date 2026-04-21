@@ -1,6 +1,7 @@
 import type { Channel } from '../schemas/channel.ts';
 import { createMirakurunClient } from '../integrations/mirakurun/client.ts';
 import { dedupeServices, serviceToChannel } from '../integrations/mirakurun/adapter.ts';
+import { useFixtures } from '../config/fixtures.ts';
 
 export interface ChannelService {
   list(): Promise<Channel[]>;
@@ -13,13 +14,19 @@ export class FixtureChannelService implements ChannelService {
   }
 }
 
+class EmptyChannelService implements ChannelService {
+  async list(): Promise<Channel[]> {
+    return [];
+  }
+}
+
 export class MirakurunChannelService implements ChannelService {
   private cache: { at: number; data: Channel[] } | null = null;
   private readonly ttlMs = 60_000;
 
   async list(): Promise<Channel[]> {
     const client = createMirakurunClient();
-    if (!client) return new FixtureChannelService().list();
+    if (!client) return useFixtures() ? new FixtureChannelService().list() : [];
     if (this.cache && Date.now() - this.cache.at < this.ttlMs) return this.cache.data;
     try {
       const services = await client.services();
@@ -27,14 +34,15 @@ export class MirakurunChannelService implements ChannelService {
       this.cache = { at: Date.now(), data: channels };
       return channels;
     } catch (err) {
-      console.warn('[channels] mirakurun fetch failed, falling back to fixtures:', err);
-      return new FixtureChannelService().list();
+      console.warn('[channels] mirakurun fetch failed:', err);
+      return useFixtures() ? new FixtureChannelService().list() : [];
     }
   }
 }
 
 function build(): ChannelService {
-  return process.env.MIRAKURUN_URL ? new MirakurunChannelService() : new FixtureChannelService();
+  if (process.env.MIRAKURUN_URL) return new MirakurunChannelService();
+  return useFixtures() ? new FixtureChannelService() : new EmptyChannelService();
 }
 
 export const channelService: ChannelService = build();

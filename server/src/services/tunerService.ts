@@ -2,6 +2,7 @@ import type { TunerState, NowRecording } from '../schemas/tuner.ts';
 import type { BcType } from '../schemas/channel.ts';
 import { createMirakurunClient } from '../integrations/mirakurun/client.ts';
 import type { MrTunerDevice } from '../integrations/mirakurun/types.ts';
+import { useFixtures } from '../config/fixtures.ts';
 
 export interface TunerService {
   list(): Promise<TunerState[]>;
@@ -163,8 +164,15 @@ export class MirakurunTunerService implements TunerService {
   }
 }
 
+class EmptyTunerService implements TunerService {
+  async list(): Promise<TunerState[]> { return []; }
+  async nowRecording(): Promise<NowRecording[]> { return []; }
+  async devices(): Promise<MrTunerDevice[]> { return []; }
+}
+
 function build(): TunerService {
-  return process.env.MIRAKURUN_URL ? new MirakurunTunerService() : new FixtureTunerService();
+  if (process.env.MIRAKURUN_URL) return new MirakurunTunerService();
+  return useFixtures() ? new FixtureTunerService() : new EmptyTunerService();
 }
 
 export const tunerService: TunerService = build();

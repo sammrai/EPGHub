@@ -14,6 +14,7 @@ import { adminRouter } from './routes/admin.ts';
 import { searchRouter } from './routes/search.ts';
 import { recordingService } from './services/recordingService.ts';
 import { scheduleService } from './services/scheduleService.ts';
+import { useFixtures } from './config/fixtures.ts';
 
 const DOC_META = {
   openapi: '3.1.0' as const,
@@ -89,10 +90,11 @@ const SWAGGER_HTML = `<!DOCTYPE html>
 export { DOC_META };
 
 // Dev seed: pre-populate recordings for fixture programs so the UI has a
-// non-empty state out of the box. Skipped when connected to a real tuner,
-// since Mirakurun-sourced programs don't carry our fixture series keys.
+// non-empty state out of the box. Skipped when fixtures are disabled
+// (EPGHUB_FIXTURES=off) or Mirakurun is wired up — real programs don't
+// carry our fixture series keys.
 export async function seedDev(): Promise<void> {
-  if (process.env.MIRAKURUN_URL) return;
+  if (!useFixtures()) return;
 
   const programs = await scheduleService.list();
   const wanted = new Set([
