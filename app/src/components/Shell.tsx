@@ -65,6 +65,21 @@ export function Sidebar({ active, onNav, counts, system, recordingCount }: Sideb
 
       <div style={{ flex: 1 }} />
 
+      <div>
+        <div className="side-section-label">リファレンス</div>
+        <div className="side-group">
+          <a
+            className="nav-item"
+            href="/docs"
+            target="_blank"
+            rel="noreferrer noopener"
+          >
+            <Icon name="external" size={14} />
+            <span>API 仕様書</span>
+          </a>
+        </div>
+      </div>
+
       <SysWidget system={system} />
     </aside>
   );

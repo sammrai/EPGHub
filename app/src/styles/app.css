@@ -294,6 +294,8 @@ input, select, textarea {
   width: 100%;
   transition: all 100ms var(--ease);
   min-height: 28px;
+  text-decoration: none;
+  box-sizing: border-box;
 }
 
 .nav-item:hover {
@@ -2156,10 +2158,74 @@ input[type=range] {
 
 /* ============ Pages (Reserves / Recorded / Live / Search / Settings) ============ */
 .page { padding: 28px 36px 60px; max-width: 1400px; overflow-y: auto; flex: 1; min-height: 0; width: 100%; box-sizing: border-box; }
-/* Settings page is narrow by design (~760px) and centered in the
-   available area so it doesn't leave a giant blank strip on wide
-   screens. Overrides .page's 1400px cap + left-aligned default. */
-.page.settings-page { max-width: 760px; margin-left: auto; margin-right: auto; }
+/* Settings page: 2-column layout (left rail nav + content pane).
+   Capped at ~1080px and centered so wide monitors don't leave a giant
+   blank strip. Overrides .page's 1400px cap + left-aligned default. */
+.page.settings-page { max-width: 1080px; margin-left: auto; margin-right: auto; }
+
+/* ---- Settings: left-rail tab navigation ---- */
+.settings-layout {
+  display: grid;
+  grid-template-columns: 212px 1fr;
+  gap: 40px;
+  align-items: start;
+}
+
+.settings-nav {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-top: 2px;
+}
+
+.settings-nav-heading {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+  padding: 16px 10px 6px;
+}
+.settings-nav-heading:first-child { padding-top: 2px; }
+
+.settings-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  font-size: 12.5px;
+  color: var(--fg-muted);
+  text-align: left;
+  transition: background 120ms var(--ease), color 120ms var(--ease);
+}
+.settings-nav-item:hover { background: var(--bg-hover); color: var(--fg-secondary); }
+.settings-nav-item.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.settings-nav-item svg { flex: 0 0 auto; opacity: 0.85; }
+.settings-nav-item.active svg { opacity: 1; }
+.settings-nav-item .settings-nav-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg-muted);
+  color: var(--fg-muted);
+}
+.settings-nav-item.active .settings-nav-count { background: rgba(255,255,255,0.6); color: var(--accent); }
+
+.settings-pane { min-width: 0; animation: settingsTabFade 180ms var(--ease); }
+@keyframes settingsTabFade {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: none; }
+}
 .page-head { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; margin-bottom: 22px; }
 .page-head h1 { margin:0 0 4px; font-size: 22px; font-weight: 600; letter-spacing:-0.01em; }
 .page-head p { margin:0; font-size: 12.5px; color: var(--fg-muted); max-width: 560px; line-height: 1.55; }
