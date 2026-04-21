@@ -8,6 +8,7 @@ import { Icon } from './Icon';
 import type { IconName } from './Icon';
 import { useSearch } from '../lib/hooks';
 import { hhmm } from '../lib/adapters';
+import { findFoldedIndex, kanaFold } from '../lib/textFold';
 import type {
   ApiChannel,
   ApiProgram,
@@ -29,6 +30,15 @@ export interface SearchPaletteProps {
   onPick: (action: SearchAction) => void;
 }
 
+interface MatchContext {
+  /** 'desc' | extended のキー名 (出演者/スタッフ等) | 'series' */
+  field: string;
+  /** 前後を切り詰めた本文。matched は snippet 内の相対オフセット + 長さ。 */
+  snippet: string;
+  matchStart: number;
+  matchLength: number;
+}
+
 interface FlatItem {
   key: string;
   section: string;
@@ -37,7 +47,54 @@ interface FlatItem {
   subtitle?: string;
   accent?: string;
   badges?: string[];
+  context?: MatchContext;
   action: SearchAction;
+}
+
+// extended フィールドのキー名は ARIB の日本語 ("出演者" 等) と英語が混在するので
+// 表示用に短縮マップを持つ。未知キーはそのまま流す。
+const FIELD_LABEL: Record<string, string> = {
+  desc: '概要',
+  series: 'シリーズ',
+};
+
+function labelField(raw: string): string {
+  return FIELD_LABEL[raw] ?? raw;
+}
+
+// タイトル外の文字列のうち、クエリがヒットする最初のフィールドから前後 30 字分を
+// 切り出す。ヒットなし / タイトル自体が既にヒットしているなら null。
+function buildMatchContext(p: ApiProgram, query: string): MatchContext | null {
+  const q = query.trim();
+  if (q.length === 0) return null;
+  if (findFoldedIndex(p.title, q)) return null;
+
+  const candidates: Array<[string, string]> = [];
+  if (p.desc) candidates.push(['desc', p.desc]);
+  if (p.extended) {
+    for (const [k, v] of Object.entries(p.extended)) {
+      if (v) candidates.push([k, v]);
+    }
+  }
+  if (p.series) candidates.push(['series', p.series]);
+
+  for (const [field, value] of candidates) {
+    const hit = findFoldedIndex(value, q);
+    if (!hit) continue;
+    const CTX = 28;
+    const start = Math.max(0, hit.start - CTX);
+    const end = Math.min(value.length, hit.start + hit.length + CTX);
+    const prefix = start > 0 ? '…' : '';
+    const suffix = end < value.length ? '…' : '';
+    const snippet = prefix + value.slice(start, end) + suffix;
+    return {
+      field,
+      snippet,
+      matchStart: (hit.start - start) + prefix.length,
+      matchLength: hit.length,
+    };
+  }
+  return null;
 }
 
 const SECTION_META: Record<string, { label: string; icon: IconName }> = {
@@ -81,6 +138,7 @@ export function SearchPalette({ open, onClose, onPick }: SearchPaletteProps) {
     if (!data) return [];
     const out: FlatItem[] = [];
     for (const p of data.programs) {
+      const ctx = buildMatchContext(p, query);
       out.push({
         key: `p:${p.id}`,
         section: 'programs',
@@ -89,6 +147,7 @@ export function SearchPalette({ open, onClose, onPick }: SearchPaletteProps) {
         subtitle: `${p.ch} · ${hhmm(p.startAt)}-${hhmm(p.endAt)}`,
         accent: p.genre?.dot,
         badges: [p.genre?.label ?? ''].filter(Boolean),
+        context: ctx ?? undefined,
         action: { kind: 'program', program: p },
       });
     }
@@ -272,6 +331,16 @@ export function SearchPalette({ open, onClose, onPick }: SearchPaletteProps) {
                           <Highlight text={it.subtitle} query={query} />
                         </span>
                       )}
+                      {it.context && (
+                        <span className="search-palette-row-context">
+                          <span className="search-palette-row-context-field">
+                            {labelField(it.context.field)}
+                          </span>
+                          <span className="search-palette-row-context-snippet">
+                            {renderSnippet(it.context)}
+                          </span>
+                        </span>
+                      )}
                     </span>
                     {it.badges && it.badges.length > 0 && (
                       <span className="search-palette-row-badges">
@@ -330,18 +399,19 @@ function EmptyHints() {
   );
 }
 
-// Case-insensitive substring highlight. Splits text into <mark> runs for
-// each occurrence of the normalized query. If query is empty or absent,
-// returns the plain text (no wrapping) so we don't pay render overhead.
+// Case-insensitive + kana-folded substring highlight. サーバ側のマッチ規則と
+// 揃え、"どらま" 入力でも "ドラマ" の出現を <mark> で囲む。fold は 1:1
+// コードポイント置換なのでインデックスは元テキストにそのまま使える。
 function Highlight({ text, query }: { text: string; query: string }) {
   const q = query.trim();
   if (q.length === 0) return <>{text}</>;
+  const folded = kanaFold(text).toLowerCase();
+  const needle = kanaFold(q).toLowerCase();
+  if (needle.length === 0) return <>{text}</>;
   const out: ReactNode[] = [];
-  const lower = text.toLowerCase();
-  const needle = q.toLowerCase();
   let from = 0;
   while (from < text.length) {
-    const hit = lower.indexOf(needle, from);
+    const hit = folded.indexOf(needle, from);
     if (hit === -1) {
       out.push(text.slice(from));
       break;
@@ -355,4 +425,21 @@ function Highlight({ text, query }: { text: string; query: string }) {
     from = hit + needle.length;
   }
   return <>{out}</>;
+}
+
+// スニペットの matchStart/Length 位置に <mark> を差し込む専用レンダラ。
+// Highlight と違い "折り畳み後のオフセットを既に持っている" 前提なので
+// 文字列全走査なし。
+function renderSnippet(ctx: MatchContext): ReactNode {
+  const { snippet, matchStart, matchLength } = ctx;
+  if (matchLength <= 0) return snippet;
+  return (
+    <>
+      {snippet.slice(0, matchStart)}
+      <mark className="search-palette-mark">
+        {snippet.slice(matchStart, matchStart + matchLength)}
+      </mark>
+      {snippet.slice(matchStart + matchLength)}
+    </>
+  );
 }

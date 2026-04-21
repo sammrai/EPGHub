@@ -171,7 +171,7 @@ export function Header({ page, crumbs, onCrumb, onOpenSearch, onCreateRule }: He
       <div className="header-spacer" />
       <div className="search" onClick={onOpenSearch}>
         <Icon name="search" size={13} />
-        <input readOnly placeholder="番組名・出演者・ジャンル…" />
+        <input readOnly placeholder="検索…" />
         <span className="kbd">⌘K</span>
       </div>
       <div className="header-spacer" />
