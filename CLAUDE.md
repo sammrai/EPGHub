@@ -4,11 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository layout
 
-Three top-level workspaces, each with its own `package.json`:
+Two top-level workspaces, each with its own `package.json`:
 
 - **`server/`** — the only backend. Hono + `@hono/zod-openapi`, Drizzle (Postgres), pg-boss worker queue. Owns recording lifecycle, TVDB matching, EPG hydration. Exposes `/openapi.json` + `/docs` + `openapi.yaml`.
 - **`app/`** — React 18 + Vite frontend. Thin UI against the server. Types are **generated** from `server/openapi.yaml` into `src/api/epghub.gen.ts`; do not edit that file by hand. Vite proxies `/api/*` → server (default `:3000`).
-- **`EPGStation/`** — reference-only legacy implementation. Left in-tree as a reference for recording-core semantics (予約競合検知・番組延長対応 etc.). Code is migrated piecemeal into `server/`; **do not depend on EPGStation at runtime**. The browser never talks to it.
 
 Supporting files: `docker-compose.yml` (Postgres for host-machine dev), `.devcontainer/postCreate.sh` (installs Postgres, runs migrations, npm installs).
 
@@ -76,11 +75,9 @@ npm run build            # tsc -b && vite build
 ## Project conventions
 
 - **Schema-driven**: zod → TS types → runtime validation → OpenAPI. If a route accepts or returns something, add a zod schema first and let `app.openapi(route, handler)` do the rest.
-- **Legacy shapes are not load-bearing.** You can freely rewrite DB tables, API surfaces, and anything inherited from EPGStation; do not preserve backwards-compat shims.
 - **No mock data under `src/`.** `fixtures/` directories (both `server/fixtures/` and `app/fixtures/`) hold dev-only sample data and must not be imported from production code paths.
 - **ISO-8601 everywhere** for times on the wire. The UI derives display strings (`HH:MM`, broadcast-day labels) locally.
 - **Viewing/playback features are intentionally out of scope.** Everything is recording-focused.
-- **Recording domain rules** (conflict detection, de-dup, program extension handling) are currently being pulled out of `EPGStation/` into `server/services/`; prefer reusing EPGStation's behaviour over re-deriving it.
 - **TVDB integration is pluggable.** `FixtureTvdbProvider` is the default without `TVDB_API_KEY`; the real v4 client swaps in when the key is set.
 
 ## Environment (server/.env)
@@ -100,5 +97,5 @@ npm run build            # tsc -b && vite build
 ## Things to avoid
 
 - Don't broad-kill `node` or `tsx` processes (e.g. `pkill -f tsx`). The devcontainer runs the VS Code server the same way; kill by PID or by a narrow path pattern.
-- Don't add an `/api/*` surface that bypasses the server — the browser talks to `server/` only. Mirakurun and EPGStation stay server-side.
+- Don't add an `/api/*` surface that bypasses the server — the browser talks to `server/` only. Mirakurun stays server-side.
 - Don't hand-edit `app/src/api/epghub.gen.ts` or `server/openapi.yaml`; regenerate them.

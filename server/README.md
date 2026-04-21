@@ -5,7 +5,6 @@
 - zod でリクエスト/レスポンスを定義 → TS 型 / ランタイム validation / OpenAPI を一本化
 - `/openapi.json` と `/docs` (Scalar API Reference) を配信
 - `npm run gen:openapi` で `openapi.yaml` をリポジトリにコミット可能な成果物として出力
-- 録画ロジックは `../EPGStation/` 由来のコアを取り込む (予約競合検知・番組延長対応などを再利用)
 
 ## 開発
 
@@ -44,7 +43,6 @@ server/
 ## 未実装
 
 - `/schedule`, `/reserves`, `/rules`, `/recorded`, `/tuners` 等の主要リソース
-- 録画コアの抽出（EPGStation からのビジネスロジック import）
 - TVDB 検索/紐付けエンドポイント
 - 永続化層（DB スキーマ再設計、マイグレーション）
 - 認証・権限制御

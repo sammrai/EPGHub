@@ -6,20 +6,20 @@
 
 - **API**: `../server/` (Hono + zod-openapi) が唯一の接続先。視聴系ルートは持たない。
 - **型**: `npm run gen:api` で `../server/openapi.yaml` → `src/api/epghub.gen.ts` を生成。
-- **録画コア**: サーバが `../EPGStation/` の録画ロジックをラップして提供する想定（予約競合/重複/番組延長）。フロントは直接触らない。
+- **録画コア**: サーバが提供する REST API をラップして呼ぶ。フロントは直接録画処理を持たない。
 - **TVDB**: サーバ側の別レイヤ。フロントはサーバ経由で結果を消費。
 
 ```
 app/
 ├─ index.html
-├─ vite.config.ts      # /api を EPGStation (localhost:8888) にプロキシ
+├─ vite.config.ts      # /api を server (localhost:3000) にプロキシ
 ├─ tsconfig.json
 ├─ package.json
 ├─ src/
 │  ├─ main.tsx
 │  ├─ App.tsx
-│  ├─ api/             # EPGStation API クライアント
-│  │  └─ epgstation.ts
+│  ├─ api/             # epghub API クライアント
+│  │  └─ epghub.ts
 │  ├─ data/            # 型とストア（実データはAPI経由）
 │  │  ├─ types.ts
 │  │  ├─ channels.ts
