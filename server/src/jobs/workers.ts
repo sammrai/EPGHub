@@ -126,11 +126,23 @@ async function handleEncode(jobs: PgBoss.Job<EncodeJob>[]): Promise<void> {
 async function handleEpgRefresh(jobs: PgBoss.Job<Record<string, never>>[]): Promise<void> {
   const { scheduleService } = await import('../services/scheduleService.ts');
   const { matchService } = await import('../services/matchService.ts');
+  const { channelSyncService } = await import('../services/channelSyncService.ts');
   for (const _ of jobs) {
     const { count } = await scheduleService.refresh();
+    // Also pull XMLTV guides for every iptv device that has one registered.
+    // This keeps the manual "再sync" button and the scheduled refresh in
+    // lockstep — same upsert path, same cadence.
+    const sources = await channelSyncService.list();
+    let xmltvHit = 0;
+    for (const src of sources) {
+      if (src.kind === 'iptv' && src.xmltvUrl) {
+        await channelSyncService.syncFromSource(src.id);
+        xmltvHit++;
+      }
+    }
     const { resolved, missed } = await matchService.enrichUnmatched();
     console.log(
-      `[epg.refresh] upserted=${count} tvdb resolved=${resolved} missed=${missed}`
+      `[epg.refresh] upserted=${count} xmltvSources=${xmltvHit} tvdb resolved=${resolved} missed=${missed}`
     );
   }
 }

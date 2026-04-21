@@ -17,6 +17,9 @@ import {
   ChannelSourceSchema,
   ChannelSourceSyncResultSchema,
   CreateChannelSourceSchema,
+  ProbeChannelSourceSchema,
+  ProbeChannelSourceResultSchema,
+  ScanResultSchema,
 } from '../schemas/channelSource.ts';
 import {
   GpuProbeResultSchema,
@@ -387,6 +390,42 @@ const createChannelSource = createRoute({
   },
 });
 
+const scanChannelSources = createRoute({
+  method: 'post',
+  path: '/admin/channel-sources/scan',
+  tags: ['admin'],
+  summary: 'ローカルネットワーク自動検出',
+  description:
+    'サーバーのローカル IPv4 サブネットを走査し、Mirakurun / EPGStation / HDHomeRun など HDHomeRun HTTP 互換デバイスを検出する。1 サブネット /24 で最長 25 秒程度かかる。',
+  responses: {
+    200: {
+      description: '検出されたデバイス一覧',
+      content: { 'application/json': { schema: ScanResultSchema } },
+    },
+  },
+});
+
+const probeChannelSource = createRoute({
+  method: 'post',
+  path: '/admin/channel-sources/probe',
+  tags: ['admin'],
+  summary: 'チャンネルソース URL の自動検出',
+  description:
+    'HDHomeRun /discover.json を叩いてデバイス情報を取得し、既知の URL パターン (Mirakurun / EPGStation) から XMLTV URL を推測する。追加モーダルの自動入力用。',
+  request: {
+    body: {
+      required: true,
+      content: { 'application/json': { schema: ProbeChannelSourceSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: 'probe 結果',
+      content: { 'application/json': { schema: ProbeChannelSourceResultSchema } },
+    },
+  },
+});
+
 const syncChannelSource = createRoute({
   method: 'post',
   path: '/admin/channel-sources/{id}/sync',
@@ -433,6 +472,84 @@ adminRouter.openapi(createChannelSource, async (c) => {
   const body = c.req.valid('json');
   const created = await channelSyncService.create(body);
   return c.json(created, 201);
+});
+
+adminRouter.openapi(scanChannelSources, async (c) => {
+  const result = await channelSyncService.scan();
+  return c.json(result, 200);
+});
+
+// Streaming variant — emits `device` events as they are found plus a final
+// `done` event. The OpenAPI contract is a best-effort text/event-stream
+// (SSE), not first-class in zod-openapi; UI consumes it via EventSource.
+adminRouter.get('/admin/channel-sources/scan-stream', async (c) => {
+  const { streamSSE } = await import('hono/streaming');
+  const { scanLocalNetwork, extractPrivatePrefix } = await import('../integrations/hdhomerun/scan.ts');
+  const { deriveSuggestedXmltvUrl } = await import('../services/channelSyncService.ts');
+
+  // Build "subnet hints" from sources likely to reflect the user's real LAN:
+  //   * Already-registered device URLs (they worked before → scan same /24)
+  //   * ?hint=<host> query param (browser sends its window.location.hostname)
+  // These cover the common case where the server runs in a container on
+  // a Docker bridge and the user's devices live on the host LAN.
+  const hints = new Set<string>();
+  try {
+    const rows = await channelSyncService.list();
+    for (const r of rows) {
+      const p = extractPrivatePrefix(r.url);
+      if (p) hints.add(p);
+    }
+  } catch { /* ignore — scan still runs with auto prefixes */ }
+  const hintParam = c.req.query('hint');
+  if (hintParam) {
+    const p = extractPrivatePrefix(hintParam);
+    if (p) hints.add(p);
+  }
+
+  return streamSSE(c, async (stream) => {
+    const ctrl = new AbortController();
+    stream.onAbort(() => ctrl.abort());
+    let lastProgress = -1;
+    await scanLocalNetwork({
+      signal: ctrl.signal,
+      extraPrefixes: Array.from(hints),
+      onProgress: (done, total) => {
+        // Only emit every ~1% of progress to keep the event volume sane
+        // while still feeling responsive in the UI.
+        const pct = Math.floor((done / total) * 100);
+        if (pct !== lastProgress) {
+          lastProgress = pct;
+          void stream.writeSSE({
+            event: 'progress',
+            data: JSON.stringify({ done, total, pct }),
+          });
+        }
+      },
+      onDevice: (d) => {
+        void stream.writeSSE({
+          event: 'device',
+          data: JSON.stringify({
+            kind: d.kind,
+            url: d.url,
+            friendlyName: d.friendlyName,
+            model: d.model,
+            tunerCount: d.tunerCount,
+            label: d.label,
+            // Prefer the probe's explicit xmltv URL (EPGStation); fall back
+            // to the URL-pattern heuristic for m3u-only sources.
+            suggestedXmltvUrl: d.xmltvUrl ?? deriveSuggestedXmltvUrl(d.url),
+          }),
+        });
+      },
+    });
+    await stream.writeSSE({ event: 'done', data: '{}' });
+  });
+});
+
+adminRouter.openapi(probeChannelSource, async (c) => {
+  const { url } = c.req.valid('json');
+  const result = await channelSyncService.probe(url);
+  return c.json(result, 200);
 });
 
 adminRouter.openapi(syncChannelSource, async (c) => {

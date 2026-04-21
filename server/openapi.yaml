@@ -37,6 +37,14 @@ components:
           type: string
           description: UI 上の識別色 (CSS color)
           example: oklch(0.55 0.12 28)
+        enabled:
+          type: boolean
+          description: 録画対象として有効か
+          example: true
+        source:
+          type: string
+          description: 生成元デバイスの kind 相当値
+          example: mirakurun
       required:
         - id
         - name
@@ -44,6 +52,8 @@ components:
         - number
         - type
         - color
+        - enabled
+        - source
     ChannelList:
       type: array
       items:
@@ -63,6 +73,11 @@ components:
       required:
         - code
         - message
+    UpdateChannel:
+      type: object
+      properties:
+        enabled:
+          type: boolean
     Genre:
       type: object
       properties:
@@ -962,6 +977,67 @@ components:
             $ref: "#/components/schemas/TunerSlot"
       required:
         - slots
+    DeviceTunerStatus:
+      type: object
+      properties:
+        tunerIdx:
+          type: integer
+          minimum: 0
+        inUse:
+          type: boolean
+        channelName:
+          type:
+            - string
+            - "null"
+        channelNumber:
+          type:
+            - string
+            - "null"
+        clientIp:
+          type:
+            - string
+            - "null"
+      required:
+        - tunerIdx
+        - inUse
+        - channelName
+        - channelNumber
+        - clientIp
+    DeviceLiveStatus:
+      type: object
+      properties:
+        sourceId:
+          type: integer
+        name:
+          type: string
+        model:
+          type:
+            - string
+            - "null"
+        friendlyName:
+          type:
+            - string
+            - "null"
+        tunerCount:
+          type: integer
+        tuners:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceTunerStatus"
+        reachable:
+          type: boolean
+      required:
+        - sourceId
+        - name
+        - model
+        - friendlyName
+        - tunerCount
+        - tuners
+        - reachable
+    DeviceLiveStatusList:
+      type: array
+      items:
+        $ref: "#/components/schemas/DeviceLiveStatus"
     StorageStatus:
       type: object
       properties:
@@ -1211,9 +1287,9 @@ components:
     ChannelSourceKind:
       type: string
       enum:
-        - m3u
         - mirakurun
-      description: チャンネルソース種別
+        - iptv
+      description: デバイス種別
     ChannelSource:
       type: object
       properties:
@@ -1228,7 +1304,34 @@ components:
         url:
           type: string
           format: uri
-          example: https://example.com/iptv.m3u
+          example: http://mirakurun:40772/api/iptv
+        xmltvUrl:
+          type:
+            - string
+            - "null"
+          format: uri
+          description: iptv kind のみ。番組表 XMLTV フィードの URL (任意)
+          example: http://mirakurun:40772/api/iptv/xmltv
+        friendlyName:
+          type:
+            - string
+            - "null"
+          example: Mirakurun
+        model:
+          type:
+            - string
+            - "null"
+          example: Mirakurun
+        deviceId:
+          type:
+            - string
+            - "null"
+          example: A1B2C3D4
+        tunerCount:
+          type:
+            - integer
+            - "null"
+          example: 8
         enabled:
           type: boolean
           example: true
@@ -1252,6 +1355,11 @@ components:
         - name
         - kind
         - url
+        - xmltvUrl
+        - friendlyName
+        - model
+        - deviceId
+        - tunerCount
         - enabled
         - lastSyncAt
         - lastError
@@ -1273,10 +1381,100 @@ components:
         url:
           type: string
           format: uri
-          example: https://example.com/iptv.m3u
+          example: http://mirakurun:40772/api/iptv
+        xmltvUrl:
+          type:
+            - string
+            - "null"
+          format: uri
+          description: iptv kind のみ。番組表 XMLTV フィードの URL
+          example: http://mirakurun:40772/api/iptv/xmltv
       required:
         - name
         - kind
+        - url
+    ScannedDevice:
+      type: object
+      properties:
+        kind:
+          $ref: "#/components/schemas/ChannelSourceKind"
+        url:
+          type: string
+        friendlyName:
+          type:
+            - string
+            - "null"
+        model:
+          type:
+            - string
+            - "null"
+        tunerCount:
+          type:
+            - integer
+            - "null"
+        label:
+          type: string
+        suggestedXmltvUrl:
+          type:
+            - string
+            - "null"
+      required:
+        - kind
+        - url
+        - friendlyName
+        - model
+        - tunerCount
+        - label
+        - suggestedXmltvUrl
+    ScanResult:
+      type: object
+      properties:
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScannedDevice"
+      required:
+        - devices
+    ProbeChannelSourceResult:
+      type: object
+      properties:
+        reachable:
+          type: boolean
+        friendlyName:
+          type:
+            - string
+            - "null"
+        model:
+          type:
+            - string
+            - "null"
+        tunerCount:
+          type:
+            - integer
+            - "null"
+        suggestedXmltvUrl:
+          type:
+            - string
+            - "null"
+        inferredKind:
+          type:
+            - string
+            - "null"
+      required:
+        - reachable
+        - friendlyName
+        - model
+        - tunerCount
+        - suggestedXmltvUrl
+        - inferredKind
+    ProbeChannelSource:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+          example: http://mirakurun:40772/api/iptv
+      required:
         - url
     ChannelSourceSyncResult:
       type: object
@@ -1422,7 +1620,14 @@ paths:
       tags:
         - channels
       summary: 放送局一覧
-      description: ユーザーがチューナー設定で有効化した放送局の一覧を返す。
+      description: DB の channels テーブルを返す。任意の source (例 "mirakurun" / "m3u") でフィルタできる。
+      parameters:
+        - schema:
+            type: string
+            example: mirakurun
+          required: false
+          name: source
+          in: query
       responses:
         "200":
           description: 放送局の配列
@@ -1432,6 +1637,36 @@ paths:
                 $ref: "#/components/schemas/ChannelList"
         "500":
           description: 内部エラー
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /channels/{id}:
+    patch:
+      tags:
+        - channels
+      summary: 放送局の有効化トグル
+      parameters:
+        - schema:
+            type: string
+          required: true
+          name: id
+          in: path
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateChannel"
+      responses:
+        "200":
+          description: 更新後の放送局
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Channel"
+        "404":
+          description: 存在しない id
           content:
             application/json:
               schema:
@@ -2064,6 +2299,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TunerAllocation"
+  /tuners/live:
+    get:
+      tags:
+        - tuners
+      summary: デバイスごとのチューナー生状態
+      description: iptv デバイスの /discover.json + /tuner{N}/status
+        を直接叩き、物理チューナーごとの使用状況を返す。Plex の Tuner status 相当。
+      responses:
+        "200":
+          description: デバイス配列 (物理チューナー状態つき)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceLiveStatusList"
   /system:
     get:
       tags:
@@ -2270,6 +2519,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /admin/channel-sources/scan:
+    post:
+      tags:
+        - admin
+      summary: ローカルネットワーク自動検出
+      description: サーバーのローカル IPv4 サブネットを走査し、Mirakurun / EPGStation / HDHomeRun など
+        HDHomeRun HTTP 互換デバイスを検出する。1 サブネット /24 で最長 25 秒程度かかる。
+      responses:
+        "200":
+          description: 検出されたデバイス一覧
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanResult"
+  /admin/channel-sources/probe:
+    post:
+      tags:
+        - admin
+      summary: チャンネルソース URL の自動検出
+      description: HDHomeRun /discover.json を叩いてデバイス情報を取得し、既知の URL パターン (Mirakurun /
+        EPGStation) から XMLTV URL を推測する。追加モーダルの自動入力用。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProbeChannelSource"
+      responses:
+        "200":
+          description: probe 結果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProbeChannelSourceResult"
   /admin/channel-sources/{id}/sync:
     post:
       tags:

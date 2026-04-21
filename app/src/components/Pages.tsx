@@ -1,7 +1,7 @@
 // Pages: Library (merged), Reserves (status), Discover, Settings
 // Rules lives in Agenda.tsx
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
@@ -29,13 +29,14 @@ import type {
   ApiRecording,
   ApiUpdateRecording,
   ApiTvdbEntry,
+  ApiChannel,
   ApiChannelSource,
-  ApiChannelSourceKind,
+  ApiProbeChannelSourceResult,
+  ApiScannedDevice,
   ApiGpuEncoder,
   ApiGpuProbeResult,
   ApiGpuStatus,
   ApiSystemStatus,
-  ApiTunerState,
 } from '../api/epghub';
 
 // ============ SHARED ============
@@ -1142,8 +1143,18 @@ interface StatusBadgeProps {
 }
 
 const StatusBadge = ({ status, progress }: StatusBadgeProps) => {
-  const cfgMap: Record<ReserveStatus, { cls: string; label: string; dot: boolean }> = {
-    recording: { cls: 'rec', label: '録画中', dot: true },
+  // Recording: show just a pulsing red dot (no pill, no "録画中" text).
+  // The column already groups these rows under the 録画中 filter, and the
+  // status-row background itself is rec-tinted — a standalone dot reads
+  // more calmly in a list than a bright red badge next to the title.
+  if (status === 'recording') {
+    return (
+      <span className="rec-dot" role="status" aria-label="録画中">
+        <span className="pulse-dot" />
+      </span>
+    );
+  }
+  const cfgMap: Record<Exclude<ReserveStatus, 'recording'>, { cls: string; label: string; dot: boolean }> = {
     encoding: { cls: 'enc', label: 'エンコード中', dot: true },
     upcoming: { cls: 'up', label: '予約済', dot: false },
     conflict: { cls: 'con', label: '競合', dot: false },
@@ -1915,11 +1926,12 @@ interface ChannelSourcesSectionProps {
 const ChannelSourcesSection = ({ pushToast }: ChannelSourcesSectionProps) => {
   const [sources, setSources] = useState<ApiChannelSource[]>([]);
   const [loading, setLoading] = useState(true);
-  const [name, setName] = useState('');
-  const [kind, setKind] = useState<ApiChannelSourceKind>('m3u');
-  const [url, setUrl] = useState('');
-  const [creating, setCreating] = useState(false);
   const [syncingId, setSyncingId] = useState<number | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [openDeviceId, setOpenDeviceId] = useState<number | null>(null);
+  const openDevice = openDeviceId != null
+    ? sources.find((s) => s.id === openDeviceId) ?? null
+    : null;
 
   const load = async () => {
     try {
@@ -1935,26 +1947,6 @@ const ChannelSourcesSection = ({ pushToast }: ChannelSourcesSectionProps) => {
   useEffect(() => {
     void load();
   }, []);
-
-  const handleCreate = async (e: ReactMouseEvent) => {
-    e.preventDefault();
-    if (!name.trim() || !url.trim()) {
-      pushToast?.('名前と URL を入力してください', 'err');
-      return;
-    }
-    setCreating(true);
-    try {
-      await api.admin.channelSources.create({ name: name.trim(), kind, url: url.trim() });
-      setName('');
-      setUrl('');
-      await load();
-      pushToast?.(`チャンネルソースを追加しました`);
-    } catch (e) {
-      pushToast?.(`追加失敗: ${(e as Error).message}`, 'err');
-    } finally {
-      setCreating(false);
-    }
-  };
 
   const handleSync = async (id: number) => {
     setSyncingId(id);
@@ -1973,130 +1965,460 @@ const ChannelSourcesSection = ({ pushToast }: ChannelSourcesSectionProps) => {
     }
   };
 
-  const handleRemove = async (id: number, nameLabel: string) => {
-    if (!window.confirm(`「${nameLabel}」を削除しますか？`)) return;
+  const totalChannels = sources.reduce((s, r) => s + r.channelCount, 0);
+
+  return (
+    <>
+      <div className="settings-section-head">
+        <div>
+          <div className="settings-section-title">デバイス</div>
+          <div className="settings-section-desc">
+            IPTV (m3u) と XMLTV 番組表で接続する HDHomeRun 互換デバイス。Mirakurun も同じルートで登録できます。
+          </div>
+        </div>
+        <div className="settings-section-actions">
+          {!loading && (
+            <span className="settings-section-stat">
+              <span className="stat-num">{sources.length}</span> デバイス
+              <span className="stat-sep">·</span>
+              <span className="stat-num">{totalChannels}</span> ch
+            </span>
+          )}
+          <button className="btn btn-sm" onClick={() => setAddOpen(true)}>
+            <Icon name="plus" size={12} />
+            追加
+          </button>
+        </div>
+      </div>
+
+      <div className="src-table">
+        <div className="src-row src-row-head">
+          <div>名前</div>
+          <div>モデル</div>
+          <div>URL</div>
+          <div>最終同期</div>
+          <div>チャンネル</div>
+          <div />
+        </div>
+        {loading && (
+          <div className="src-empty">読み込み中…</div>
+        )}
+        {!loading && sources.length === 0 && (
+          <div className="src-empty">
+            まだ登録されているデバイスはありません。右上の「追加」から登録してください。
+          </div>
+        )}
+        {sources.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            className={`src-row clickable${s.lastError ? ' has-error' : ''}`}
+            title={s.lastError ?? 'クリックでチャンネル一覧を開く'}
+            onClick={() => setOpenDeviceId(s.id)}
+          >
+            <div className="src-name">
+              {s.name}
+              {s.lastError && <span className="src-error-dot" aria-label="エラー">●</span>}
+            </div>
+            <div className="src-kind">
+              {s.model || s.friendlyName ? (
+                <span className="kind-chip kind-iptv" title={s.friendlyName ?? undefined}>
+                  {s.model ?? s.friendlyName}
+                </span>
+              ) : (
+                <span style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>—</span>
+              )}
+            </div>
+            <div className="src-url" title={s.url}>
+              {s.url}
+              {s.xmltvUrl && (
+                <div
+                  style={{ fontSize: 10.5, color: 'var(--fg-subtle)' }}
+                  title={s.xmltvUrl}
+                >
+                  XMLTV: {s.xmltvUrl}
+                </div>
+              )}
+            </div>
+            <div className="src-sync">
+              {s.lastSyncAt ? new Date(s.lastSyncAt).toLocaleString('ja-JP') : '未同期'}
+            </div>
+            <div className="src-count">
+              {s.channelCount} ch
+              {s.tunerCount != null && (
+                <div style={{ fontSize: 10.5, color: 'var(--fg-subtle)' }}>
+                  {s.tunerCount} チューナー
+                </div>
+              )}
+            </div>
+            <div className="src-chev"><Icon name="chevR" size={14} /></div>
+          </button>
+        ))}
+      </div>
+
+      {openDevice && (
+        <DeviceDetailModal
+          device={openDevice}
+          syncing={syncingId === openDevice.id}
+          onClose={() => setOpenDeviceId(null)}
+          onSync={() => void handleSync(openDevice.id)}
+          onDelete={async () => {
+            const ok = window.confirm(`「${openDevice.name}」を削除しますか？ (登録済みチャンネルも削除されます)`);
+            if (!ok) return;
+            setOpenDeviceId(null);
+            try {
+              await api.admin.channelSources.remove(openDevice.id);
+              await load();
+              pushToast?.('削除しました');
+            } catch (e) {
+              pushToast?.(`削除失敗: ${(e as Error).message}`, 'err');
+            }
+          }}
+          onToastError={(msg) => pushToast?.(msg, 'err')}
+        />
+      )}
+
+      {addOpen && (
+        <AddChannelSourceModal
+          existingUrls={new Set(sources.map((s) => s.url))}
+          onClose={() => setAddOpen(false)}
+          onAdded={async () => {
+            setAddOpen(false);
+            await load();
+            pushToast?.('チャンネルソースを追加しました');
+          }}
+          onError={(msg) => pushToast?.(msg, 'err')}
+        />
+      )}
+    </>
+  );
+};
+
+// ----- Add channel source modal ---------------------------------
+interface AddChannelSourceModalProps {
+  existingUrls: Set<string>;
+  onClose: () => void;
+  onAdded: () => Promise<void> | void;
+  onError: (msg: string) => void;
+}
+
+const AddChannelSourceModal = ({ existingUrls, onClose, onAdded, onError }: AddChannelSourceModalProps) => {
+  const [name, setName] = useState('');
+  const [url, setUrl] = useState('');
+  const [xmltvUrl, setXmltvUrl] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [probe, setProbe] = useState<ApiProbeChannelSourceResult | null>(null);
+  const [probing, setProbing] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [scanResults, setScanResults] = useState<ApiScannedDevice[] | null>(null);
+  const [scanProgress, setScanProgress] = useState<{ done: number; total: number; pct: number } | null>(null);
+  // Hold the active EventSource so the user (or cleanup) can abort mid-scan.
+  const scanSourceRef = useRef<EventSource | null>(null);
+  // Remember what URL produced the current probe so we don't spam the
+  // backend while the user types. The blur handler will debounce off this.
+  const lastProbedRef = useRef<string>('');
+  // Also remember whether the user manually edited the XMLTV field — once
+  // they do, we stop auto-filling it from probe results.
+  const userEditedXmltvRef = useRef(false);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !submitting) onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose, submitting]);
+
+  const handleBackdropClick = (e: ReactMouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget && !submitting) onClose();
+  };
+
+  const canSubmit = name.trim().length > 0 && url.trim().length > 0 && !submitting;
+
+  // Run the probe after user leaves the URL field. Best-effort: failures
+  // just clear the probe state and let the user type XMLTV URL manually.
+  const runProbe = async () => {
+    const u = url.trim();
+    if (!u || u === lastProbedRef.current) return;
+    lastProbedRef.current = u;
+    setProbing(true);
     try {
-      await api.admin.channelSources.remove(id);
-      await load();
-      pushToast?.(`削除しました`);
+      const r = await api.admin.channelSources.probe(u);
+      setProbe(r);
+      if (!userEditedXmltvRef.current && r.suggestedXmltvUrl) {
+        setXmltvUrl(r.suggestedXmltvUrl);
+      }
+      // Prefer the real discover.FriendlyName → Model → the kind heuristic,
+      // so users get a meaningful default instead of typing anything.
+      const inferredName = r.friendlyName ?? r.model ?? r.inferredKind;
+      if (inferredName && !name.trim()) {
+        setName(inferredName);
+      }
+    } catch {
+      setProbe(null);
+    } finally {
+      setProbing(false);
+    }
+  };
+
+  // Track which scan rows are currently being added so we can show per-row
+  // spinners without locking the whole modal.
+  const [addingUrl, setAddingUrl] = useState<string | null>(null);
+
+  // Scan → click = add. We create the device directly with the discovered
+  // kind / name / URLs; the user can rename after the fact from the list.
+  const addFromScan = async (d: ApiScannedDevice) => {
+    if (addingUrl) return;
+    setAddingUrl(d.url);
+    try {
+      await api.admin.channelSources.create({
+        name: d.friendlyName ?? d.model ?? d.label,
+        kind: d.kind,
+        url: d.url,
+        xmltvUrl: d.kind === 'iptv' ? d.suggestedXmltvUrl ?? null : null,
+      });
+      stopScan();
+      await onAdded();
     } catch (e) {
-      pushToast?.(`削除失敗: ${(e as Error).message}`, 'err');
+      onError(`追加失敗: ${(e as Error).message}`);
+    } finally {
+      setAddingUrl(null);
+    }
+  };
+
+
+  const stopScan = () => {
+    scanSourceRef.current?.close();
+    scanSourceRef.current = null;
+    setScanning(false);
+  };
+
+  // Stream the scan over SSE so devices pop in as the server finds them —
+  // user sees the first match in a few seconds instead of waiting 25s for
+  // the whole /24 to complete.
+  const runScan = () => {
+    if (scanning) {
+      stopScan();
+      return;
+    }
+    setScanning(true);
+    setScanResults([]);
+    setScanProgress({ done: 0, total: 0, pct: 0 });
+    // Hand the server our browser-visible hostname as a subnet hint — when
+    // the user accesses the app via a LAN IP this tells the scanner to also
+    // probe that /24 (useful when the server lives in a Docker container
+    // on a different subnet from the user's real devices).
+    const hint = window.location.hostname;
+    const qs = hint ? `?hint=${encodeURIComponent(hint)}` : '';
+    const src = new EventSource(`/api/admin/channel-sources/scan-stream${qs}`);
+    scanSourceRef.current = src;
+    src.addEventListener('progress', (e) => {
+      try {
+        setScanProgress(JSON.parse((e as MessageEvent<string>).data));
+      } catch {}
+    });
+    src.addEventListener('device', (e) => {
+      try {
+        const d = JSON.parse((e as MessageEvent<string>).data) as ApiScannedDevice;
+        setScanResults((prev) => {
+          if (!prev) return [d];
+          if (prev.some((x) => x.url === d.url)) return prev;
+          return [...prev, d];
+        });
+      } catch {}
+    });
+    src.addEventListener('done', () => stopScan());
+    src.onerror = () => {
+      // Server closed the stream or network dropped — treat as done.
+      stopScan();
+    };
+  };
+
+  // Auto-start a scan as soon as the modal opens — the user came here to add
+  // a device, and the fastest path is "open → pick from scan results".
+  // Also clean up on unmount so a fast close doesn't leak a streaming req.
+  useEffect(() => {
+    runScan();
+    return () => {
+      scanSourceRef.current?.close();
+      scanSourceRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Manual form is collapsed by default — surfaces only when scan finishes
+  // empty or when the user explicitly asks for it.
+  const [manualOpen, setManualOpen] = useState(false);
+
+  const submit = async () => {
+    if (!canSubmit) return;
+    setSubmitting(true);
+    try {
+      await api.admin.channelSources.create({
+        name: name.trim(),
+        kind: 'iptv',
+        url: url.trim(),
+        xmltvUrl: xmltvUrl.trim() || null,
+      });
+      await onAdded();
+    } catch (e) {
+      onError(`追加失敗: ${(e as Error).message}`);
+    } finally {
+      setSubmitting(false);
     }
   };
 
   return (
-    <SettingsSection
-      title="チャンネルソース"
-      desc="Mirakurun や m3u IPTV プレイリストを登録してチャンネル一覧を生成します。録画は channels.streamUrl を直接使います。"
-    >
-      <form
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 110px 1.6fr auto',
-          gap: 8,
-          padding: '11px 14px',
-          borderBottom: '1px solid var(--border)',
-          alignItems: 'center',
-        }}
-      >
-        <input
-          className="input"
-          placeholder="名前 (例: IPTV JP)"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          style={{ fontSize: 12 }}
-        />
-        <select
-          className="input"
-          value={kind}
-          onChange={(e) => setKind(e.target.value as ApiChannelSourceKind)}
-          style={{ fontSize: 12 }}
-        >
-          <option value="m3u">m3u</option>
-          <option value="mirakurun">mirakurun</option>
-        </select>
-        <input
-          className="input"
-          placeholder="URL (https://... .m3u や http://mirakurun:40772)"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-          style={{ fontSize: 12, fontFamily: 'var(--font-mono)' }}
-        />
-        <button className="btn btn-sm" onClick={handleCreate} disabled={creating}>
-          {creating ? '追加中…' : '追加'}
-        </button>
-      </form>
+    <div className="modal-backdrop" onMouseDown={handleBackdropClick}>
+      <div className="modal" role="dialog" aria-modal="true" aria-label="デバイスを追加">
+        <div className="modal-head">
+          <div className="modal-title">デバイスを追加</div>
+          <div style={{ fontSize: 11.5, color: 'var(--fg-muted)' }}>
+            IPTV (m3u) URL を入れると discover.json を自動チェックし、対応していれば XMLTV URL も推測して埋めます。Plex / Jellyfin と同様のパターンです。
+          </div>
+        </div>
+        <div className="modal-body add-device-body">
+          {/* Primary path: live scan results. The whole row is a click target
+              that adds the device directly — no form, no confirmation. */}
+          <div className="scan-panel">
+            <div className="scan-panel-head">
+              {scanning && <span className="scan-spinner" aria-hidden />}
+              <span className="scan-panel-title">
+                {scanning
+                  ? 'ローカルネットワークを検索中'
+                  : scanResults && scanResults.length > 0
+                    ? `${scanResults.length} 件見つかりました`
+                    : '検索結果'}
+              </span>
+            </div>
 
-      {loading && (
-        <div style={{ padding: '14px', fontSize: 12, color: 'var(--fg-subtle)' }}>
-          読み込み中…
+            <div className="scan-results">
+              {scanResults && scanResults.length === 0 && !scanning && (
+                <div className="scan-empty-row">
+                  対応デバイスは見つかりませんでした。
+                </div>
+              )}
+              {scanResults && scanResults.length === 0 && scanning && (
+                <div className="scan-empty-row subtle">検索中…</div>
+              )}
+              {scanResults && scanResults.map((d) => {
+                const busy = addingUrl === d.url;
+                const already = existingUrls.has(d.url);
+                return (
+                  <button
+                    key={d.url}
+                    type="button"
+                    className={`scan-result-body${busy ? ' busy' : ''}${already ? ' already' : ''}`}
+                    onClick={() => void addFromScan(d)}
+                    disabled={!!addingUrl || submitting || already}
+                    aria-disabled={already}
+                  >
+                    <div className="scan-result-main">
+                      <div className="scan-result-name">{d.friendlyName ?? d.label}</div>
+                      <div className="scan-result-url" title={d.url}>{d.url}</div>
+                    </div>
+                    <div className="scan-result-meta">
+                      {d.model && <span>{d.model}</span>}
+                      {d.tunerCount != null && <span>{d.tunerCount}&nbsp;ch</span>}
+                    </div>
+                    <span className={`scan-result-add${already ? ' added' : ''}`}>
+                      {already ? '登録済' : busy ? '追加中…' : '追加'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Manual fallback: hidden by default, revealed when the user taps
+              "手動で入力" or edits a scan row. Keeps the primary flow quiet. */}
+          <div className="manual-toggle-row">
+            <button
+              type="button"
+              className="manual-toggle"
+              onClick={() => setManualOpen((v) => !v)}
+            >
+              {manualOpen ? '手動入力を閉じる' : '手動で入力'}
+            </button>
+          </div>
+
+          {manualOpen && (
+            <div className="field-group">
+              <label className="field">
+                <span className="field-label">名前</span>
+                <input
+                  className="field-input"
+                  placeholder="未入力なら検出結果から自動設定"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </label>
+
+              <label className="field">
+                <span className="field-label">m3u / IPTV URL</span>
+                <input
+                  className="field-input mono"
+                  placeholder="http://mirakurun:40772/api/iptv"
+                  value={url}
+                  onChange={(e) => {
+                    setUrl(e.target.value);
+                    if (e.target.value.trim() !== lastProbedRef.current) setProbe(null);
+                  }}
+                  onBlur={() => void runProbe()}
+                />
+                <span className={`field-hint${probe?.reachable ? ' ok' : ''}`}>
+                  {probing && '検出中…'}
+                  {!probing && probe && probe.reachable && (
+                    <>
+                      {probe.inferredKind ?? probe.friendlyName ?? 'HDHomeRun'} を検出
+                      {probe.tunerCount != null && ` · ${probe.tunerCount} チューナー`}
+                      {probe.model && ` · ${probe.model}`}
+                    </>
+                  )}
+                  {!probing && probe && !probe.reachable && probe.inferredKind && (
+                    <>{probe.inferredKind} 形式 · XMLTV URL を推測しました</>
+                  )}
+                </span>
+              </label>
+
+              <label className="field">
+                <span className="field-label">
+                  XMLTV 番組表 URL
+                  <span className="field-optional">任意</span>
+                </span>
+                <input
+                  className="field-input mono"
+                  placeholder="http://mirakurun:40772/api/iptv/xmltv"
+                  value={xmltvUrl}
+                  onChange={(e) => {
+                    userEditedXmltvRef.current = true;
+                    setXmltvUrl(e.target.value);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && canSubmit) void submit();
+                  }}
+                />
+              </label>
+            </div>
+          )}
         </div>
-      )}
-      {!loading && sources.length === 0 && (
-        <div style={{ padding: '14px', fontSize: 12, color: 'var(--fg-subtle)' }}>
-          まだ登録されているソースはありません。
-        </div>
-      )}
-      {sources.map((s) => (
-        <div
-          key={s.id}
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr 70px 2fr 140px 70px auto auto',
-            gap: 10,
-            alignItems: 'center',
-            padding: '10px 14px',
-            borderBottom: '1px solid var(--border)',
-            background: s.lastError ? 'color-mix(in oklch, var(--bg) 92%, red 8%)' : undefined,
-          }}
-          title={s.lastError ?? undefined}
-        >
-          <div style={{ fontSize: 12, fontWeight: 600 }}>
-            {s.name}
-            {s.lastError && (
-              <span style={{ color: '#c33', marginLeft: 6, fontSize: 11 }}>●</span>
-            )}
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}>
-            {s.kind}
-          </div>
-          <div
-            style={{
-              fontSize: 11,
-              color: 'var(--fg-muted)',
-              fontFamily: 'var(--font-mono)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-            title={s.url}
-          >
-            {s.url}
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--fg-subtle)' }}>
-            {s.lastSyncAt
-              ? new Date(s.lastSyncAt).toLocaleString('ja-JP')
-              : '未同期'}
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--fg-muted)', textAlign: 'right' }}>
-            {s.channelCount} ch
-          </div>
-          <button
-            className="btn btn-sm ghost"
-            onClick={() => void handleSync(s.id)}
-            disabled={syncingId === s.id}
-          >
-            {syncingId === s.id ? '同期中…' : '再sync'}
+        <div className="modal-foot">
+          <button className="btn btn-sm ghost" onClick={onClose} disabled={submitting}>
+            閉じる
           </button>
-          <button
-            className="btn btn-sm ghost"
-            onClick={() => void handleRemove(s.id, s.name)}
-          >
-            削除
-          </button>
+          <div className="spacer" />
+          {manualOpen && (
+            <button
+              className="btn btn-sm"
+              onClick={() => void submit()}
+              disabled={!canSubmit}
+            >
+              {submitting ? '追加中…' : '手動で追加'}
+            </button>
+          )}
         </div>
-      ))}
-    </SettingsSection>
+      </div>
+    </div>
   );
 };
 
@@ -2323,7 +2645,6 @@ const GpuEncodeSection = ({ pushToast }: GpuEncodeSectionProps) => {
 // typical "setup → operate → maintain" flow.
 type SettingsTabKey =
   | 'channels'
-  | 'tuners'
   | 'recording'
   | 'storage'
   | 'maintenance';
@@ -2336,8 +2657,7 @@ interface SettingsTabDef {
 }
 
 const SETTINGS_TABS: SettingsTabDef[] = [
-  { key: 'channels',    icon: 'tv',        label: 'チャンネル',       group: 'input' },
-  { key: 'tuners',      icon: 'tuner',     label: 'チューナー',       group: 'input' },
+  { key: 'channels',    icon: 'tv',        label: 'デバイス',         group: 'input' },
   { key: 'recording',   icon: 'rec',       label: '録画・エンコード', group: 'record' },
   { key: 'storage',     icon: 'disk',      label: 'ストレージ',       group: 'record' },
   { key: 'maintenance', icon: 'lightning', label: 'メンテナンス',     group: 'system' },
@@ -2423,8 +2743,6 @@ export const SettingsPage = ({ pushToast }: SettingsPageProps = {}) => {
         <div key={active} className="settings-pane">
           {active === 'channels' && <ChannelSourcesSection pushToast={pushToast} />}
 
-          {active === 'tuners' && <TunerSection pushToast={pushToast} />}
-
           {active === 'recording' && <GpuEncodeSection pushToast={pushToast} />}
 
           {active === 'storage' && <StorageSection pushToast={pushToast} />}
@@ -2437,114 +2755,177 @@ export const SettingsPage = ({ pushToast }: SettingsPageProps = {}) => {
 };
 
 // -----------------------------------------------------------------
-// Tuner section — pulls the real tuner summary from /tuners, which
-// Mirakurun populates. Response is already aggregated per broadcast
-// type ({ type: 'GR'|'BS'|'CS'|'SKY', total, inUse }), so we render a
-// per-type row with usage ratio. Per-device details aren't exposed by
-// the backend, so we intentionally don't try to fake them.
+// Tuner section — rich per-physical-tuner view. Feeds from:
+// -----------------------------------------------------------------
+// Device detail modal — opened from the device row. Shows metadata,
+// exposes sync / delete actions, and lists channels belonging to this
+// device with per-row enabled toggles. Channel ↔ device mapping uses
+// the channels.source field (legacy 'm3u' for iptv-kind upserts).
 // -----------------------------------------------------------------
 
-interface TunerSectionProps {
-  pushToast?: (msg: string, kind?: 'ok' | 'err') => void;
+interface DeviceDetailModalProps {
+  device: ApiChannelSource;
+  syncing: boolean;
+  onClose: () => void;
+  onSync: () => void;
+  onDelete: () => Promise<void> | void;
+  onToastError: (msg: string) => void;
 }
 
-const TUNER_TYPE_LABELS: Record<'GR' | 'BS' | 'CS' | 'SKY', string> = {
-  GR: '地上波',
-  BS: 'BS',
-  CS: 'CS',
-  SKY: 'SKY',
+const KIND_TO_CHANNEL_SOURCE: Record<string, string> = {
+  mirakurun: 'mirakurun',
+  iptv: 'm3u', // upsertM3uChannels writes source='m3u' even for iptv devices
 };
 
-const TunerSection = ({ pushToast }: TunerSectionProps) => {
-  const [tuners, setTuners] = useState<ApiTunerState[] | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+const DeviceDetailModal = ({
+  device,
+  syncing,
+  onClose,
+  onSync,
+  onDelete,
+  onToastError,
+}: DeviceDetailModalProps) => {
+  const [channels, setChannels] = useState<ApiChannel[] | null>(null);
+  const [loadingCh, setLoadingCh] = useState(true);
+  const [toggling, setToggling] = useState<string | null>(null);
 
-  const load = async () => {
-    setLoading(true);
+  const channelSource = KIND_TO_CHANNEL_SOURCE[device.kind] ?? device.kind;
+
+  const loadChannels = async () => {
+    setLoadingCh(true);
     try {
-      const rows = await api.tuners.list();
-      setTuners(rows);
-      setErr(null);
+      const rows = await api.channels.list({ source: channelSource });
+      setChannels(rows);
     } catch (e) {
-      setErr((e as Error).message);
-      pushToast?.(`チューナー取得失敗: ${(e as Error).message}`, 'err');
+      onToastError(`チャンネル取得失敗: ${(e as Error).message}`);
     } finally {
-      setLoading(false);
+      setLoadingCh(false);
     }
   };
 
   useEffect(() => {
-    void load();
-  }, []);
+    void loadChannels();
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [device.id]);
 
-  const totalTuners = (tuners ?? []).reduce((s, t) => s + t.total, 0);
-  const inUseTotal = (tuners ?? []).reduce((s, t) => s + t.inUse, 0);
+  const handleBackdropClick = (e: ReactMouseEvent<HTMLDivElement>) => {
+    if (e.target === e.currentTarget) onClose();
+  };
+
+  const handleToggle = async (ch: ApiChannel) => {
+    setToggling(ch.id);
+    const next = !ch.enabled;
+    // Optimistic update so the toggle feels instant; revert on failure.
+    setChannels((prev) =>
+      prev ? prev.map((c) => (c.id === ch.id ? { ...c, enabled: next } : c)) : prev
+    );
+    try {
+      await api.channels.patch(ch.id, { enabled: next });
+    } catch (e) {
+      setChannels((prev) =>
+        prev ? prev.map((c) => (c.id === ch.id ? { ...c, enabled: !next } : c)) : prev
+      );
+      onToastError(`切替失敗: ${(e as Error).message}`);
+    } finally {
+      setToggling(null);
+    }
+  };
+
+  const enabledCount = channels?.filter((c) => c.enabled).length ?? 0;
 
   return (
-    <SettingsSection
-      title="チューナー"
-      desc="Mirakurun が検出した受信デバイスの合計。同時録画数は合計チューナー数が上限です。"
-    >
-      <div className="tuner-summary-row">
-        <div className="tuner-summary-main">
-          {tuners ? (
-            <>
-              <span>
-                <span className="tuner-count-num">{totalTuners}</span> チューナー
-              </span>
-              <span className="tuner-count-sep">·</span>
-              <span className="tuner-count-inuse">{inUseTotal} 使用中</span>
-            </>
-          ) : (
-            <span style={{ color: 'var(--fg-subtle)' }}>
-              {loading ? '読み込み中…' : '取得に失敗しました'}
-            </span>
-          )}
-        </div>
-        <button
-          className="btn btn-sm ghost"
-          onClick={() => void load()}
-          disabled={loading}
-        >
-          {loading ? '更新中…' : '再取得'}
-        </button>
-      </div>
-
-      {err && !tuners && (
-        <div className="settings-empty-row">取得に失敗: {err}</div>
-      )}
-
-      {tuners && tuners.length === 0 && (
-        <div className="settings-empty-row">
-          チューナーが検出されていません。Mirakurun の接続設定を確認してください。
-        </div>
-      )}
-
-      {tuners && tuners.length > 0 && (
-        <div className="tuner-type-list">
-          {tuners.map((t) => {
-            const pct = t.total === 0 ? 0 : Math.round((t.inUse / t.total) * 100);
-            return (
-              <div key={t.type} className="tuner-type-row">
-                <span className="tuner-type-label">{TUNER_TYPE_LABELS[t.type]}</span>
-                <div className="tuner-type-meter">
-                  <div
-                    className="tuner-type-meter-fill"
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-                <span className="tuner-type-count">
-                  <span className="tuner-type-inuse">{t.inUse}</span>
-                  <span className="tuner-type-sep">/</span>
-                  <span>{t.total}</span>
-                </span>
+    <div className="modal-backdrop" onMouseDown={handleBackdropClick}>
+      <div className="modal device-modal" role="dialog" aria-modal="true" aria-label={device.name}>
+        <div className="modal-head">
+          <div className="device-modal-head">
+            <div>
+              <div className="modal-title">{device.name}</div>
+              <div className="device-modal-meta">
+                {[device.model, device.friendlyName, device.tunerCount ? `${device.tunerCount} チューナー` : null]
+                  .filter((v): v is string => !!v)
+                  .join(' · ') || device.kind}
               </div>
-            );
-          })}
+              <div className="device-modal-url" title={device.url}>{device.url}</div>
+              {device.xmltvUrl && (
+                <div className="device-modal-url subtle" title={device.xmltvUrl}>
+                  XMLTV: {device.xmltvUrl}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
-      )}
-    </SettingsSection>
+
+        <div className="modal-body device-modal-body">
+          <div className="device-modal-actions">
+            <div className="device-modal-stats">
+              <span><span className="stat-num">{channels?.length ?? '—'}</span> チャンネル</span>
+              <span className="stat-sep">·</span>
+              <span><span className="stat-num">{enabledCount}</span> 有効</span>
+              {device.lastSyncAt && (
+                <>
+                  <span className="stat-sep">·</span>
+                  <span className="device-modal-sync-time">
+                    最終同期 {new Date(device.lastSyncAt).toLocaleString('ja-JP')}
+                  </span>
+                </>
+              )}
+              {device.lastError && (
+                <span className="device-modal-error" title={device.lastError}>エラー</span>
+              )}
+            </div>
+            <div className="device-modal-action-buttons">
+              <button
+                className="btn btn-sm ghost"
+                onClick={onSync}
+                disabled={syncing}
+              >
+                {syncing ? '同期中…' : '再sync'}
+              </button>
+              <button
+                className="btn btn-sm ghost device-modal-delete"
+                onClick={() => void onDelete()}
+              >
+                削除
+              </button>
+            </div>
+          </div>
+
+          <div className="device-channel-list">
+            {loadingCh && <div className="src-empty">読み込み中…</div>}
+            {!loadingCh && channels && channels.length === 0 && (
+              <div className="src-empty">
+                まだチャンネルはありません。上の「再sync」を押して取得してください。
+              </div>
+            )}
+            {!loadingCh && channels && channels.map((c) => (
+              <div key={c.id} className={`device-channel-row${c.enabled ? '' : ' disabled'}`}>
+                <span className={`channel-type-chip bc-${c.type.toLowerCase()}`}>{c.type}</span>
+                <span className="device-channel-num">{c.number || '—'}</span>
+                <span className="device-channel-name">{c.name}</span>
+                <button
+                  type="button"
+                  className={`toggle${c.enabled ? ' on' : ''}`}
+                  onClick={() => void handleToggle(c)}
+                  disabled={toggling === c.id}
+                  aria-pressed={c.enabled}
+                  aria-label={c.enabled ? '無効化' : '有効化'}
+                >
+                  <span className="toggle-knob" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="modal-foot">
+          <div className="spacer" />
+          <button className="btn btn-sm" onClick={onClose}>閉じる</button>
+        </div>
+      </div>
+    </div>
   );
 };
 

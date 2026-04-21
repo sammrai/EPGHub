@@ -5,11 +5,20 @@ import { channels, channelSources } from '../db/schema.ts';
 import { parseM3u, type M3uEntry } from '../integrations/m3u/parser.ts';
 import { HttpMirakurunClient } from '../integrations/mirakurun/client.ts';
 import { dedupeServices, serviceToChannel } from '../integrations/mirakurun/adapter.ts';
+import { parseXmltv } from '../integrations/xmltv/parser.ts';
+import { fetchHdhomerunDiscover } from '../integrations/hdhomerun/discover.ts';
+import { scanLocalNetwork, extractPrivatePrefix } from '../integrations/hdhomerun/scan.ts';
+import { programService } from './programService.ts';
+import { genreFromKey } from '../lib/genreRegistry.ts';
 import type {
   ChannelSource,
   ChannelSourceKind,
   ChannelSourceSyncResult,
+  ProbeChannelSourceResult,
+  ScanResult,
+  ScannedDevice,
 } from '../schemas/channelSource.ts';
+import type { Program } from '../schemas/program.ts';
 
 // -----------------------------------------------------------------
 // channelSyncService — CRUD over channel_sources + a syncFromSource(id)
@@ -31,6 +40,11 @@ interface ChannelSourceRow {
   name: string;
   kind: string;
   url: string;
+  xmltvUrl: string | null;
+  friendlyName: string | null;
+  model: string | null;
+  deviceId: string | null;
+  tunerCount: number | null;
   enabled: boolean;
   lastSyncAt: Date | null;
   lastError: string | null;
@@ -39,11 +53,17 @@ interface ChannelSourceRow {
 }
 
 function toApi(row: ChannelSourceRow): ChannelSource {
+  const kind: ChannelSourceKind = row.kind === 'mirakurun' ? 'mirakurun' : 'iptv';
   return {
     id: row.id,
     name: row.name,
-    kind: (row.kind === 'm3u' ? 'm3u' : 'mirakurun') as ChannelSourceKind,
+    kind,
     url: row.url,
+    xmltvUrl: row.xmltvUrl,
+    friendlyName: row.friendlyName,
+    model: row.model,
+    deviceId: row.deviceId,
+    tunerCount: row.tunerCount,
     enabled: row.enabled,
     lastSyncAt: row.lastSyncAt ? row.lastSyncAt.toISOString() : null,
     lastError: row.lastError,
@@ -117,6 +137,78 @@ function m3uToChannelValues(entry: M3uEntry): {
     source: 'm3u',
     m3uGroup: entry.groupTitle ?? null,
   };
+}
+
+// XMLTV <channel id="..."> values map 1:1 to m3u tvgId. Build a lookup
+// from the same M3uEntry[] we used to upsert channels so we can rewrite
+// incoming XMLTV programmes to our internal `m3u-<tvgId>` channel ids.
+function buildXmltvToInternalChannelMap(entries: M3uEntry[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const entry of entries) {
+    const tvgId = entry.tvgId?.trim();
+    if (!tvgId) continue;
+    map.set(tvgId, m3uChannelId(entry));
+  }
+  return map;
+}
+
+const XMLTV_FALLBACK_GENRE = genreFromKey('info');
+
+// Given a device URL, return a best-guess XMLTV feed URL for known providers.
+// Mirakurun    /api/iptv         → /api/iptv/xmltv
+// EPGStation   /api/iptv/channel.m3u8?... → /api/iptv/epg.xml?isHalfWidth=true&days=3
+// others → null (user supplies manually)
+export function deriveSuggestedXmltvUrl(rawUrl: string): string | null {
+  try {
+    const u = new URL(rawUrl);
+    const p = u.pathname.toLowerCase();
+    if (p.endsWith('/api/iptv/channel.m3u8')) {
+      const out = new URL(rawUrl);
+      out.pathname = u.pathname.replace(/channel\.m3u8$/i, 'epg.xml');
+      out.searchParams.delete('mode');
+      if (!out.searchParams.has('days')) out.searchParams.set('days', '3');
+      return out.toString();
+    }
+    if (p.endsWith('/api/iptv') || p.endsWith('/api/iptv/')) {
+      return `${rawUrl.replace(/\/+$/, '')}/xmltv`;
+    }
+  } catch {}
+  return null;
+}
+
+async function upsertXmltvPrograms(
+  xmltvText: string,
+  xmltvToInternal: Map<string, string>
+): Promise<number> {
+  const { programmes } = parseXmltv(xmltvText);
+  if (programmes.length === 0) return 0;
+  const out: Program[] = [];
+  let dropped = 0;
+  for (const p of programmes) {
+    const ch = xmltvToInternal.get(p.channelId);
+    if (!ch) {
+      // XMLTV references a channel we didn't register from m3u — skip it
+      // rather than creating an orphan program row (the `ch` FK would fail).
+      dropped++;
+      continue;
+    }
+    out.push({
+      id: `${ch}_${p.startAt}`,
+      ch,
+      startAt: p.startAt,
+      endAt: p.endAt,
+      title: p.title,
+      genre: XMLTV_FALLBACK_GENRE,
+      ep: p.subTitle ?? null,
+      series: null,
+      desc: p.desc ?? undefined,
+    });
+  }
+  if (dropped > 0) {
+    console.warn(`[channelSync] xmltv: ${dropped} programme(s) skipped (unknown channel)`);
+  }
+  await programService.upsertMany(out);
+  return out.length;
 }
 
 async function upsertM3uChannels(entries: M3uEntry[]): Promise<number> {
@@ -212,13 +304,36 @@ export const channelSyncService = {
     name: string;
     kind: ChannelSourceKind;
     url: string;
+    xmltvUrl?: string | null;
   }): Promise<ChannelSource> {
+    // Idempotent: if the URL is already registered, return the existing row
+    // (and patch the xmltv_url if the caller provided a newer one) rather
+    // than silently creating a duplicate. Scan-and-click UX can trigger
+    // repeated submits; dedupe at the storage boundary is the cleanest fix.
+    const [existing] = await db
+      .select()
+      .from(channelSources)
+      .where(eq(channelSources.url, input.url))
+      .limit(1);
+    if (existing) {
+      const wantXmltv = input.kind === 'iptv' ? input.xmltvUrl ?? null : null;
+      if (wantXmltv && wantXmltv !== existing.xmltvUrl) {
+        const [patched] = await db
+          .update(channelSources)
+          .set({ xmltvUrl: wantXmltv })
+          .where(eq(channelSources.id, existing.id))
+          .returning();
+        return toApi(patched);
+      }
+      return toApi(existing);
+    }
     const [row] = await db
       .insert(channelSources)
       .values({
         name: input.name,
         kind: input.kind,
         url: input.url,
+        xmltvUrl: input.kind === 'iptv' ? input.xmltvUrl ?? null : null,
       })
       .returning();
     return toApi(row);
@@ -236,10 +351,39 @@ export const channelSyncService = {
     let channelCount = 0;
     let error: string | undefined;
     try {
-      if (row.kind === 'm3u') {
+      if (row.kind === 'iptv') {
         const text = await fetchWithTimeout(row.url);
         const entries = parseM3u(text);
         channelCount = await upsertM3uChannels(entries);
+        // Optional XMLTV guide: pull after channels are in place so the
+        // programme-row foreign key (ch → channels.id) resolves. Failures
+        // here are logged as partial errors rather than aborting the sync.
+        if (row.xmltvUrl) {
+          try {
+            const xmltv = await fetchWithTimeout(row.xmltvUrl);
+            const chMap = buildXmltvToInternalChannelMap(entries);
+            const n = await upsertXmltvPrograms(xmltv, chMap);
+            console.log(`[channelSync] source ${id} xmltv upserted ${n} programmes`);
+          } catch (xmlErr) {
+            error = `xmltv: ${(xmlErr as Error).message}`;
+            console.warn(`[channelSync] source ${id} xmltv fetch/parse failed:`, xmlErr);
+          }
+        }
+        // Best-effort HDHomeRun discover — tells us FriendlyName, ModelNumber,
+        // TunerCount, DeviceID. Providers that don't implement it (plain m3u
+        // playlists) return null and we just leave the metadata fields alone.
+        const disc = await fetchHdhomerunDiscover(row.url);
+        if (disc) {
+          await db
+            .update(channelSources)
+            .set({
+              friendlyName: disc.friendlyName,
+              model: disc.modelNumber ?? disc.modelName ?? disc.manufacturer,
+              deviceId: disc.deviceId,
+              tunerCount: disc.tunerCount,
+            })
+            .where(eq(channelSources.id, id));
+        }
       } else if (row.kind === 'mirakurun') {
         channelCount = await syncMirakurun(row.url);
       } else {
@@ -262,18 +406,85 @@ export const channelSyncService = {
     return error ? { channelCount, error } : { channelCount };
   },
 
-  // Seed a mirakurun row on first boot if MIRAKURUN_URL is set and no rows
-  // exist yet. Keeps the env-driven path working for users who haven't
-  // migrated to the source-registration UI. Idempotent.
+  // Auto-probe a prospective m3u URL before the user saves the device.
+  // Tries HDHomeRun /discover.json for metadata, and heuristically suggests
+  // a matching XMLTV URL based on known URL patterns:
+  //   Mirakurun base  /api/iptv        → /api/iptv/xmltv
+  //   EPGStation      /api/iptv/channel.m3u8?... → /api/iptv/epg.xml?isHalfWidth=true&days=3
+  //   anything else   → null (user types it manually)
+  // Runs cheap probes — no writes.
+  async probe(rawUrl: string): Promise<ProbeChannelSourceResult> {
+    const url = rawUrl.trim();
+    const disc = await fetchHdhomerunDiscover(url).catch(() => null);
+
+    const suggestedXmltvUrl = deriveSuggestedXmltvUrl(url);
+    let inferredKind: string | null = null;
+    try {
+      const p = new URL(url).pathname.toLowerCase();
+      if (p.endsWith('/api/iptv/channel.m3u8')) inferredKind = 'EPGStation';
+      else if (p.endsWith('/api/iptv') || p.endsWith('/api/iptv/')) inferredKind = 'Mirakurun';
+    } catch {}
+
+    // Discover payload refines the kind label when available.
+    if (disc?.friendlyName) {
+      const fn = disc.friendlyName.toLowerCase();
+      if (fn.includes('mirakurun')) inferredKind = inferredKind ?? 'Mirakurun';
+      else if (fn.includes('epgstation')) inferredKind = inferredKind ?? 'EPGStation';
+    }
+
+    return {
+      reachable: !!disc,
+      friendlyName: disc?.friendlyName ?? null,
+      model: disc?.modelNumber ?? disc?.modelName ?? disc?.manufacturer ?? null,
+      tunerCount: disc?.tunerCount ?? null,
+      suggestedXmltvUrl,
+      inferredKind,
+    };
+  },
+
+  // LAN scan — walk the server's local subnets on a priority-ordered set
+  // of (port, path) candidates and return every HDHomeRun-speaking device
+  // we can reach. Each result already includes a best-guess XMLTV URL so
+  // the UI can offer one-click add.
+  async scan(): Promise<ScanResult> {
+    // Mirror the SSE path's hint behavior for the non-streaming fallback.
+    const hints = new Set<string>();
+    const rows = await db.select().from(channelSources);
+    for (const r of rows) {
+      const p = extractPrivatePrefix(r.url);
+      if (p) hints.add(p);
+    }
+    const raw = await scanLocalNetwork({ extraPrefixes: Array.from(hints) });
+    const devices: ScannedDevice[] = raw.map((d) => ({
+      kind: d.kind,
+      url: d.url,
+      friendlyName: d.friendlyName,
+      model: d.model,
+      tunerCount: d.tunerCount,
+      label: d.label,
+      // The probe itself now carries xmltv for EPGStation; fall back to the
+      // URL-pattern heuristic for anything else (future providers).
+      suggestedXmltvUrl: d.xmltvUrl ?? deriveSuggestedXmltvUrl(d.url),
+    }));
+    return { devices };
+  },
+
+  // Seed an iptv row on first boot if MIRAKURUN_URL is set and no rows
+  // exist yet. We now register Mirakurun *as* an IPTV/HDHomeRun device —
+  // its /api/iptv endpoint speaks the HDHomeRun protocol, so the same
+  // sync/discover/tuner-status code paths work. Mirakurun-specific
+  // overlays (SSE, ARIB extended) layer on top when available.
   async seedFromEnvIfEmpty(): Promise<void> {
     const mirakurunUrl = process.env.MIRAKURUN_URL;
     if (!mirakurunUrl) return;
     const existing = await db.select().from(channelSources).limit(1);
     if (existing.length > 0) return;
+    const base = mirakurunUrl.replace(/\/+$/, '');
     await db.insert(channelSources).values({
       name: 'Mirakurun (env)',
-      kind: 'mirakurun',
-      url: mirakurunUrl,
+      kind: 'iptv',
+      url: `${base}/api/iptv`,
+      xmltvUrl: `${base}/api/iptv/xmltv`,
     });
   },
 };

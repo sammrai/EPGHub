@@ -14,6 +14,10 @@ export type ApiRecordingDropSummary = components['schemas']['RecordingDropSummar
 export type ApiRecordingDropLog = components['schemas']['RecordingDropLog'];
 export type ApiTvdbEntry = components['schemas']['TvdbEntry'];
 export type ApiTunerState = components['schemas']['TunerState'];
+export type ApiTunerAllocation = components['schemas']['TunerAllocation'];
+export type ApiTunerSlot = components['schemas']['TunerSlot'];
+export type ApiDeviceLiveStatus = components['schemas']['DeviceLiveStatus'];
+export type ApiDeviceTunerStatus = components['schemas']['DeviceTunerStatus'];
 export type ApiNowRecording = components['schemas']['NowRecording'];
 export type ApiSystemStatus = components['schemas']['SystemStatus'];
 export type ApiRankingList = components['schemas']['RankingList'];
@@ -26,6 +30,9 @@ export type ApiChannelSource = components['schemas']['ChannelSource'];
 export type ApiChannelSourceKind = components['schemas']['ChannelSourceKind'];
 export type ApiCreateChannelSource = components['schemas']['CreateChannelSource'];
 export type ApiChannelSourceSyncResult = components['schemas']['ChannelSourceSyncResult'];
+export type ApiProbeChannelSourceResult = components['schemas']['ProbeChannelSourceResult'];
+export type ApiScannedDevice = components['schemas']['ScannedDevice'];
+export type ApiScanResult = components['schemas']['ScanResult'];
 export type ApiGpuEncoder = components['schemas']['GpuEncoder'];
 export type ApiGpuProbeDetail = components['schemas']['GpuProbeDetail'];
 export type ApiGpuProbeResult = components['schemas']['GpuProbeResult'];
@@ -84,7 +91,12 @@ async function req<T>(
 
 export const api = {
   channels: {
-    list: () => req<ApiChannel[]>('GET', '/channels'),
+    list: (opts?: { source?: string }) => {
+      const qs = opts?.source ? `?source=${encodeURIComponent(opts.source)}` : '';
+      return req<ApiChannel[]>('GET', `/channels${qs}`);
+    },
+    patch: (id: string, patch: { enabled?: boolean }) =>
+      req<ApiChannel>('PATCH', `/channels/${encodeURIComponent(id)}`, patch),
   },
   schedule: {
     list: (opts?: { date?: string; all?: boolean }) => {
@@ -140,6 +152,8 @@ export const api = {
   },
   tuners: {
     list: () => req<ApiTunerState[]>('GET', '/tuners'),
+    allocation: () => req<ApiTunerAllocation>('GET', '/tuners/allocation'),
+    live: () => req<ApiDeviceLiveStatus[]>('GET', '/tuners/live'),
     nowRecording: () => req<ApiNowRecording[]>('GET', '/now-recording'),
   },
   system: {
@@ -165,6 +179,10 @@ export const api = {
       list: () => req<ApiChannelSource[]>('GET', '/admin/channel-sources'),
       create: (body: ApiCreateChannelSource) =>
         req<ApiChannelSource>('POST', '/admin/channel-sources', body),
+      probe: (url: string) =>
+        req<ApiProbeChannelSourceResult>('POST', '/admin/channel-sources/probe', { url }),
+      scan: () =>
+        req<ApiScanResult>('POST', '/admin/channel-sources/scan'),
       sync: (id: number) =>
         req<ApiChannelSourceSyncResult>('POST', `/admin/channel-sources/${id}/sync`),
       remove: (id: number) => req<void>('DELETE', `/admin/channel-sources/${id}`),

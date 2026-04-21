@@ -80,6 +80,8 @@ export function serviceToChannel(svc: MrService): Channel {
     number: svc.remoteControlKeyId != null ? String(svc.remoteControlKeyId).padStart(3, '0') : svc.channel.channel,
     type: normalizedType,
     color: `oklch(0.58 0.11 ${hue})`,
+    enabled: true,
+    source: 'mirakurun',
   };
 }
 

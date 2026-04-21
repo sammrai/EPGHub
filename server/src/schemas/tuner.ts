@@ -56,5 +56,39 @@ export const NowRecordingSchema = z
 
 export const NowRecordingListSchema = z.array(NowRecordingSchema).openapi('NowRecordingList');
 
+// HDHomeRun-style per-tuner live status, fetched on demand from the
+// iptv device's /tuner{N}/status endpoint. One entry per physical tuner.
+export const DeviceTunerStatusSchema = z
+  .object({
+    tunerIdx: z.number().int().nonnegative(),
+    inUse: z.boolean(),
+    /** Channel name the tuner is currently locked to, if any. */
+    channelName: z.string().nullable(),
+    /** Channel number, HDHomeRun-style (e.g. "1.1"). */
+    channelNumber: z.string().nullable(),
+    /** IP of the client consuming this tuner's stream, if any. */
+    clientIp: z.string().nullable(),
+  })
+  .openapi('DeviceTunerStatus');
+
+export const DeviceLiveStatusSchema = z
+  .object({
+    sourceId: z.number().int(),
+    name: z.string(),
+    model: z.string().nullable(),
+    friendlyName: z.string().nullable(),
+    tunerCount: z.number().int(),
+    tuners: z.array(DeviceTunerStatusSchema),
+    /** True when the discover probe last succeeded. */
+    reachable: z.boolean(),
+  })
+  .openapi('DeviceLiveStatus');
+
+export const DeviceLiveStatusListSchema = z
+  .array(DeviceLiveStatusSchema)
+  .openapi('DeviceLiveStatusList');
+
 export type TunerState = z.infer<typeof TunerStateSchema>;
 export type NowRecording = z.infer<typeof NowRecordingSchema>;
+export type DeviceTunerStatus = z.infer<typeof DeviceTunerStatusSchema>;
+export type DeviceLiveStatus = z.infer<typeof DeviceLiveStatusSchema>;

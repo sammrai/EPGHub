@@ -1,48 +1,63 @@
-import type { Channel } from '../schemas/channel.ts';
-import { createMirakurunClient } from '../integrations/mirakurun/client.ts';
-import { dedupeServices, serviceToChannel } from '../integrations/mirakurun/adapter.ts';
-import { useFixtures } from '../config/fixtures.ts';
+import { eq } from 'drizzle-orm';
+import { db } from '../db/client.ts';
+import { channels } from '../db/schema.ts';
+import type { Channel, UpdateChannel } from '../schemas/channel.ts';
 
-export interface ChannelService {
-  list(): Promise<Channel[]>;
+// Channel service — canonical source is the DB `channels` table, which is
+// populated by channelSyncService.syncFromSource(). No live Mirakurun or
+// fixture fallback: once a device is registered the DB becomes source of
+// truth, and we don't silently hide / synthesize channels.
+
+type ChannelType = 'GR' | 'BS' | 'CS';
+
+interface ChannelRow {
+  id: string;
+  name: string;
+  short: string;
+  number: string;
+  type: string;
+  color: string;
+  enabled: boolean;
+  source: string;
 }
 
-export class FixtureChannelService implements ChannelService {
-  async list(): Promise<Channel[]> {
-    const { SAMPLE_CHANNELS } = await import('../../fixtures/channels.ts');
-    return SAMPLE_CHANNELS;
-  }
+function toApi(row: ChannelRow): Channel {
+  // `type` is stored as varchar(4) but domain-wise one of GR/BS/CS. Coerce
+  // with a safety default rather than crashing on unexpected values.
+  const t: ChannelType =
+    row.type === 'BS' || row.type === 'CS' || row.type === 'GR' ? row.type : 'GR';
+  return {
+    id: row.id,
+    name: row.name,
+    short: row.short,
+    number: row.number,
+    type: t,
+    color: row.color,
+    enabled: row.enabled,
+    source: row.source,
+  };
 }
 
-class EmptyChannelService implements ChannelService {
-  async list(): Promise<Channel[]> {
-    return [];
-  }
+export interface ListOptions {
+  /** Filter by the `source` field — e.g. 'mirakurun' | 'm3u'. */
+  source?: string;
 }
 
-export class MirakurunChannelService implements ChannelService {
-  private cache: { at: number; data: Channel[] } | null = null;
-  private readonly ttlMs = 60_000;
+export const channelService = {
+  async list(opts: ListOptions = {}): Promise<Channel[]> {
+    const rows = await db.select().from(channels);
+    const mapped = rows.map(toApi);
+    return opts.source ? mapped.filter((c) => c.source === opts.source) : mapped;
+  },
 
-  async list(): Promise<Channel[]> {
-    const client = createMirakurunClient();
-    if (!client) return useFixtures() ? new FixtureChannelService().list() : [];
-    if (this.cache && Date.now() - this.cache.at < this.ttlMs) return this.cache.data;
-    try {
-      const services = await client.services();
-      const channels = dedupeServices(services).map(serviceToChannel);
-      this.cache = { at: Date.now(), data: channels };
-      return channels;
-    } catch (err) {
-      console.warn('[channels] mirakurun fetch failed:', err);
-      return useFixtures() ? new FixtureChannelService().list() : [];
-    }
-  }
-}
-
-function build(): ChannelService {
-  if (process.env.MIRAKURUN_URL) return new MirakurunChannelService();
-  return useFixtures() ? new FixtureChannelService() : new EmptyChannelService();
-}
-
-export const channelService: ChannelService = build();
+  async update(id: string, patch: UpdateChannel): Promise<Channel | null> {
+    const [row] = await db
+      .update(channels)
+      .set({
+        ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
+      })
+      .where(eq(channels.id, id))
+      .returning();
+    return row ? toApi(row) : null;
+  },
+};

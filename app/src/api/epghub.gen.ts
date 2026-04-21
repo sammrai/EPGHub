@@ -13,11 +13,13 @@ export interface paths {
         };
         /**
          * 放送局一覧
-         * @description ユーザーがチューナー設定で有効化した放送局の一覧を返す。
+         * @description DB の channels テーブルを返す。任意の source (例 "mirakurun" / "m3u") でフィルタできる。
          */
         get: {
             parameters: {
-                query?: never;
+                query?: {
+                    source?: string;
+                };
                 header?: never;
                 path?: never;
                 cookie?: never;
@@ -50,6 +52,57 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/channels/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** 放送局の有効化トグル */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["UpdateChannel"];
+                };
+            };
+            responses: {
+                /** @description 更新後の放送局 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Channel"];
+                    };
+                };
+                /** @description 存在しない id */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         trace?: never;
     };
     "/schedule": {
@@ -1163,6 +1216,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tuners/live": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * デバイスごとのチューナー生状態
+         * @description iptv デバイスの /discover.json + /tuner{N}/status を直接叩き、物理チューナーごとの使用状況を返す。Plex の Tuner status 相当。
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description デバイス配列 (物理チューナー状態つき) */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DeviceLiveStatusList"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/system": {
         parameters: {
             query?: never;
@@ -1602,6 +1694,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/channel-sources/scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * ローカルネットワーク自動検出
+         * @description サーバーのローカル IPv4 サブネットを走査し、Mirakurun / EPGStation / HDHomeRun など HDHomeRun HTTP 互換デバイスを検出する。1 サブネット /24 で最長 25 秒程度かかる。
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 検出されたデバイス一覧 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ScanResult"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/channel-sources/probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * チャンネルソース URL の自動検出
+         * @description HDHomeRun /discover.json を叩いてデバイス情報を取得し、既知の URL パターン (Mirakurun / EPGStation) から XMLTV URL を推測する。追加モーダルの自動入力用。
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ProbeChannelSource"];
+                };
+            };
+            responses: {
+                /** @description probe 結果 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProbeChannelSourceResult"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/channel-sources/{id}/sync": {
         parameters: {
             query?: never;
@@ -1893,6 +2067,16 @@ export interface components {
              * @example oklch(0.55 0.12 28)
              */
             color: string;
+            /**
+             * @description 録画対象として有効か
+             * @example true
+             */
+            enabled: boolean;
+            /**
+             * @description 生成元デバイスの kind 相当値
+             * @example mirakurun
+             */
+            source: string;
         };
         ChannelList: components["schemas"]["Channel"][];
         Error: {
@@ -1903,6 +2087,9 @@ export interface components {
             detail?: {
                 [key: string]: unknown;
             };
+        };
+        UpdateChannel: {
+            enabled?: boolean;
         };
         Genre: {
             /** @example drama */
@@ -2320,6 +2507,23 @@ export interface components {
         TunerAllocation: {
             slots: components["schemas"]["TunerSlot"][];
         };
+        DeviceTunerStatus: {
+            tunerIdx: number;
+            inUse: boolean;
+            channelName: string | null;
+            channelNumber: string | null;
+            clientIp: string | null;
+        };
+        DeviceLiveStatus: {
+            sourceId: number;
+            name: string;
+            model: string | null;
+            friendlyName: string | null;
+            tunerCount: number;
+            tuners: components["schemas"]["DeviceTunerStatus"][];
+            reachable: boolean;
+        };
+        DeviceLiveStatusList: components["schemas"]["DeviceLiveStatus"][];
         StorageStatus: {
             totalBytes: number;
             usedBytes: number;
@@ -2427,10 +2631,10 @@ export interface components {
             source?: "auto" | "programs-table";
         };
         /**
-         * @description チャンネルソース種別
+         * @description デバイス種別
          * @enum {string}
          */
-        ChannelSourceKind: "m3u" | "mirakurun";
+        ChannelSourceKind: "mirakurun" | "iptv";
         ChannelSource: {
             /** @example 1 */
             id: number;
@@ -2439,9 +2643,23 @@ export interface components {
             kind: components["schemas"]["ChannelSourceKind"];
             /**
              * Format: uri
-             * @example https://example.com/iptv.m3u
+             * @example http://mirakurun:40772/api/iptv
              */
             url: string;
+            /**
+             * Format: uri
+             * @description iptv kind のみ。番組表 XMLTV フィードの URL (任意)
+             * @example http://mirakurun:40772/api/iptv/xmltv
+             */
+            xmltvUrl: string | null;
+            /** @example Mirakurun */
+            friendlyName: string | null;
+            /** @example Mirakurun */
+            model: string | null;
+            /** @example A1B2C3D4 */
+            deviceId: string | null;
+            /** @example 8 */
+            tunerCount: number | null;
             /** @example true */
             enabled: boolean;
             /** Format: date-time */
@@ -2459,7 +2677,40 @@ export interface components {
             kind: components["schemas"]["ChannelSourceKind"];
             /**
              * Format: uri
-             * @example https://example.com/iptv.m3u
+             * @example http://mirakurun:40772/api/iptv
+             */
+            url: string;
+            /**
+             * Format: uri
+             * @description iptv kind のみ。番組表 XMLTV フィードの URL
+             * @example http://mirakurun:40772/api/iptv/xmltv
+             */
+            xmltvUrl?: string | null;
+        };
+        ScannedDevice: {
+            kind: components["schemas"]["ChannelSourceKind"];
+            url: string;
+            friendlyName: string | null;
+            model: string | null;
+            tunerCount: number | null;
+            label: string;
+            suggestedXmltvUrl: string | null;
+        };
+        ScanResult: {
+            devices: components["schemas"]["ScannedDevice"][];
+        };
+        ProbeChannelSourceResult: {
+            reachable: boolean;
+            friendlyName: string | null;
+            model: string | null;
+            tunerCount: number | null;
+            suggestedXmltvUrl: string | null;
+            inferredKind: string | null;
+        };
+        ProbeChannelSource: {
+            /**
+             * Format: uri
+             * @example http://mirakurun:40772/api/iptv
              */
             url: string;
         };

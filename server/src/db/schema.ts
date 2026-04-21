@@ -19,15 +19,24 @@ export const channels = pgTable('channels', {
   m3uGroup:  text('m3u_group'),
 });
 
-// channel_sources — registered upstream playlists / Mirakurun endpoints.
-// channelSyncService.syncFromSource(id) walks each row, fetches the
-// upstream, and upserts into channels. Mirakurun rows may be auto-seeded
-// from the MIRAKURUN_URL env on first boot so existing envs keep working.
+// channel_sources — registered upstream devices. Two kinds:
+//   'mirakurun' : Mirakurun REST + SSE endpoint (single URL)
+//   'iptv'      : m3u playlist + optional XMLTV guide (Plex-style)
+// channelSyncService.syncFromSource(id) fetches the upstream and upserts
+// into channels; iptv rows with xmltvUrl also upsert programs.
 export const channelSources = pgTable('channel_sources', {
   id:           serial('id').primaryKey(),
   name:         text('name').notNull(),
-  kind:         varchar('kind', { length: 16 }).notNull(), // 'm3u' | 'mirakurun'
+  kind:         varchar('kind', { length: 16 }).notNull(), // 'mirakurun' | 'iptv'
   url:          text('url').notNull(),
+  xmltvUrl:     text('xmltv_url'),
+  // HDHomeRun /discover.json metadata — captured for iptv devices when the
+  // upstream implements the HDHomeRun HTTP protocol (Mirakurun / tvheadend / …).
+  // Nullable because plain m3u providers won't populate them.
+  friendlyName: text('friendly_name'),
+  model:        text('model'),
+  deviceId:     text('device_id'),
+  tunerCount:   integer('tuner_count'),
   enabled:      boolean('enabled').notNull().default(true),
   lastSyncAt:   timestamp('last_sync_at', { withTimezone: true }),
   lastError:    text('last_error'),

@@ -39,7 +39,7 @@ function r(
 }
 
 function ch(id: string, type: 'GR' | 'BS' | 'CS'): Channel {
-  return { id, name: id, short: id, number: '000', type, color: '#000' };
+  return { id, name: id, short: id, number: '000', type, color: '#000', enabled: true, source: 'test' };
 }
 
 function dev(index: number, type: 'GR' | 'BS' | 'CS' | 'SKY'): MrTunerDevice {
