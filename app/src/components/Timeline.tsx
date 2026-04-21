@@ -64,18 +64,11 @@ export function TimelineView({
   for (let h = START_HOUR; h < END_HOUR; h++) hourTicks.push(h);
 
   const scrollerRef = useRef<HTMLDivElement | null>(null);
-  const rulerRef = useRef<HTMLDivElement | null>(null);
-
-  // ルーラーを scroller の水平位置と同期。transform だけを触るので再レンダ不要。
-  const syncRuler = (scrollX: number) => {
-    if (rulerRef.current) {
-      rulerRef.current.style.transform = `translateX(${-scrollX}px)`;
-    }
-  };
 
   // 初期スクロール: 現在時刻を左寄り (左端+80px) に置く。baseDate が変わる
-  // 度に 1 度だけ適用。scrubRange と scrollLeft を双方向同期すると丸め誤差で
-  // チャタリングするので、ここではプログラム側が「書く」のみ、読むのは onScroll。
+  // 度に 1 度だけ適用。ルーラーは scroll コンテナ内に sticky で組み込まれて
+  // いるので、JS での transform 同期は不要 (以前は onScroll で transform を
+  // 更新していたが、1 フレーム遅れて微妙にズレていた)。
   const didInitialScroll = useRef<string>('');
   useLayoutEffect(() => {
     if (!scrollerRef.current) return;
@@ -83,24 +76,53 @@ export function TimelineView({
     didInitialScroll.current = baseDate;
     const target = nowVisible ? Math.max(0, nowX - 80) : 0;
     scrollerRef.current.scrollLeft = target;
-    syncRuler(target);
     const windowSpan = (scrollerRef.current.clientWidth - 160) / pxPerMin;
     setScrubRange({ start: target / pxPerMin, end: target / pxPerMin + windowSpan });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [baseDate]);
 
-  const onMinimapClick = (e: MouseEvent<HTMLDivElement>) => {
-    if (!scrollerRef.current) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const frac = (e.clientX - rect.left) / rect.width;
+  const mmTrackRef = useRef<HTMLDivElement | null>(null);
+  const mmDraggingRef = useRef(false);
+  // Apply a minimap X coordinate (clientX) as the new scroll position.
+  // Window span is read live from the scroller element — reading it from
+  // `scrubRange` would introduce a closure on stale state during drags.
+  const applyMmPos = (clientX: number) => {
+    if (!scrollerRef.current || !mmTrackRef.current) return;
+    const rect = mmTrackRef.current.getBoundingClientRect();
+    const frac = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const windowSpan = Math.max(
+      1,
+      (scrollerRef.current.clientWidth - 160) / pxPerMin,
+    );
     const centerMin = frac * totalMins;
-    const windowSpan = scrubRange.end - scrubRange.start;
-    const newStart = Math.max(0, Math.min(totalMins - windowSpan, centerMin - windowSpan / 2));
-    const scrollX = newStart * pxPerMin;
-    scrollerRef.current.scrollLeft = scrollX;
-    syncRuler(scrollX);
-    setScrubRange({ start: newStart, end: newStart + windowSpan });
+    const newStart = Math.max(
+      0,
+      Math.min(totalMins - windowSpan, centerMin - windowSpan / 2),
+    );
+    scrollerRef.current.scrollLeft = newStart * pxPerMin;
   };
+  const onMinimapDown = (e: MouseEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    mmDraggingRef.current = true;
+    applyMmPos(e.clientX);
+    e.preventDefault();
+  };
+  useEffect(() => {
+    const onMove = (e: globalThis.MouseEvent) => {
+      if (!mmDraggingRef.current) return;
+      applyMmPos(e.clientX);
+    };
+    const onUp = () => {
+      mmDraggingRef.current = false;
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    return () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [totalMins, pxPerMin]);
 
   const loadingMore = useRef(false);
   const lastVisibleDate = useRef<string>(baseDate);
@@ -109,10 +131,7 @@ export function TimelineView({
     const scrollX = el.scrollLeft;
     const windowSpan = (el.clientWidth - 160) / pxPerMin;
     const newStart = scrollX / pxPerMin;
-    // scrubRange は minimap / ラベル用の state。onScroll で更新するが、
-    // useEffect で scrollLeft を書き戻す経路を作らない (= チャタリング防止)。
     setScrubRange({ start: newStart, end: newStart + windowSpan });
-    syncRuler(scrollX);
     // 右端 400px を切ったら次の 1 日を追加読み込み。
     const remain = el.scrollWidth - (el.scrollLeft + el.clientWidth);
     if (remain < 400 && !loadingMore.current) {
@@ -133,46 +152,64 @@ export function TimelineView({
     loadingMore.current = false;
   }, [daysLoaded]);
 
+  // Click-and-drag pan. The horizontal scrollbar is hidden (the minimap
+  // is the primary scrubber), so drag-to-scroll is how users navigate the
+  // timeline. We only engage the pan when the mousedown target isn't a
+  // program card — so clicking a program still opens the modal.
+  const panRef = useRef<{ startX: number; startScroll: number; active: boolean }>({
+    startX: 0,
+    startScroll: 0,
+    active: false,
+  });
+  const onPanDown = (e: MouseEvent<HTMLDivElement>) => {
+    if (!scrollerRef.current) return;
+    if (e.button !== 0) return;
+    // Let clicks on programs/channel-col/interactive bits fall through.
+    const target = e.target as HTMLElement;
+    if (target.closest('.tl-prog') || target.closest('.tl-ch') || target.closest('a, button')) {
+      return;
+    }
+    panRef.current = {
+      startX: e.clientX,
+      startScroll: scrollerRef.current.scrollLeft,
+      active: true,
+    };
+    scrollerRef.current.classList.add('panning');
+  };
+  const onPanMove = (e: MouseEvent<HTMLDivElement>) => {
+    if (!panRef.current.active || !scrollerRef.current) return;
+    const dx = e.clientX - panRef.current.startX;
+    scrollerRef.current.scrollLeft = panRef.current.startScroll - dx;
+  };
+  const endPan = () => {
+    if (!panRef.current.active) return;
+    panRef.current.active = false;
+    scrollerRef.current?.classList.remove('panning');
+  };
+
   return (
     <div className="tl-view">
-      <div className="tl-ruler">
-        <div
-          ref={rulerRef}
-          style={{ position: 'relative', width, height: '100%', willChange: 'transform' }}
-        >
-          {hourTicks.map(h => (
-            <div
-              key={h}
-              className={`tl-tick ${h % 3 === 0 ? 'major' : ''}`}
-              style={{ left: (h - START_HOUR) * 60 * pxPerMin }}
-            >
-              {String(h % 24).padStart(2, '0')}:00
-            </div>
-          ))}
-          {nowVisible && (
-            <div
-              style={{
-                position: 'absolute',
-                left: nowX - 18,
-                top: 6,
-                color: 'var(--rec)',
-                fontFamily: 'var(--font-mono)',
-                fontSize: 10,
-                fontWeight: 700,
-                background: 'white',
-                padding: '1px 4px',
-                borderRadius: 3,
-                border: '1px solid var(--rec)',
-              }}
-            >
-              NOW {nowLabel}
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="tl-scroll" ref={scrollerRef} onScroll={onScroll}>
+      <div
+        className="tl-scroll"
+        ref={scrollerRef}
+        onScroll={onScroll}
+        onMouseDown={onPanDown}
+        onMouseMove={onPanMove}
+        onMouseUp={endPan}
+        onMouseLeave={endPan}
+      >
         <div style={{ position: 'relative', width: width + 160 }}>
+          <div className="tl-ruler">
+            {hourTicks.map(h => (
+              <div
+                key={h}
+                className={`tl-tick ${h % 3 === 0 ? 'major' : ''}`}
+                style={{ left: 160 + (h - START_HOUR) * 60 * pxPerMin }}
+              >
+                {String(h % 24).padStart(2, '0')}:00
+              </div>
+            ))}
+          </div>
           {channels.map(ch => {
             const progs = programs.filter(p => p.ch === ch.id);
             const totalDurMin = progs.reduce((s, p) => {
@@ -239,7 +276,7 @@ export function TimelineView({
       </div>
 
       <div className="tl-minimap">
-        <div className="mm-track" onMouseDown={onMinimapClick}>
+        <div className="mm-track" ref={mmTrackRef} onMouseDown={onMinimapDown}>
           {hourTicks.filter(h => (h - START_HOUR) % 4 === 0).map(h => (
             <div key={h} className="mm-hour" style={{ left: `${((h - START_HOUR) / (END_HOUR - START_HOUR)) * 100}%` }}>
               {String(h % 24).padStart(2, '0')}

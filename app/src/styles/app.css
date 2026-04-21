@@ -956,17 +956,18 @@ input, select, textarea {
   overflow: hidden;
 }
 
+/* The ruler is now a direct child of the scroll body and sticks to the
+   scroll viewport's top. That means it scrolls horizontally with the
+   programs (perfect alignment, no JS transform sync) and stays pinned
+   vertically. */
 .tl-ruler {
   position: sticky;
   top: 0;
   height: 36px;
   background: var(--bg-elev);
   border-bottom: 1px solid var(--border-strong);
-  display: flex;
-  padding-left: 160px;
-  overflow: hidden;
   z-index: 20;
-  flex-shrink: 0;
+  width: 100%;
 }
 
 .tl-scroll {
@@ -974,6 +975,18 @@ input, select, textarea {
   overflow-y: auto;
   overflow-x: auto;
   position: relative;
+  cursor: grab;
+  /* Hide the horizontal scrollbar — the minimap below is the primary
+     scrubber. Vertical scrolling still surfaces a normal scrollbar. */
+  scrollbar-width: thin;
+}
+.tl-scroll::-webkit-scrollbar { height: 0; }
+.tl-scroll::-webkit-scrollbar:vertical { width: 8px; height: auto; }
+.tl-scroll.panning {
+  cursor: grabbing;
+  /* While dragging, suppress text selection so the pan feels like a
+     native scroll instead of accidentally highlighting hour labels. */
+  user-select: none;
 }
 
 .tl-row {
@@ -994,7 +1007,9 @@ input, select, textarea {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  z-index: 10;
+  /* Above .tl-now (z: 25) so the red now-line never bleeds over the
+     sticky channel column when the user scrolls past the current time. */
+  z-index: 30;
 }
 
 .tl-strip {
@@ -1066,45 +1081,36 @@ input, select, textarea {
 
 .tl-tick.major { color: var(--fg); font-weight: 600; }
 
+/* Vertical "now" line for the Timeline. Spans from the top of the ruler
+   through every channel row (z-index > the sticky ruler's 20 so the line
+   cuts through the time band too). No dot marker — a cap at the top
+   would detach from the line when the user scrolls vertically, because
+   the line lives in the scrollable body while the ruler is sticky. */
 .tl-now {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 1px;
+  width: 2px;
   background: var(--rec);
-  z-index: 9;
+  z-index: 25;
   pointer-events: none;
+  box-shadow: 0 0 8px oklch(0.58 0.2 25 / 0.4);
 }
 
-.tl-now::before {
-  content: '';
+/* Solid red marker sitting inside the ruler at the current-time column.
+   No time text — the hour ticks already give position context, and the
+   marker's job is just "NOW is here". Height fills the ruler, width
+   centered on the `.tl-now` hairline. */
+.tl-now-marker {
   position: absolute;
-  top: -3px;
-  left: -3px;
-  width: 7px;
-  height: 7px;
-  background: var(--rec);
-  border-radius: 50%;
-}
-
-/* Time label sitting on the ruler at the "now" column. Subtle mono text
-   in the broadcaster-red, no heavy box/border — matches the minimalist
-   grid aesthetic. Anchored by its left edge; the `left` inline style
-   already accounts for the now line's x-offset. */
-.tl-now-label {
-  position: absolute;
-  top: 4px;
+  top: 0;
+  bottom: 0;
+  width: 3px;
   transform: translateX(-50%);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--rec);
-  background: var(--bg-elev);
-  padding: 0 4px;
-  border-radius: 3px;
-  letter-spacing: 0.02em;
+  background: var(--rec);
+  border-radius: 1px;
   pointer-events: none;
-  white-space: nowrap;
+  z-index: 10;
 }
 
 /* scrub/minimap */

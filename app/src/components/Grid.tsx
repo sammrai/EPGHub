@@ -117,6 +117,44 @@ export function Subheader({ layout, onLayout, filter, setFilter, bcType, setBcTy
   const pillWrapRef = useRef<HTMLDivElement>(null);
   const pillBtnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  // Genre "その他" dropdown. The 4 most-watched Japanese genres stay inline
+  // as chips; the rarer ones fold into this dropdown to keep the subheader
+  // horizontally compact.
+  const [genreMoreOpen, setGenreMoreOpen] = useState(false);
+  const genreMoreWrapRef = useRef<HTMLDivElement>(null);
+  const genreMoreBtnRef = useRef<HTMLButtonElement>(null);
+  const genreMoreMenuRef = useRef<HTMLDivElement>(null);
+  const [genreMorePos, setGenreMorePos] = useState<{ top: number; left: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!genreMoreOpen || !genreMoreBtnRef.current) {
+      setGenreMorePos(null);
+      return;
+    }
+    const rect = genreMoreBtnRef.current.getBoundingClientRect();
+    setGenreMorePos({ top: rect.bottom + 6, left: rect.left });
+  }, [genreMoreOpen]);
+  useEffect(() => {
+    if (!genreMoreOpen) return;
+    function onDown(e: MouseEvent) {
+      const inWrap = genreMoreWrapRef.current?.contains(e.target as Node);
+      const inMenu = genreMoreMenuRef.current?.contains(e.target as Node);
+      if (!inWrap && !inMenu) setGenreMoreOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setGenreMoreOpen(false);
+    }
+    function onResize() {
+      setGenreMoreOpen(false);
+    }
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('resize', onResize);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [genreMoreOpen]);
   // The subheader has `overflow-x: auto` for the chip row, which clips any
   // absolutely-positioned child. To escape the clip, the dropdown uses
   // `position: fixed` with coordinates computed from the pill's bounding
@@ -164,6 +202,12 @@ export function Subheader({ layout, onLayout, filter, setFilter, bcType, setBcTy
     { k: 'music', label: '音楽',          dot: 'oklch(0.62 0.12 340)' },
     { k: 'news',  label: 'ニュース',       dot: 'oklch(0.6 0.02 250)' },
   ];
+  // Primary chips = frequently toggled; rest go behind a "その他 ▾" dropdown
+  // to keep the subheader horizontally compact.
+  const PRIMARY_GENRE_KEYS = new Set(['all', 'drama', 'anime', 'var', 'movie']);
+  const primaryGenres = genres.filter((g) => PRIMARY_GENRE_KEYS.has(g.k));
+  const secondaryGenres = genres.filter((g) => !PRIMARY_GENRE_KEYS.has(g.k));
+  const activeSecondary = secondaryGenres.find((g) => g.k === filter);
   const bc: BcEntry[] = [
     { k: 'all', label: '全波' },
     { k: 'GR',  label: '地デジ' },
@@ -216,8 +260,6 @@ export function Subheader({ layout, onLayout, filter, setFilter, bcType, setBcTy
         )}
       </div>
 
-      <div style={{ width: 1, height: 22, background: 'var(--border)', margin: '0 4px' }} />
-
       <div className="seg" style={{ marginRight: 4 }}>
         {bc.map(b => (
           <button
@@ -230,21 +272,68 @@ export function Subheader({ layout, onLayout, filter, setFilter, bcType, setBcTy
         ))}
       </div>
 
-      <div className="genre-select-wrap">
-        <select
-          className="genre-select"
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-        >
-          {genres.map((g) => (
-            <option key={g.k} value={g.k}>
-              {g.label}
-            </option>
-          ))}
-        </select>
-      </div>
-
       <div style={{ flex: 1 }} />
+
+      <div className="genre-chips">
+        {primaryGenres.map((g) => (
+          <button
+            key={g.k}
+            type="button"
+            className={`filter-chip${filter === g.k ? ' on' : ''}`}
+            onClick={() => setFilter(g.k)}
+          >
+            {g.dot && <span className="dot" style={{ background: g.dot }} />}
+            {g.label}
+          </button>
+        ))}
+        <div className="genre-more-wrap" ref={genreMoreWrapRef}>
+          <button
+            ref={genreMoreBtnRef}
+            type="button"
+            className={`filter-chip${activeSecondary ? ' on' : ''}`}
+            aria-haspopup="listbox"
+            aria-expanded={genreMoreOpen}
+            onClick={() => setGenreMoreOpen((o) => !o)}
+          >
+            {activeSecondary ? (
+              <>
+                {activeSecondary.dot && (
+                  <span className="dot" style={{ background: activeSecondary.dot }} />
+                )}
+                {activeSecondary.label}
+              </>
+            ) : (
+              'その他'
+            )}
+            <Icon name="chevD" size={10} />
+          </button>
+          {genreMoreOpen && genreMorePos && (
+            <div
+              ref={genreMoreMenuRef}
+              className="genre-more-menu"
+              role="listbox"
+              style={{ top: genreMorePos.top, left: genreMorePos.left }}
+            >
+              {secondaryGenres.map((g) => (
+                <button
+                  key={g.k}
+                  type="button"
+                  role="option"
+                  aria-selected={filter === g.k}
+                  className={`gmm-item${filter === g.k ? ' active' : ''}`}
+                  onClick={() => {
+                    setFilter(g.k);
+                    setGenreMoreOpen(false);
+                  }}
+                >
+                  {g.dot && <span className="dot" style={{ background: g.dot }} />}
+                  <span>{g.label}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
 
       <div className="seg">
         <button
