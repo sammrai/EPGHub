@@ -5,7 +5,6 @@
 // when a button is clicked. Pages is static so mutations are ephemeral.
 import {
   CHANNELS,
-  RANKINGS,
   RULES,
   SYSTEM,
   TUNERS,
@@ -14,6 +13,7 @@ import {
   defaultToday,
   nowRecording,
   programsForDate,
+  rankingsForGenre,
   recordingsList,
   searchPrograms,
 } from './data';
@@ -92,8 +92,10 @@ export function handleMockRequest(req: Request): Response | null {
       return method === 'GET' ? ok(nowRecording(today)) : null;
     case '/api/system':
       return method === 'GET' ? ok(SYSTEM) : null;
-    case '/api/rankings':
-      return method === 'GET' ? ok(RANKINGS) : null;
+    case '/api/rankings': {
+      const genre = url.searchParams.get('genre') ?? 'all';
+      return method === 'GET' ? ok(rankingsForGenre(genre)) : null;
+    }
     case '/api/search': {
       const q = url.searchParams.get('q') ?? '';
       return method === 'GET' ? ok(searchPrograms(q, today)) : null;
