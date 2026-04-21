@@ -11,7 +11,6 @@ import type {
   ApiRule,
   ApiSearchResult,
   ApiSystemStatus,
-  ApiTunerAllocation,
   ApiTunerState,
   ApiTvdbEntry,
 } from '../api/epghub';
@@ -142,7 +141,9 @@ export const TUNERS = [
   { type: 'CS', total: 2, inUse: 0 },
 ] as unknown as ApiTunerState[];
 
-export const TUNER_ALLOCATION = { slots: [] } as unknown as ApiTunerAllocation;
+// Not typed against the generated schema — it lands on branches where the
+// ApiTunerAllocation export may lag. The UI only cares about `slots: []`.
+export const TUNER_ALLOCATION = { slots: [] } as unknown;
 
 export function nowRecording(today: string): ApiNowRecording[] {
   const progs = programsForDate(today) as unknown as Array<{ id: string; ch: string; title: string; startAt: string; endAt: string; series?: string | null }>;
