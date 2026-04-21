@@ -15,8 +15,13 @@ const API = process.env.EPGHUB_API_URL ?? 'http://localhost:3000';
 const pkgUrl = new URL('./package.json', import.meta.url);
 const pkg = JSON.parse(readFileSync(fileURLToPath(pkgUrl), 'utf8')) as { version: string };
 
+// GitHub Pages serves this project site at /<repo>/ — when EPGHUB_BASE is
+// set the mock build resolves assets + router routes to that sub-path.
+const BASE = process.env.EPGHUB_BASE ?? '/';
+
 export default defineConfig({
   plugins: [react()],
+  base: BASE,
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },

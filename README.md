@@ -15,3 +15,5 @@ docker compose up -d
 ```
 
 UI http://localhost:8890 · API docs http://localhost:8890/docs
+
+サンプル UI（モック・バックエンド無し）: https://sammrai.github.io/EPGHub/
