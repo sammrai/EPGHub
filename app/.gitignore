@@ -3,4 +3,5 @@ dist
 .env
 .env.*
 !.env.example
-src/api/epghub.gen.ts
+# src/api/epghub.gen.ts は OpenAPI から生成されるが、型解決とビルド再現性の
+# ため (CLAUDE.md のルール通り) コミット対象とする。
