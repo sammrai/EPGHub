@@ -1,15 +1,18 @@
-# Host-machine Postgres for epghub. Use when not running inside the devcontainer.
-# Inside the devcontainer, Postgres is installed directly (see server/README).
+# End-to-end stack for epghub. `docker compose up -d` pulls the images
+# published by .github/workflows/build-push.yml; if an image isn't available
+# locally and pulls fail, `docker compose build` rebuilds from source using
+# the Dockerfiles under server/ and app/.
 #
-# Usage (host):
-#   docker compose up -d
-#   cd server && cp .env.example .env && npm install
-#   npm run db:migrate
-#   npm run dev
+# Overridable via env or a local .env file:
+#   EPGHUB_TAG        — image tag to pull (default: latest)
+#   EPGHUB_IMAGE_OWNER— GHCR owner/namespace (default: sammrai)
+#   MIRAKURUN_URL     — live tuner endpoint (optional; fixtures drive when unset)
+#   TVDB_API_KEY      — TheTVDB v4 key (optional)
+name: epghub
+
 services:
   postgres:
     image: postgres:15-alpine
-    container_name: epghub-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: epghub
@@ -25,5 +28,40 @@ services:
       timeout: 3s
       retries: 10
 
+  server:
+    image: ghcr.io/${EPGHUB_IMAGE_OWNER:-sammrai}/epghub-server:${EPGHUB_TAG:-latest}
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://epghub:epghub@postgres:5432/epghub
+      PORT: "3000"
+      RECORDING_DIR: /var/lib/epghub/recordings
+      TVDB_CACHE_DIR: /var/lib/epghub/tvdb-cache
+      MIRAKURUN_URL: ${MIRAKURUN_URL:-}
+      TVDB_API_KEY: ${TVDB_API_KEY:-}
+    volumes:
+      - epghub-recordings:/var/lib/epghub/recordings
+      - epghub-tvdb-cache:/var/lib/epghub/tvdb-cache
+    ports:
+      - "3000:3000"
+
+  app:
+    image: ghcr.io/${EPGHUB_IMAGE_OWNER:-sammrai}/epghub-app:${EPGHUB_TAG:-latest}
+    build:
+      context: .
+      dockerfile: app/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "5173:80"
+
 volumes:
   epghub-pg-data:
+  epghub-recordings:
+  epghub-tvdb-cache:
