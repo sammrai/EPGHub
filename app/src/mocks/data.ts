@@ -194,6 +194,8 @@ const SCHEDULE: Record<string, Slot[]> = {
     { dur: 30, title: 'NEWS23',                    genre: 'news' },
     { dur: 60, title: 'A-Studio+',                  genre: 'var'  },
     { dur: 30, title: '情熱大陸',                   genre: 'doc',   series: 'jonetsu', ep: '#1240', desc: '今夜の主人公は若き建築家。', demo: 'series-tvdb-free', tvdbId: 362256 },
+    { dur: 30, title: '情熱大陸 再放送',             genre: 'doc',   series: 'jonetsu', ep: '#1239', desc: '世界で戦う女性格闘家。', demo: 'series-tvdb-free', tvdbId: 362256 },
+    { dur: 30, title: '情熱大陸 アーカイブ',          genre: 'doc',   series: 'jonetsu', ep: '#1238', desc: '伝説の陶芸家を追う。', demo: 'series-tvdb-free', tvdbId: 362256 },
     { dur: 60, title: 'マツコの知らない世界 再放送',   genre: 'var',   series: 'matsuko-shiranai', ep: '#372', tvdbId: 357827 },
     { dur: 60, title: '深夜ドラマ',                  genre: 'drama', series: 'deep-night-drama', demo: 'series-plain-free' },
     { dur: 90, title: 'JNN フラッシュニュース',       genre: 'news' },
@@ -230,7 +232,7 @@ const SCHEDULE: Record<string, Slot[]> = {
     { dur: 90, title: '金曜プレミアム トムとジェリー', genre: 'movie', desc: '週末の劇場版アニメ枠。', tvdbId: 133330 },
     { dur: 60, title: 'VS 嵐 リマスター',            genre: 'var'  },
     { dur: 60, title: 'ネプリーグ',                  genre: 'var'  },
-    { dur: 60, title: '世にも奇妙な物語',             genre: 'drama', series: 'yonimo-kimyo', ep: '#340', demo: 'series-tvdb-free', tvdbId: 391636 },
+    { dur: 60, title: '世にも奇妙な物語',             genre: 'drama', series: 'yonimo-kimyo', ep: '#85', demo: 'series-tvdb-free', tvdbId: 395243 },
     { dur: 30, title: 'Mr.サンデー',                 genre: 'news' },
     { dur: 60, title: '深夜アニメ (フジ)',            genre: 'anime' },
     { dur: 30, title: 'フジ深夜バラエティ',           genre: 'var'  },
@@ -289,7 +291,7 @@ const SCHEDULE: Record<string, Slot[]> = {
     { dur: 60, title: 'にっぽん縦断 こころ旅',         genre: 'doc'  },
     { dur: 90, title: '名作ドラマアンコール',         genre: 'drama' },
     { dur: 90, title: '深夜の名画座 わたしに会うまでの1600キロ', genre: 'movie', desc: '名画座アンコール。', tvdbId: 3496 },
-    { dur: 90, title: '深夜の名画座',                 genre: 'movie', demo: 'movie-plain-free' },
+    { dur: 90, title: '深夜の名画座 プラダを着た悪魔',  genre: 'movie', demo: 'movie-plain-free', tvdbId: 281 },
     { dur: 120, title: '朝までリピート',              genre: 'other' },
     { dur: 60, title: '早朝のオーケストラ',           genre: 'other' },
     { dur: 60, title: '美の壺',                      genre: 'edu'  },
@@ -303,7 +305,7 @@ const SCHEDULE: Record<string, Slot[]> = {
     { dur: 90, title: '深層ニュース',                 genre: 'news' },
     { dur: 60, title: '時代劇アワー',                 genre: 'drama', series: 'jidai-geki-hour', ep: '#24', demo: 'series-plain-rec' },
     { dur: 120, title: 'BS日テレシネマ プラダを着た悪魔', genre: 'movie', desc: '話題作の再放送。', tvdbId: 281 },
-    { dur: 90, title: 'BS日テレシネマ',              genre: 'movie', demo: 'movie-plain-free' },
+    { dur: 90, title: 'BS日テレシネマ トムとジェリー',  genre: 'movie', demo: 'movie-plain-free', tvdbId: 133330 },
     { dur: 60, title: '人生の楽園',                   genre: 'var'  },
     { dur: 60, title: 'ぶらり旅 (再)',                 genre: 'var'  },
     { dur: 120, title: '深夜のアニメ枠',              genre: 'anime' },
@@ -324,7 +326,7 @@ const SCHEDULE: Record<string, Slot[]> = {
     { dur: 60, title: 'Newsザタイム',                genre: 'news' },
     { dur: 60, title: 'アニソン倶楽部',              genre: 'var'  },
     { dur: 60, title: '昭和歌謡ベスト',                genre: 'var'  },
-    { dur: 90, title: '深夜の名作劇場 名もなき映画',  genre: 'movie', demo: 'movie-plain-free' },
+    { dur: 90, title: '深夜の名作劇場 クィーン',       genre: 'movie', demo: 'movie-plain-free', tvdbId: 2649 },
     { dur: 120, title: '早朝リピート',                genre: 'other' },
     { dur: 60, title: 'テレショップ',                 genre: 'other' },
     { dur: 60, title: 'モーニングBS',                 genre: 'news' },
@@ -374,6 +376,7 @@ const TVDB_CATALOG_RAW = [
   { id: 378977, slug: 'sunday-art-museum', type: 'series', title: '日曜美術館', titleEn: 'Sunday Art Museum', network: 'NHK', year: 2020, matchedBy: 'exact', totalSeasons: 6, currentSeason: 6, currentEp: 10, totalEps: 260, status: 'continuing', poster: 'https://artworks.thetvdb.com/banners/series/378977/posters/5e7bb0d65f2e5.jpg' },
   { id: 384681, slug: 'hirunandesu', type: 'series', title: 'ヒルナンデス!', titleEn: 'Hirunandesu!', network: 'Nippon TV', year: 2011, matchedBy: 'exact', totalSeasons: 15, currentSeason: 15, currentEp: 60, totalEps: 3200, status: 'continuing', poster: 'https://artworks.thetvdb.com/banners/series/384681/posters/5ffd107fb9639.jpg' },
   { id: 391636, slug: 'thus-spoke-kishibe-rohan', type: 'series', title: '岸辺露伴は動かない', titleEn: 'Thus Spoke Kishibe Rohan', network: 'NHK', year: 2017, matchedBy: 'exact', totalSeasons: 4, currentSeason: 4, currentEp: 3, totalEps: 18, status: 'continuing', poster: 'https://artworks.thetvdb.com/banners/series/391636/posters/5fdf312372c6e.jpg' },
+  { id: 395243, slug: 'yo-nimo-kimyona-monogatari', type: 'series', title: '世にも奇妙な物語', titleEn: 'Tales of the Unusual', network: 'Fuji TV', year: 1990, matchedBy: 'exact', totalSeasons: 35, currentSeason: 35, currentEp: 2, totalEps: 85, status: 'continuing', poster: 'https://artworks.thetvdb.com/banners/series/395243/posters/6082dc8e5e18e.jpg' },
   { id: 399881, slug: 'ichikeis-crow', type: 'series', title: 'イチケイのカラス', titleEn: "Ichikei's Crow", network: 'Fuji TV', year: 2021, matchedBy: 'exact', totalSeasons: 2, currentSeason: 2, currentEp: 10, totalEps: 20, status: 'continuing', poster: 'https://artworks.thetvdb.com/banners/v4/series/399881/posters/6707d9b7c93d7.jpg' },
   { id: 414096, slug: 'urusei-yatsura', type: 'series', title: 'うる星やつら', titleEn: 'Urusei Yatsura', network: 'Fuji TV', year: 2022, matchedBy: 'exact', totalSeasons: 2, currentSeason: 2, currentEp: 12, totalEps: 50, status: 'continuing', poster: 'https://artworks.thetvdb.com/banners/v4/series/414096/posters/64e4f02bbc8b2.jpg' },
   { id: 418527, slug: 'shojiki-fudosan', type: 'series', title: '正直不動産', titleEn: 'Shojiki Fudosan', network: 'NHK', year: 2022, matchedBy: 'exact', totalSeasons: 2, currentSeason: 2, currentEp: 10, totalEps: 20, status: 'continuing', poster: 'https://artworks.thetvdb.com/banners/v4/series/418527/posters/689b0b338e23c.jpg' },
@@ -472,6 +475,7 @@ const DEMO_RECORDING_CASES: DemoCase[] = [
   'movie-tvdb-free',   // → encoding  (2)
   'movie-tvdb-rec',    // → failed    (3)
   'series-tvdb-free',  // → ready     (5)
+  'movie-plain-free',  // → ready     (N)
   'series-plain-free', // → conflict  (2)
 ];
 
@@ -481,7 +485,7 @@ function makeRecordings(today: string): ApiRecording[] {
   // Keep the full program record (with `tvdb`) so recording rows carry
   // tvdbId — the library page splits recordings into series/movie by that
   // field, without it everything falls into "その他".
-  const byId = new Map(progs.map((p) => [p.id, p as unknown as { id: string; ch: string; title: string; startAt: string; endAt: string; tvdb?: { id: number; type: string } }] as const));
+  const byId = new Map(progs.map((p) => [p.id, p as unknown as { id: string; ch: string; title: string; startAt: string; endAt: string; tvdb?: { id: number; type: string }; tvdbSeason?: number; tvdbEpisode?: number; tvdbEpisodeName?: string }] as const));
   const now = new Date();
   const stateByCase: Record<DemoCase, string> = {
     'series-tvdb-rec':   'scheduled',
@@ -513,7 +517,8 @@ function makeRecordings(today: string): ApiRecording[] {
     'movie-plain-rec':   1, // recording ×1  → recording total 3
     'movie-tvdb-free':   2, // encoding  ×2
     'movie-tvdb-rec':    1, // failed    ×1
-    'series-tvdb-free':  1, // ready     ×1
+    'series-tvdb-free':  4, // ready     ×4 (情熱大陸×3 + 世にも奇妙×1)
+    'movie-plain-free':  3, // ready     ×3  → library total 5
     'series-plain-free': 1, // conflict  ×1
   };
 
@@ -551,6 +556,11 @@ function makeRecordings(today: string): ApiRecording[] {
         startAt,
         endAt,
         tvdbId: p.tvdb?.id ?? null,
+        season: p.tvdbSeason ?? null,
+        ep: p.tvdbEpisode ?? null,
+        epTitle: p.tvdbEpisodeName ?? null,
+        air: startAt.slice(0, 10),
+        size: 1.2,
         priority: caseId.startsWith('series-tvdb') ? 'high' : 'medium',
         quality: '1080i',
         keepRaw: false,
@@ -687,7 +697,7 @@ const RANKING_SEEDS: Record<string, RankingSeed[]> = {
     { title: '金曜ドラマ 静寂の向こう',     channelName: 'TBS',        delta: 0,    tvdbId: 418527, quote: '急転の第6話' },
     { title: '連続テレビ小説 みらい色',     channelName: 'NHK総合',    delta: 1,    tvdbId: 270774, quote: '第58回' },
     { title: '金曜ナイトドラマ',           channelName: 'テレビ朝日', delta: -1,   tvdbId: 249250, quote: null },
-    { title: '世にも奇妙な物語',           channelName: 'フジテレビ', delta: 2,    tvdbId: 391636, quote: '新作読み切り' },
+    { title: '世にも奇妙な物語',           channelName: 'フジテレビ', delta: 2,    tvdbId: 395243, quote: '新作読み切り' },
     { title: '相棒',                       channelName: 'テレビ朝日', delta: 3,    tvdbId: 188501, quote: '杉下右京 新たな謎' },
     { title: '時代劇アワー',               channelName: 'BS日テレ',   delta: null, tvdbId: null,  quote: null },
     { title: 'サスペンス劇場',             channelName: 'BS-TBS',     delta: 0,    tvdbId: null,  quote: null },

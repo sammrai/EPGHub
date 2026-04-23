@@ -41,6 +41,9 @@ jobs:
           EPGHUB_BASE: /${{ github.event.repository.name }}/
         run: npm run build:mock
 
+      - name: Generate API docs
+        run: npx --yes @redocly/cli build-docs ../server/openapi.yaml --output dist/api-docs.html
+
       # SPA fallback — GH Pages serves 404.html when a path has no static
       # match, so copy index.html over to keep deep links working.
       - name: Add SPA fallback

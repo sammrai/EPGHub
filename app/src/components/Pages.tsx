@@ -49,17 +49,31 @@ import type {
 // ============ SHARED ============
 export interface PageHeadProps {
   title: string;
-  desc?: string;
   children?: ReactNode;
 }
 
-export const PageHead = ({ title, desc, children }: PageHeadProps) => (
+/** Shared top row for every page: title on the left, global search in
+ *  the center, optional action buttons on the right. The search pill
+ *  dispatches a window-level event so App.tsx can open the command
+ *  palette without PageHead needing the callback as a prop. */
+export const PageHead = ({ title, children }: PageHeadProps) => (
   <div className="page-head">
-    <div>
+    <div className="page-head-main">
       <h1>{title}</h1>
-      {desc && <p>{desc}</p>}
     </div>
-    {children && <div style={{ display: 'flex', gap: 8 }}>{children}</div>}
+    <div className="page-head-search">
+      <button
+        type="button"
+        className="body-search"
+        onClick={() => window.dispatchEvent(new CustomEvent('epghub:open-search'))}
+        aria-label="検索を開く"
+      >
+        <Icon name="search" size={14} />
+        <span className="body-search-placeholder">検索…</span>
+        <span className="kbd">⌘K</span>
+      </button>
+    </div>
+    {children && <div className="page-head-actions">{children}</div>}
   </div>
 );
 
@@ -303,6 +317,7 @@ export const LibraryPage = ({
   onDeleted,
 }: LibraryPageProps) => {
   const [filter, setFilter] = useState<LibFilter>('all');
+  const [movieView, setMovieView] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<LibViewMode>(
     () => (localStorage.getItem('lib-view') as LibViewMode) || 'card'
   );
@@ -361,6 +376,19 @@ export const LibraryPage = ({
   // Other: recordings with no TVDB link (news, sports, unmatched one-offs)
   const otherRecordings = recordings.filter((r) => r.tvdbId == null);
 
+  if (movieView != null) {
+    const m = movieItems.find((x) => x.r.id === movieView);
+    if (m)
+      return (
+        <MovieDetail
+          m={m}
+          channels={channels}
+          onBack={() => setMovieView(null)}
+          onDeleted={onDeleted}
+        />
+      );
+  }
+
   if (view != null) {
     const s = seriesList.find((x) => x.tvdb.id === view);
     if (s)
@@ -414,14 +442,7 @@ export const LibraryPage = ({
 
   return (
     <div className="page">
-      <PageHead
-        title="ライブラリ"
-        desc="録画されたすべてのタイトル。シリーズはTVDBでまとめ、映画は1本ごと、それ以外は録画物として並びます。"
-      >
-        <button className="btn" onClick={onGoGuide}>
-          番組表から追加
-        </button>
-      </PageHead>
+      <PageHead title="ライブラリ" />
 
       <div
         style={{
@@ -504,7 +525,7 @@ export const LibraryPage = ({
               );
             if (it.kind === 'movie')
               return (
-                <MovieLibCard key={'m' + it.m.r.id} m={it.m} channels={channels} onDeleted={onDeleted} />
+                <MovieLibCard key={'m' + it.m.r.id} m={it.m} channels={channels} onDeleted={onDeleted} onOpen={() => setMovieView(it.m.r.id)} />
               );
             return (
               <RecordingLibCard
@@ -538,7 +559,7 @@ export const LibraryPage = ({
               );
             if (it.kind === 'movie')
               return (
-                <MovieLibRow key={'m' + it.m.r.id} m={it.m} channels={channels} onDeleted={onDeleted} />
+                <MovieLibRow key={'m' + it.m.r.id} m={it.m} channels={channels} onDeleted={onDeleted} onOpen={() => setMovieView(it.m.r.id)} />
               );
             return (
               <RecordingLibRow
@@ -696,9 +717,10 @@ interface MovieLibCardProps {
   m: MovieListEntry;
   channels: Channel[];
   onDeleted?: (id: string) => void;
+  onOpen?: () => void;
 }
 
-const MovieLibCard = ({ m, channels, onDeleted }: MovieLibCardProps) => {
+const MovieLibCard = ({ m, channels, onDeleted, onOpen }: MovieLibCardProps) => {
   const ch = channels.find((c) => c.id === m.r.ch);
   const handleDelete = makeDeleteHandler({ id: m.r.id, title: m.tvdb.title }, onDeleted);
   // Fall back to the recording's own duration when TVDB /search hit lacks
@@ -710,7 +732,7 @@ const MovieLibCard = ({ m, channels, onDeleted }: MovieLibCardProps) => {
     `${runtime}分`,
   ].filter(Boolean);
   return (
-    <div className="series-lib-card">
+    <div className={`series-lib-card${onOpen ? ' clickable' : ''}`} onClick={onOpen}>
       <div className="lib-card-kind">
         <span className="kind-tag movie">映画</span>
       </div>
@@ -884,9 +906,10 @@ interface MovieLibRowProps {
   m: MovieListEntry;
   channels: Channel[];
   onDeleted?: (id: string) => void;
+  onOpen?: () => void;
 }
 
-const MovieLibRow = ({ m, channels, onDeleted }: MovieLibRowProps) => {
+const MovieLibRow = ({ m, channels, onDeleted, onOpen }: MovieLibRowProps) => {
   const ch = channels.find((c) => c.id === m.r.ch);
   const handleDelete = makeDeleteHandler({ id: m.r.id, title: m.tvdb.title }, onDeleted);
   const subParts = [
@@ -895,7 +918,7 @@ const MovieLibRow = ({ m, channels, onDeleted }: MovieLibRowProps) => {
     m.tvdb.director || null,
   ].filter(Boolean);
   return (
-    <div className="res-row">
+    <div className={`res-row${onOpen ? ' clickable' : ''}`} onClick={onOpen}>
       <div>
         <span className="kind-tag movie">映画</span>
       </div>
@@ -942,6 +965,74 @@ const MovieLibRow = ({ m, channels, onDeleted }: MovieLibRowProps) => {
   );
 };
 
+interface MovieDetailProps {
+  m: MovieListEntry;
+  channels: Channel[];
+  onBack: () => void;
+  onDeleted?: (id: string) => void;
+}
+
+const MovieDetail = ({ m, channels, onBack, onDeleted }: MovieDetailProps) => {
+  const ch = channels.find((c) => c.id === m.r.ch);
+  const runtime = m.tvdb.runtime > 0 ? m.tvdb.runtime : m.r.duration;
+  const handleDelete = makeDeleteHandler({ id: m.r.id, title: m.tvdb.title }, (id) => {
+    onDeleted?.(id);
+    onBack();
+  });
+  return (
+    <div className="page">
+      <div className="series-detail-hero">
+        <Poster seed={m.tvdb.slug} label={m.tvdb.titleEn} size="xl" poster={m.tvdb.poster} />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 11, color: 'var(--fg-subtle)', fontFamily: 'var(--font-mono)' }}>
+            TVDB #{m.tvdb.id}
+          </div>
+          <h1 style={{ margin: '6px 0 4px', fontSize: 24, fontWeight: 600, letterSpacing: '-0.01em' }}>
+            {m.tvdb.title}
+          </h1>
+          <div style={{ fontSize: 13, color: 'var(--fg-muted)', fontStyle: 'italic' }}>
+            {m.tvdb.titleEn}
+          </div>
+          <div style={{ display: 'flex', gap: 14, marginTop: 12, fontSize: 12, color: 'var(--fg-muted)' }}>
+            {m.tvdb.year > 0 && <span><strong style={{ color: 'var(--fg)' }}>{m.tvdb.year}年</strong></span>}
+            {m.tvdb.director && <span>{m.tvdb.director} 監督</span>}
+            {runtime > 0 && <span>{runtime}分</span>}
+            {m.tvdb.rating > 0 && <span>★ {m.tvdb.rating}</span>}
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 16, alignItems: 'center' }}>
+            <button className="btn" onClick={onBack}>← 戻る</button>
+            {handleDelete && (
+              <button className="btn danger" onClick={handleDelete}>削除</button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ marginTop: 24 }}>
+        <div style={{ fontSize: 12, color: 'var(--fg-subtle)', marginBottom: 10, fontWeight: 600, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+          録画情報
+        </div>
+        <div className="res-table" style={{ borderRadius: 8, overflow: 'hidden' }}>
+          <div className="res-row" style={{ cursor: 'default' }}>
+            <div><span className="kind-tag movie">映画</span></div>
+            <div className="res-prog">
+              <div className="res-title">{m.r.title}</div>
+              <div className="res-sub">{ch?.name ?? m.r.ch}</div>
+            </div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--fg-muted)' }}>
+              {m.r.air}
+            </div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--fg-muted)' }}>
+              {m.r.size} GB
+            </div>
+            <div><StateTag state={m.r.state} /></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 interface SeriesDetailProps {
   series: SeriesListEntry;
   onBack: () => void;
@@ -951,19 +1042,16 @@ interface SeriesDetailProps {
 const SeriesDetail = ({ series: s, onBack: _onBack, toggleRule }: SeriesDetailProps) => {
   void _onBack;
   const counts = seriesCounts(s.tvdb, s.recorded);
-  const [season, setSeason] = useState<number>(counts.currentSeason || 1);
+  const latestRecordedSeason = Math.max(0, ...s.recorded.map((e) => e.season ?? 0));
+  const [season, setSeason] = useState<number>(latestRecordedSeason || counts.currentSeason || 1);
   const recordedInSeason = s.recorded
     .filter((e) => e.season === season)
     .sort((a, b) => (b.ep ?? 0) - (a.ep ?? 0));
   const seasonsSet = new Set<number>(
     s.recorded.map((e) => e.season).filter((n): n is number => n != null)
   );
-  if (counts.currentSeason > 0) seasonsSet.add(counts.currentSeason);
+  if (seasonsSet.size === 0 && counts.currentSeason > 0) seasonsSet.add(counts.currentSeason);
   const seasons = Array.from(seasonsSet).sort((a, b) => b - a);
-  // Pad seasons only if TVDB gave us an authoritative season count.
-  for (let i = 1; i <= s.tvdb.totalSeasons; i++)
-    if (!seasons.includes(i)) seasons.push(i);
-  seasons.sort((a, b) => b - a);
   if (seasons.length === 0) seasons.push(1);
 
   return (
@@ -1389,10 +1477,7 @@ export const ReservesPage = ({
 
   return (
     <div className="page">
-      <PageHead
-        title="予約・状態"
-        desc="録画中・エンコード中・今後の予約を1つのテーブルで。"
-      />
+      <PageHead title="予約一覧" />
 
       <div
         style={{
@@ -1685,39 +1770,23 @@ const ReserveEditModal = ({ recording, onClose, onSave }: ReserveEditModalProps)
             <label className="opt-label">
               <span className="opt-label-text">前マージン (秒)</span>
               <input
+                className="control-sm"
                 type="number"
                 value={marginPre}
                 min={0}
                 onChange={(e) => setMarginPre(Math.max(0, Number(e.target.value) || 0))}
-                style={{
-                  width: 80,
-                  padding: '6px 8px',
-                  border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-sm)',
-                  background: 'var(--bg)',
-                  color: 'var(--fg)',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 12,
-                }}
+                style={{ width: 80, fontFamily: 'var(--font-mono)' }}
               />
             </label>
             <label className="opt-label">
               <span className="opt-label-text">後マージン (秒)</span>
               <input
+                className="control-sm"
                 type="number"
                 value={marginPost}
                 min={0}
                 onChange={(e) => setMarginPost(Math.max(0, Number(e.target.value) || 0))}
-                style={{
-                  width: 80,
-                  padding: '6px 8px',
-                  border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-sm)',
-                  background: 'var(--bg)',
-                  color: 'var(--fg)',
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: 12,
-                }}
+                style={{ width: 80, fontFamily: 'var(--font-mono)' }}
               />
             </label>
           </div>
@@ -2614,14 +2683,13 @@ const GpuEncodeSection = ({ pushToast }: GpuEncodeSectionProps) => {
         <div style={{ fontSize: 12, color: 'var(--fg-muted)' }}>優先エンコーダ</div>
         <div style={{ fontSize: 12 }}>
           <select
-            className="input"
+            className="control-sm"
             value={status?.preferred ?? ''}
             disabled={!hasAny || saving}
             onChange={(e) => {
               const v = e.target.value;
               void saveSettings({ preferred: v === '' ? null : (v as ApiGpuEncoder) });
             }}
-            style={{ fontSize: 12 }}
           >
             <option value="">(未選択 — CPU プリセットを使用)</option>
             {available.map((enc) => (
@@ -2734,10 +2802,21 @@ export const SettingsPage = ({ pushToast }: SettingsPageProps = {}) => {
 
   return (
     <div className="page settings-page">
-      <PageHead title="設定" desc="受信ソース・録画・シリーズ連携・運用ジョブの設定。" />
+      <PageHead title="設定" />
       <div className="settings-layout">
         <nav className="settings-nav" aria-label="設定カテゴリ" onKeyDown={handleNavKey}>
           {navItems}
+          <div className="settings-nav-heading">開発者</div>
+          <a
+            className="settings-nav-item"
+            href={import.meta.env.VITE_USE_FIXTURES === '1' ? 'api-docs.html' : '/docs'}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ textDecoration: 'none' }}
+          >
+            <Icon name="link" size={14} />
+            <span>API 仕様書</span>
+          </a>
         </nav>
         <div key={active} className="settings-pane">
           {active === 'channels' && <ChannelSourcesSection pushToast={pushToast} />}
@@ -3210,7 +3289,7 @@ const RecordingDefaultsSection = ({ pushToast }: RecordingDefaultsSectionProps) 
             value={defaults.quality}
             onChange={(e) => void save({ quality: e.target.value as ApiQuality })}
             disabled={saving}
-            style={SETTING_SELECT_STYLE}
+            className="control-sm"
           >
             {(Object.keys(QUALITY_LABEL) as ApiQuality[]).map((k) => (
               <option key={k} value={k}>{QUALITY_LABEL[k]}</option>
@@ -3227,7 +3306,7 @@ const RecordingDefaultsSection = ({ pushToast }: RecordingDefaultsSectionProps) 
             value={defaults.encodePreset}
             onChange={(e) => void save({ encodePreset: e.target.value as ApiRecEncodePreset })}
             disabled={saving}
-            style={SETTING_SELECT_STYLE}
+            className="control-sm"
           >
             {(Object.keys(PRESET_LABEL) as ApiRecEncodePreset[]).map((k) => (
               <option key={k} value={k}>{PRESET_LABEL[k]}</option>
@@ -3244,7 +3323,7 @@ const RecordingDefaultsSection = ({ pushToast }: RecordingDefaultsSectionProps) 
             value={defaults.priority}
             onChange={(e) => void save({ priority: e.target.value as ApiPriority })}
             disabled={saving}
-            style={SETTING_SELECT_STYLE}
+            className="control-sm"
           >
             {(Object.keys(PRIORITY_LABEL) as ApiPriority[]).map((k) => (
               <option key={k} value={k}>{PRIORITY_LABEL[k]}</option>
@@ -3318,6 +3397,7 @@ const MarginInput = ({ value, onCommit, disabled, ariaLabel }: MarginInputProps)
 
   return (
     <input
+      className="control-sm"
       type="number"
       min={0}
       max={600}
@@ -3331,7 +3411,7 @@ const MarginInput = ({ value, onCommit, disabled, ariaLabel }: MarginInputProps)
       }}
       disabled={disabled}
       aria-label={ariaLabel}
-      style={{ width: 72, fontSize: 12, padding: '3px 6px' }}
+      style={{ width: 72, fontFamily: 'var(--font-mono)' }}
     />
   );
 };
@@ -3347,7 +3427,6 @@ const SETTING_ROW_STYLE: CSSProperties = {
 };
 const SETTING_ROW_LAST_STYLE: CSSProperties = { ...SETTING_ROW_STYLE, borderBottom: 'none' };
 const SETTING_LABEL_STYLE: CSSProperties = { fontSize: 12, color: 'var(--fg-muted)' };
-const SETTING_SELECT_STYLE: CSSProperties = { fontSize: 12 };
 
 // -----------------------------------------------------------------
 // TVDB API key entry. The server only exposes the last 4 chars of the
@@ -3417,6 +3496,7 @@ const TvdbLinkSection = ({ pushToast }: TvdbLinkSectionProps) => {
         <div style={{ fontSize: 12, fontFamily: 'var(--font-mono)' }}>
           {editing ? (
             <input
+              className="control-sm"
               type="text"
               autoFocus
               value={draft}
@@ -3426,10 +3506,7 @@ const TvdbLinkSection = ({ pushToast }: TvdbLinkSectionProps) => {
                 else if (e.key === 'Escape') { setEditing(false); setDraft(''); }
               }}
               placeholder="TVDB v4 APIキーを入力"
-              style={{
-                width: '100%', maxWidth: 320,
-                fontFamily: 'var(--font-mono)', fontSize: 12, padding: '4px 6px',
-              }}
+              style={{ width: '100%', maxWidth: 320, fontFamily: 'var(--font-mono)' }}
               disabled={saving}
             />
           ) : apiKey.source === 'db' ? (
@@ -3638,10 +3715,7 @@ export const DiscoverPage = ({ existingSeriesIds, onAdded, onRemove }: DiscoverP
 
   return (
     <div className="page">
-      <PageHead
-        title="発見"
-        desc="JCOM TV ガイドの予約ランキング。気になる番組があれば、TVDBで見つかったシリーズはそのまま自動録画対象に追加できます。"
-      >
+      <PageHead title="発見">
         <div
           style={{
             fontSize: 11,
