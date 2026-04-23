@@ -102,14 +102,19 @@ export const RecordingSchema = z
 
 export const RecordingListSchema = z.array(RecordingSchema).openapi('RecordingList');
 
+// Optional everywhere except programId / source — unset fields fall back to
+// the admin-configured defaults (admin_settings.rec.*) inside
+// recordingService.create(). The old zod .default() values are kept as
+// last-resort fallbacks in adminSettingsService.REC_DEFAULTS_FALLBACK so
+// behaviour is unchanged when the settings rows don't exist yet.
 export const CreateRecordingSchema = z
   .object({
     programId: z.string(),
-    priority: PrioritySchema.default('medium'),
-    quality: QualitySchema.default('1080i'),
-    keepRaw: z.boolean().default(false),
-    marginPre: z.number().int().default(0),
-    marginPost: z.number().int().default(30),
+    priority: PrioritySchema.optional(),
+    quality: QualitySchema.optional(),
+    keepRaw: z.boolean().optional(),
+    marginPre: z.number().int().min(0).max(600).optional(),
+    marginPost: z.number().int().min(0).max(600).optional(),
     source: RecordingSourceSchema.default({ kind: 'once' }),
     // Force-create over a duplicate/conflict warning.
     force: z.boolean().default(false),

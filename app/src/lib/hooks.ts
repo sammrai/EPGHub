@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/epghub';
 import type {
+  ApiAdminSettings,
   ApiChannel,
   ApiNowRecording,
   ApiProgram,
@@ -161,6 +162,7 @@ export const useTuners      = () => useResource<ApiTunerState[]>(() => api.tuner
 export const useNowRecording = () => useResource<ApiNowRecording[]>(() => api.tuners.nowRecording());
 export const useSystem      = () => useResource<ApiSystemStatus>(() => api.system.status());
 export const useChannelsApi = () => useResource<ApiChannel[]>(() => api.channels.list());
+export const useAdminSettings = () => useResource<ApiAdminSettings>(() => api.admin.settings.get());
 
 // Debounced global search hook. query を入力中はリクエストを 180ms まとめて
 // 1 本に絞り、AbortController で途中打ち切る。空文字のときは即時 empty。

@@ -45,6 +45,13 @@ export interface ApiGpuSettingsPatch {
   preferred?: ApiGpuEncoder | null;
 }
 
+export type ApiAdminSettings = components['schemas']['AdminSettings'];
+export type ApiAdminSettingsPatch = components['schemas']['AdminSettingsPatch'];
+export type ApiRecDefaults = components['schemas']['RecDefaults'];
+export type ApiRecEncodePreset = components['schemas']['RecEncodePreset'];
+export type ApiPriority = components['schemas']['Priority'];
+export type ApiQuality = components['schemas']['Quality'];
+
 // Minimal local shape for the tvdb_entries.episodes jsonb array exposed by
 // GET /tvdb/:id/episodes. Kept in sync with server/src/routes/tvdb.ts
 // TvdbEpisodeSchema — not yet regenerated into epghub.gen.ts.
@@ -192,6 +199,11 @@ export const api = {
       status: () => req<ApiGpuStatus>('GET', '/admin/gpu/status'),
       settings: (patch: ApiGpuSettingsPatch) =>
         req<ApiGpuStatus>('PATCH', '/admin/gpu/settings', patch),
+    },
+    settings: {
+      get: () => req<ApiAdminSettings>('GET', '/admin/settings'),
+      patch: (patch: ApiAdminSettingsPatch) =>
+        req<ApiAdminSettings>('PATCH', '/admin/settings', patch),
     },
   },
 };

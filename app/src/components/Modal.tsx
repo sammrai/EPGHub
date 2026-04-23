@@ -160,7 +160,7 @@ function ReservedModal({ program, onClose, onCancel, onStopRecording, channels, 
       : (program.ruleMatched ? `ルール「${program.ruleMatched}」` : '単発予約');
   const settings = {
     priority: program.priority || 'medium',
-    quality: '1080p',
+    quality: '1080i',
     keepRaw: false,
     margin: { pre: 0, post: 30 },
     source: sourceText,
@@ -324,7 +324,9 @@ interface ReserveNewModalProps {
 
 type ReserveMode = 'once' | 'series' | 'rule';
 type Priority = 'high' | 'medium' | 'low';
-type Quality = '1080p' | '720p';
+// Server accepts '1080i' (HD interlaced, native broadcast) or '720p'.
+// Keep in sync with server/src/schemas/recording.ts QualitySchema.
+type Quality = '1080i' | '720p';
 
 function ReserveNewModal({
   program,
@@ -340,7 +342,7 @@ function ReserveNewModal({
 }: ReserveNewModalProps) {
   const [mode, setMode] = useState<ReserveMode>('once');
   const [priority, setPriority] = useState<Priority>('medium');
-  const [quality, setQuality] = useState<Quality>('1080p');
+  const [quality, setQuality] = useState<Quality>('1080i');
   const [keepRaw, setKeepRaw] = useState(false);
   const [editingTvdb, setEditingTvdb] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
@@ -372,7 +374,7 @@ function ReserveNewModal({
     };
   }, [settingsOpen]);
   const settingsDirty =
-    priority !== 'medium' || quality !== '1080p' || keepRaw;
+    priority !== 'medium' || quality !== '1080i' || keepRaw;
   const sizeHintGb = Math.round(
     program.sizeRaw || (toMin(program.end) - toMin(program.start)) * 0.13,
   );
@@ -569,7 +571,7 @@ function ReserveNewModal({
                 <label className="opt-label rsp-row">
                   <span className="opt-label-text">品質</span>
                   <div className="seg-sm">
-                    {(['1080p', '720p'] as const).map((q) => (
+                    {(['1080i', '720p'] as const).map((q) => (
                       <button
                         key={q}
                         className={quality === q ? 'active' : ''}

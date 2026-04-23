@@ -155,12 +155,64 @@ export class TvdbV4Provider implements TvdbProvider {
   }
 }
 
-function build(): TvdbProvider {
-  const key = process.env.TVDB_API_KEY;
-  if (key && key.length > 0 && !key.startsWith('your-')) {
+// Runtime provider cache. The concrete provider depends on whether a TVDB
+// API key is configured (via admin_settings.tvdb.apiKey or, as a bootstrap
+// fallback, TVDB_API_KEY env var). Admins rotate the key from the Settings
+// page, so the provider is built lazily on first use and rebuilt whenever
+// adminSettingsService fires a tvdb.apiKey change event.
+let _cached: TvdbProvider | null = null;
+let _keyListenerBound = false;
+
+async function build(): Promise<TvdbProvider> {
+  // DB key wins over env — adminSettingsService lets operators replace the
+  // env-supplied key without redeploying. Empty strings are treated as unset.
+  let key: string | null = null;
+  try {
+    const { getTvdbApiKey } = await import('./adminSettingsService.ts');
+    key = await getTvdbApiKey();
+  } catch {
+    // adminSettingsService unavailable (e.g. pre-DB bootstrap) — env fallback.
+  }
+  if (!key) {
+    const envKey = process.env.TVDB_API_KEY;
+    if (envKey && envKey.length > 0 && !envKey.startsWith('your-')) {
+      key = envKey;
+    }
+  }
+  if (key) {
     return new TvdbV4Provider(key, process.env.TVDB_API_PIN);
   }
   return new FixtureTvdbProvider();
 }
 
-export const tvdbService: TvdbProvider = build();
+async function getProvider(): Promise<TvdbProvider> {
+  if (!_keyListenerBound) {
+    _keyListenerBound = true;
+    try {
+      const { onTvdbApiKeyChange } = await import('./adminSettingsService.ts');
+      onTvdbApiKeyChange(() => { _cached = null; });
+    } catch {
+      // Listener registration best-effort only; getProvider() still works
+      // without it (next PATCH simply won't hot-swap until process restart).
+    }
+  }
+  if (!_cached) _cached = await build();
+  return _cached;
+}
+
+// Public proxy. Each call resolves through getProvider() so the first call
+// after a key change picks up the new provider without touching importers.
+export const tvdbService: TvdbProvider = {
+  async search(query) {
+    return (await getProvider()).search(query);
+  },
+  async getById(id) {
+    return (await getProvider()).getById(id);
+  },
+  async catalog() {
+    return (await getProvider()).catalog();
+  },
+  async getSeriesEpisodes(id) {
+    return (await getProvider()).getSeriesEpisodes(id);
+  },
+};

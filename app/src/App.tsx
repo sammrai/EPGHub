@@ -330,13 +330,10 @@ export function App() {
       } else {
         const pid = apiProgramId(p);
         if (!pid) throw new Error('programId missing');
+        // Omit priority/quality/keepRaw/margin* so the server fills them in
+        // from admin_settings.rec.* (set from the Settings page).
         await api.recordings.create({
           programId: pid,
-          priority: 'medium',
-          quality: '1080i',
-          keepRaw: false,
-          marginPre: 0,
-          marginPost: 30,
           source: { kind: 'once' },
           force: false,
         });

@@ -13,6 +13,10 @@ import {
   setGpuSettings,
 } from '../services/gpuProbeService.ts';
 import {
+  getSnapshot as getAdminSettingsSnapshot,
+  patchSettings as patchAdminSettings,
+} from '../services/adminSettingsService.ts';
+import {
   ChannelSourceListSchema,
   ChannelSourceSchema,
   ChannelSourceSyncResultSchema,
@@ -26,6 +30,10 @@ import {
   GpuStatusSchema,
   GpuSettingsPatchSchema,
 } from '../schemas/gpuProbe.ts';
+import {
+  AdminSettingsSchema,
+  AdminSettingsPatchSchema,
+} from '../schemas/adminSettings.ts';
 import { ErrorSchema } from '../schemas/common.ts';
 
 export const adminRouter = new OpenAPIHono();
@@ -647,4 +655,61 @@ adminRouter.openapi(patchGpuSettings, async (c) => {
   await setGpuSettings(body);
   const status = await getGpuStatus();
   return c.json(status, 200);
+});
+
+// -----------------------------------------------------------------
+// Recording defaults + TVDB API key — stored in the same system_settings
+// table under the `rec.*` and `tvdb.apiKey` namespaces. GET returns the
+// merged snapshot (with fallbacks for unset keys and the raw TVDB key
+// replaced by a last-4 masked status). PATCH accepts any subset; sending
+// an empty-string apiKey clears the saved key.
+// -----------------------------------------------------------------
+
+const getAdminSettingsRoute = createRoute({
+  method: 'get',
+  path: '/admin/settings',
+  tags: ['admin'],
+  summary: '録画デフォルトと TVDB キー設定を取得',
+  description:
+    '録画作成時に適用されるデフォルト (priority/quality/margin/keepRaw/encodePreset) と '
+    + 'TVDB v4 APIキーの保存状況 (source + last4 のみ、キー本体は返さない) を返す。',
+  responses: {
+    200: {
+      description: '設定スナップショット',
+      content: { 'application/json': { schema: AdminSettingsSchema } },
+    },
+  },
+});
+
+const patchAdminSettingsRoute = createRoute({
+  method: 'patch',
+  path: '/admin/settings',
+  tags: ['admin'],
+  summary: '録画デフォルト / TVDB キーを部分更新',
+  description:
+    '送った key だけを更新する。tvdb.apiKey に空文字列を渡すと保存済みキーを削除し env fallback に戻す。'
+    + ' apiKey を差し替えると tvdbService が次回呼び出し時に新しいキーで再認証する。',
+  request: {
+    body: {
+      required: true,
+      content: { 'application/json': { schema: AdminSettingsPatchSchema } },
+    },
+  },
+  responses: {
+    200: {
+      description: '更新後のスナップショット',
+      content: { 'application/json': { schema: AdminSettingsSchema } },
+    },
+  },
+});
+
+adminRouter.openapi(getAdminSettingsRoute, async (c) => {
+  const snapshot = await getAdminSettingsSnapshot();
+  return c.json(snapshot, 200);
+});
+
+adminRouter.openapi(patchAdminSettingsRoute, async (c) => {
+  const body = c.req.valid('json');
+  const snapshot = await patchAdminSettings(body);
+  return c.json(snapshot, 200);
 });

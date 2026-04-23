@@ -495,22 +495,19 @@ components:
         programId:
           type: string
         priority:
-          allOf:
-            - $ref: "#/components/schemas/Priority"
-            - default: medium
+          $ref: "#/components/schemas/Priority"
         quality:
-          allOf:
-            - $ref: "#/components/schemas/Quality"
-            - default: 1080i
+          $ref: "#/components/schemas/Quality"
         keepRaw:
           type: boolean
-          default: false
         marginPre:
           type: integer
-          default: 0
+          minimum: 0
+          maximum: 600
         marginPost:
           type: integer
-          default: 30
+          minimum: 0
+          maximum: 600
         source:
           allOf:
             - $ref: "#/components/schemas/RecordingSource"
@@ -1571,6 +1568,104 @@ components:
             - type:
                 - string
                 - "null"
+    RecEncodePreset:
+      type: string
+      enum:
+        - h265-1080p
+        - h264-720p
+        - audio-only
+        - h265-1080p-nvenc
+        - h264-720p-nvenc
+        - h265-1080p-vaapi
+        - h264-720p-vaapi
+        - h265-1080p-qsv
+        - h264-720p-qsv
+    RecDefaults:
+      type: object
+      properties:
+        priority:
+          $ref: "#/components/schemas/Priority"
+        quality:
+          $ref: "#/components/schemas/Quality"
+        marginPre:
+          type: integer
+          minimum: 0
+          maximum: 600
+        marginPost:
+          type: integer
+          minimum: 0
+          maximum: 600
+        keepRaw:
+          type: boolean
+        encodePreset:
+          $ref: "#/components/schemas/RecEncodePreset"
+      required:
+        - priority
+        - quality
+        - marginPre
+        - marginPost
+        - keepRaw
+        - encodePreset
+    TvdbApiKeyStatus:
+      type: object
+      properties:
+        source:
+          type: string
+          enum:
+            - db
+            - none
+          description: "db: 保存済み, none: 未設定"
+        last4:
+          type:
+            - string
+            - "null"
+          description: 保存キーの末尾4文字 (マスク表示用)。未設定なら null
+      required:
+        - source
+        - last4
+    AdminSettings:
+      type: object
+      properties:
+        rec:
+          $ref: "#/components/schemas/RecDefaults"
+        tvdb:
+          type: object
+          properties:
+            apiKey:
+              $ref: "#/components/schemas/TvdbApiKeyStatus"
+          required:
+            - apiKey
+      required:
+        - rec
+        - tvdb
+    AdminSettingsPatch:
+      type: object
+      properties:
+        rec:
+          type: object
+          properties:
+            priority:
+              $ref: "#/components/schemas/Priority"
+            quality:
+              $ref: "#/components/schemas/Quality"
+            marginPre:
+              type: integer
+              minimum: 0
+              maximum: 600
+            marginPost:
+              type: integer
+              minimum: 0
+              maximum: 600
+            keepRaw:
+              type: boolean
+            encodePreset:
+              $ref: "#/components/schemas/RecEncodePreset"
+        tvdb:
+          type: object
+          properties:
+            apiKey:
+              type: string
+              description: TVDB v4 APIキー。空文字を送ると保存済みキーを削除する。
     SearchResult:
       type: object
       properties:
@@ -2650,6 +2745,39 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/GpuStatus"
+  /admin/settings:
+    get:
+      tags:
+        - admin
+      summary: 録画デフォルトと TVDB キー設定を取得
+      description: 録画作成時に適用されるデフォルト (priority/quality/margin/keepRaw/encodePreset) と
+        TVDB v4 APIキーの保存状況 (source + last4 のみ、キー本体は返さない) を返す。
+      responses:
+        "200":
+          description: 設定スナップショット
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminSettings"
+    patch:
+      tags:
+        - admin
+      summary: 録画デフォルト / TVDB キーを部分更新
+      description: 送った key だけを更新する。tvdb.apiKey に空文字列を渡すと保存済みキーを削除し env fallback に戻す。
+        apiKey を差し替えると tvdbService が次回呼び出し時に新しいキーで再認証する。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AdminSettingsPatch"
+      responses:
+        "200":
+          description: 更新後のスナップショット
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminSettings"
   /search:
     get:
       tags:

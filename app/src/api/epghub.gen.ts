@@ -1989,6 +1989,72 @@ export interface paths {
         };
         trace?: never;
     };
+    "/admin/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 録画デフォルトと TVDB キー設定を取得
+         * @description 録画作成時に適用されるデフォルト (priority/quality/margin/keepRaw/encodePreset) と TVDB v4 APIキーの保存状況 (source + last4 のみ、キー本体は返さない) を返す。
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 設定スナップショット */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminSettings"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * 録画デフォルト / TVDB キーを部分更新
+         * @description 送った key だけを更新する。tvdb.apiKey に空文字列を渡すと保存済みキーを削除し env fallback に戻す。 apiKey を差し替えると tvdbService が次回呼び出し時に新しいキーで再認証する。
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AdminSettingsPatch"];
+                };
+            };
+            responses: {
+                /** @description 更新後のスナップショット */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminSettings"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
     "/search": {
         parameters: {
             query?: never;
@@ -2278,14 +2344,11 @@ export interface components {
         RecordingList: components["schemas"]["Recording"][];
         CreateRecording: {
             programId: string;
-            priority?: components["schemas"]["Priority"] & unknown;
-            quality?: components["schemas"]["Quality"] & unknown;
-            /** @default false */
-            keepRaw: boolean;
-            /** @default 0 */
-            marginPre: number;
-            /** @default 30 */
-            marginPost: number;
+            priority?: components["schemas"]["Priority"];
+            quality?: components["schemas"]["Quality"];
+            keepRaw?: boolean;
+            marginPre?: number;
+            marginPost?: number;
             source?: components["schemas"]["RecordingSource"] & unknown;
             /** @default false */
             force: boolean;
@@ -2755,6 +2818,45 @@ export interface components {
         GpuSettingsPatch: {
             enabled?: boolean;
             preferred?: components["schemas"]["GpuEncoder"] & (string | null);
+        };
+        /** @enum {string} */
+        RecEncodePreset: "h265-1080p" | "h264-720p" | "audio-only" | "h265-1080p-nvenc" | "h264-720p-nvenc" | "h265-1080p-vaapi" | "h264-720p-vaapi" | "h265-1080p-qsv" | "h264-720p-qsv";
+        RecDefaults: {
+            priority: components["schemas"]["Priority"];
+            quality: components["schemas"]["Quality"];
+            marginPre: number;
+            marginPost: number;
+            keepRaw: boolean;
+            encodePreset: components["schemas"]["RecEncodePreset"];
+        };
+        TvdbApiKeyStatus: {
+            /**
+             * @description db: 保存済み, none: 未設定
+             * @enum {string}
+             */
+            source: "db" | "none";
+            /** @description 保存キーの末尾4文字 (マスク表示用)。未設定なら null */
+            last4: string | null;
+        };
+        AdminSettings: {
+            rec: components["schemas"]["RecDefaults"];
+            tvdb: {
+                apiKey: components["schemas"]["TvdbApiKeyStatus"];
+            };
+        };
+        AdminSettingsPatch: {
+            rec?: {
+                priority?: components["schemas"]["Priority"];
+                quality?: components["schemas"]["Quality"];
+                marginPre?: number;
+                marginPost?: number;
+                keepRaw?: boolean;
+                encodePreset?: components["schemas"]["RecEncodePreset"];
+            };
+            tvdb?: {
+                /** @description TVDB v4 APIキー。空文字を送ると保存済みキーを削除する。 */
+                apiKey?: string;
+            };
         };
         SearchResult: {
             /** @description 検索クエリ (正規化済み) */

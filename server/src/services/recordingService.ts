@@ -11,6 +11,7 @@ import { scheduleService } from './scheduleService.ts';
 import { channelService } from './channelService.ts';
 import { tunerService } from './tunerService.ts';
 import { allocate as allocateTuners } from './tunerAllocator.ts';
+import { getRecDefaults } from './adminSettingsService.ts';
 import { boss, QUEUE } from '../jobs/queue.ts';
 import { db } from '../db/client.ts';
 import { recordings, dropLogs } from '../db/schema.ts';
@@ -241,6 +242,16 @@ class DrizzleRecordingService implements RecordingService {
       throw new RecordingConflictError('program-missing', { programId: input.programId });
     }
 
+    // Merge with admin-configured defaults for every attribute the caller
+    // omitted. The zod schema used to carry `.default(...)` for these, but
+    // admins now override them from the Settings page via admin_settings.
+    const defaults = await getRecDefaults();
+    const priority   = input.priority   ?? defaults.priority;
+    const quality    = input.quality    ?? defaults.quality;
+    const keepRaw    = input.keepRaw    ?? defaults.keepRaw;
+    const marginPre  = input.marginPre  ?? defaults.marginPre;
+    const marginPost = input.marginPost ?? defaults.marginPost;
+
     // Full list — we need both scheduled and non-terminal rows to detect
     // duplicates and feed the allocator.
     const existing = await this.list();
@@ -277,11 +288,11 @@ class DrizzleRecordingService implements RecordingService {
       startAt: program.startAt,
       endAt: program.endAt,
       title: program.title,
-      priority: input.priority,
-      quality: input.quality,
-      keepRaw: input.keepRaw,
-      marginPre: input.marginPre,
-      marginPost: input.marginPost,
+      priority,
+      quality,
+      keepRaw,
+      marginPre,
+      marginPost,
       source,
       state: 'scheduled',
     };
@@ -329,11 +340,11 @@ class DrizzleRecordingService implements RecordingService {
         startAt: new Date(program.startAt),
         endAt: new Date(program.endAt),
         title: program.title,
-        priority: input.priority,
-        quality: input.quality,
-        keepRaw: input.keepRaw,
-        marginPre: input.marginPre,
-        marginPost: input.marginPost,
+        priority,
+        quality,
+        keepRaw,
+        marginPre,
+        marginPost,
         sourceKind: source.kind,
         sourceRuleId,
         sourceTvdbId,

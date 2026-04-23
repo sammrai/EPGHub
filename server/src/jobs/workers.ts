@@ -45,6 +45,7 @@ async function handleEncode(jobs: PgBoss.Job<EncodeJob>[]): Promise<void> {
   const { eq } = await import('drizzle-orm');
   const { runEncode } = await import('../recording/encoder.ts');
   const { defaultPreset, isPresetName, PRESETS } = await import('../recording/encodePresets.ts');
+  const { getRecDefaults } = await import('../services/adminSettingsService.ts');
   const {
     setEncodeStarted,
     setEncodeProgress,
@@ -52,6 +53,17 @@ async function handleEncode(jobs: PgBoss.Job<EncodeJob>[]): Promise<void> {
     setEncodeFailed,
   } = await import('../services/recordingService.ts');
   const { boss: pgBoss } = await import('./queue.ts');
+
+  // Fall-back preset precedence: explicit job.data.preset → admin setting
+  // (rec.encodePreset) → module-level fallback. One DB read per batch is
+  // cheap and avoids baking the preset into every job record.
+  let adminDefaultPreset: string | null = null;
+  try {
+    const d = await getRecDefaults();
+    adminDefaultPreset = d.encodePreset;
+  } catch {
+    // adminSettings unavailable (DB not ready) — keep null, fall back below.
+  }
 
   for (const job of jobs) {
     const { recordingId } = job.data;
@@ -62,8 +74,12 @@ async function handleEncode(jobs: PgBoss.Job<EncodeJob>[]): Promise<void> {
     }
 
     const requested = job.data.preset;
+    const adminPreset =
+      adminDefaultPreset && isPresetName(adminDefaultPreset) ? adminDefaultPreset : null;
     const presetName =
-      requested && isPresetName(requested) ? requested : defaultPreset();
+      requested && isPresetName(requested)
+        ? requested
+        : (adminPreset ?? defaultPreset());
     if (requested && !isPresetName(requested)) {
       console.warn(`[encode] ${recordingId}: unknown preset "${requested}", falling back to ${presetName}`);
     }

@@ -24,8 +24,14 @@ import type {
 } from '../data/types';
 import { api } from '../api/epghub';
 import type {
+  ApiAdminSettings,
+  ApiAdminSettingsPatch,
+  ApiPriority,
+  ApiQuality,
   ApiRankingItem,
   ApiRankingGenre,
+  ApiRecDefaults,
+  ApiRecEncodePreset,
   ApiRecording,
   ApiUpdateRecording,
   ApiTvdbEntry,
@@ -2646,6 +2652,7 @@ const GpuEncodeSection = ({ pushToast }: GpuEncodeSectionProps) => {
 type SettingsTabKey =
   | 'channels'
   | 'recording'
+  | 'tvdb'
   | 'storage'
   | 'maintenance';
 
@@ -2659,6 +2666,7 @@ interface SettingsTabDef {
 const SETTINGS_TABS: SettingsTabDef[] = [
   { key: 'channels',    icon: 'tv',        label: 'デバイス',         group: 'input' },
   { key: 'recording',   icon: 'rec',       label: '録画・エンコード', group: 'record' },
+  { key: 'tvdb',        icon: 'link',      label: 'シリーズ連携',     group: 'record' },
   { key: 'storage',     icon: 'disk',      label: 'ストレージ',       group: 'record' },
   { key: 'maintenance', icon: 'lightning', label: 'メンテナンス',     group: 'system' },
 ];
@@ -2743,7 +2751,14 @@ export const SettingsPage = ({ pushToast }: SettingsPageProps = {}) => {
         <div key={active} className="settings-pane">
           {active === 'channels' && <ChannelSourcesSection pushToast={pushToast} />}
 
-          {active === 'recording' && <GpuEncodeSection pushToast={pushToast} />}
+          {active === 'recording' && (
+            <>
+              <RecordingDefaultsSection pushToast={pushToast} />
+              <GpuEncodeSection pushToast={pushToast} />
+            </>
+          )}
+
+          {active === 'tvdb' && <TvdbLinkSection pushToast={pushToast} />}
 
           {active === 'storage' && <StorageSection pushToast={pushToast} />}
 
@@ -3034,6 +3049,364 @@ const StorageSection = ({ pushToast }: StorageSectionProps) => {
           <span>基準日 {status.today}</span>
         </div>
       )}
+    </SettingsSection>
+  );
+};
+
+// -----------------------------------------------------------------
+// Recording defaults — DB-backed (admin_settings under the `rec.*`
+// namespace) via adminSettingsService. Every new reservation that omits
+// a field inherits from here. Selects save on change; margins save on
+// blur so arrow-key tweaks don't thrash the backend.
+// -----------------------------------------------------------------
+
+interface RecordingDefaultsSectionProps {
+  pushToast?: (msg: string, kind?: 'ok' | 'err') => void;
+}
+
+const QUALITY_LABEL: Record<ApiQuality, string> = {
+  '1080i': '1080i (放送そのまま)',
+  '720p':  '720p (軽量)',
+};
+
+const PRIORITY_LABEL: Record<ApiPriority, string> = {
+  low:    '低 (録画優先)',
+  medium: '中 (標準)',
+  high:   '高 (即エンコード)',
+};
+
+const PRESET_LABEL: Record<ApiRecEncodePreset, string> = {
+  'h265-1080p':       'H.265 1080p',
+  'h264-720p':        'H.264 720p',
+  'audio-only':       '音声のみ',
+  'h265-1080p-nvenc': 'H.265 1080p (NVENC)',
+  'h264-720p-nvenc':  'H.264 720p (NVENC)',
+  'h265-1080p-vaapi': 'H.265 1080p (VAAPI)',
+  'h264-720p-vaapi':  'H.264 720p (VAAPI)',
+  'h265-1080p-qsv':   'H.265 1080p (QSV)',
+  'h264-720p-qsv':    'H.264 720p (QSV)',
+};
+
+const RecordingDefaultsSection = ({ pushToast }: RecordingDefaultsSectionProps) => {
+  const [defaults, setDefaults] = useState<ApiRecDefaults | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.admin.settings.get().then((s) => {
+      if (!cancelled) {
+        setDefaults(s.rec);
+        setLoading(false);
+      }
+    }).catch((e) => {
+      if (!cancelled) {
+        setLoading(false);
+        pushToast?.(`取得失敗: ${(e as Error).message}`, 'err');
+      }
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const save = async (patch: Partial<ApiRecDefaults>) => {
+    if (!defaults) return;
+    const prev = defaults;
+    // Optimistic — revert on failure.
+    setDefaults({ ...prev, ...patch });
+    setSaving(true);
+    try {
+      const next = await api.admin.settings.patch({ rec: patch });
+      setDefaults(next.rec);
+    } catch (e) {
+      setDefaults(prev);
+      pushToast?.(`保存失敗: ${(e as Error).message}`, 'err');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading || !defaults) {
+    return (
+      <SettingsSection title="録画・エンコード (デフォルト)" desc="新規予約に適用する初期値。">
+        <div className="settings-empty-row">{loading ? '読み込み中…' : '取得に失敗しました'}</div>
+      </SettingsSection>
+    );
+  }
+
+  return (
+    <SettingsSection
+      title="録画・エンコード (デフォルト)"
+      desc="新規予約に適用する初期値。"
+    >
+      <div style={SETTING_ROW_STYLE}>
+        <div style={SETTING_LABEL_STYLE}>デフォルト品質</div>
+        <div style={{ fontSize: 12 }}>
+          <select
+            value={defaults.quality}
+            onChange={(e) => void save({ quality: e.target.value as ApiQuality })}
+            disabled={saving}
+            style={SETTING_SELECT_STYLE}
+          >
+            {(Object.keys(QUALITY_LABEL) as ApiQuality[]).map((k) => (
+              <option key={k} value={k}>{QUALITY_LABEL[k]}</option>
+            ))}
+          </select>
+        </div>
+        <span />
+      </div>
+
+      <div style={SETTING_ROW_STYLE}>
+        <div style={SETTING_LABEL_STYLE}>エンコードプリセット</div>
+        <div style={{ fontSize: 12 }}>
+          <select
+            value={defaults.encodePreset}
+            onChange={(e) => void save({ encodePreset: e.target.value as ApiRecEncodePreset })}
+            disabled={saving}
+            style={SETTING_SELECT_STYLE}
+          >
+            {(Object.keys(PRESET_LABEL) as ApiRecEncodePreset[]).map((k) => (
+              <option key={k} value={k}>{PRESET_LABEL[k]}</option>
+            ))}
+          </select>
+        </div>
+        <span />
+      </div>
+
+      <div style={SETTING_ROW_STYLE}>
+        <div style={SETTING_LABEL_STYLE}>エンコード優先度</div>
+        <div style={{ fontSize: 12 }}>
+          <select
+            value={defaults.priority}
+            onChange={(e) => void save({ priority: e.target.value as ApiPriority })}
+            disabled={saving}
+            style={SETTING_SELECT_STYLE}
+          >
+            {(Object.keys(PRIORITY_LABEL) as ApiPriority[]).map((k) => (
+              <option key={k} value={k}>{PRIORITY_LABEL[k]}</option>
+            ))}
+          </select>
+        </div>
+        <span />
+      </div>
+
+      <div style={SETTING_ROW_STYLE}>
+        <div style={SETTING_LABEL_STYLE}>前/後マージン</div>
+        <div style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+          <MarginInput
+            value={defaults.marginPre}
+            onCommit={(v) => void save({ marginPre: v })}
+            disabled={saving}
+            ariaLabel="前マージン (秒)"
+          />
+          <span style={{ color: 'var(--fg-muted)' }}>秒 /</span>
+          <MarginInput
+            value={defaults.marginPost}
+            onCommit={(v) => void save({ marginPost: v })}
+            disabled={saving}
+            ariaLabel="後マージン (秒)"
+          />
+          <span style={{ color: 'var(--fg-muted)' }}>秒</span>
+        </div>
+        <span />
+      </div>
+
+      <div style={SETTING_ROW_LAST_STYLE}>
+        <div style={SETTING_LABEL_STYLE}>TS (raw) 保持</div>
+        <div style={{ fontSize: 12 }}>
+          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <input
+              type="checkbox"
+              checked={defaults.keepRaw}
+              onChange={(e) => void save({ keepRaw: e.target.checked })}
+              disabled={saving}
+            />
+            <span style={{ fontSize: 11 }}>
+              エンコード後も .ts を残す
+            </span>
+          </label>
+        </div>
+        <span />
+      </div>
+    </SettingsSection>
+  );
+};
+
+// Committed-on-blur number input — raw keystrokes stay local so intermediate
+// values like "5" (before typing "0") don't fire PATCH. Commits on blur or
+// Enter, reverts on Escape.
+interface MarginInputProps {
+  value: number;
+  onCommit: (v: number) => void;
+  disabled?: boolean;
+  ariaLabel?: string;
+}
+const MarginInput = ({ value, onCommit, disabled, ariaLabel }: MarginInputProps) => {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => { setDraft(String(value)); }, [value]);
+
+  const commit = () => {
+    const n = parseInt(draft, 10);
+    const clamped = Number.isFinite(n) ? Math.max(0, Math.min(600, n)) : value;
+    setDraft(String(clamped));
+    if (clamped !== value) onCommit(clamped);
+  };
+
+  return (
+    <input
+      type="number"
+      min={0}
+      max={600}
+      step={10}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') { e.currentTarget.blur(); }
+        else if (e.key === 'Escape') { setDraft(String(value)); e.currentTarget.blur(); }
+      }}
+      disabled={disabled}
+      aria-label={ariaLabel}
+      style={{ width: 72, fontSize: 12, padding: '3px 6px' }}
+    />
+  );
+};
+
+// Row / label styles shared by RecordingDefaultsSection + TvdbLinkSection.
+const SETTING_ROW_STYLE: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: '180px 1fr auto',
+  gap: 14,
+  alignItems: 'center',
+  padding: '11px 14px',
+  borderBottom: '1px solid var(--border)',
+};
+const SETTING_ROW_LAST_STYLE: CSSProperties = { ...SETTING_ROW_STYLE, borderBottom: 'none' };
+const SETTING_LABEL_STYLE: CSSProperties = { fontSize: 12, color: 'var(--fg-muted)' };
+const SETTING_SELECT_STYLE: CSSProperties = { fontSize: 12 };
+
+// -----------------------------------------------------------------
+// TVDB API key entry. The server only exposes the last 4 chars of the
+// stored key, so the display shows '•••3f4a' (never the raw key). The
+// "設定" button toggles an inline input; saving PATCHes the whole key,
+// saving an empty string clears it.
+// -----------------------------------------------------------------
+
+interface TvdbLinkSectionProps {
+  pushToast?: (msg: string, kind?: 'ok' | 'err') => void;
+}
+
+function maskedKey(last4: string | null): string {
+  if (!last4) return '';
+  return '•'.repeat(Math.max(8, 12 - last4.length)) + last4;
+}
+
+const TvdbLinkSection = ({ pushToast }: TvdbLinkSectionProps) => {
+  const [snapshot, setSnapshot] = useState<ApiAdminSettings | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    api.admin.settings.get().then((s) => {
+      if (!cancelled) { setSnapshot(s); setLoading(false); }
+    }).catch((e) => {
+      if (!cancelled) { setLoading(false); pushToast?.(`取得失敗: ${(e as Error).message}`, 'err'); }
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const save = async (body: ApiAdminSettingsPatch) => {
+    setSaving(true);
+    try {
+      const next = await api.admin.settings.patch(body);
+      setSnapshot(next);
+      setEditing(false);
+      setDraft('');
+    } catch (e) {
+      pushToast?.(`保存失敗: ${(e as Error).message}`, 'err');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading || !snapshot) {
+    return (
+      <SettingsSection title="シリーズ連携 (TVDB)" desc="シリーズを TVDB と照合してシーズン・話数を整理します。">
+        <div className="settings-empty-row">{loading ? '読み込み中…' : '取得に失敗しました'}</div>
+      </SettingsSection>
+    );
+  }
+
+  const { apiKey } = snapshot.tvdb;
+
+  return (
+    <SettingsSection
+      title="シリーズ連携 (TVDB)"
+      desc="シリーズを TVDB と照合してシーズン・話数を整理します。"
+    >
+      <div style={SETTING_ROW_LAST_STYLE}>
+        <div style={SETTING_LABEL_STYLE}>TVDB APIキー</div>
+        <div style={{ fontSize: 12, fontFamily: 'var(--font-mono)' }}>
+          {editing ? (
+            <input
+              type="text"
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void save({ tvdb: { apiKey: draft.trim() } });
+                else if (e.key === 'Escape') { setEditing(false); setDraft(''); }
+              }}
+              placeholder="TVDB v4 APIキーを入力"
+              style={{
+                width: '100%', maxWidth: 320,
+                fontFamily: 'var(--font-mono)', fontSize: 12, padding: '4px 6px',
+              }}
+              disabled={saving}
+            />
+          ) : apiKey.source === 'db' ? (
+            maskedKey(apiKey.last4)
+          ) : (
+            <span style={{ color: 'var(--fg-subtle)', fontFamily: 'inherit' }}>(未設定)</span>
+          )}
+        </div>
+        {editing ? (
+          <div style={{ display: 'inline-flex', gap: 6 }}>
+            <button
+              className="btn btn-sm"
+              onClick={() => void save({ tvdb: { apiKey: draft.trim() } })}
+              disabled={saving}
+            >
+              {saving ? '保存中…' : '保存'}
+            </button>
+            <button
+              className="btn btn-sm ghost"
+              onClick={() => { setEditing(false); setDraft(''); }}
+              disabled={saving}
+            >
+              取消
+            </button>
+            {apiKey.source === 'db' && (
+              <button
+                className="btn btn-sm ghost"
+                onClick={() => void save({ tvdb: { apiKey: '' } })}
+                disabled={saving}
+                title="保存済みキーを削除"
+              >
+                削除
+              </button>
+            )}
+          </div>
+        ) : (
+          <button className="btn btn-sm ghost" onClick={() => { setDraft(''); setEditing(true); }}>
+            {apiKey.source === 'db' ? '変更' : '設定'}
+          </button>
+        )}
+      </div>
     </SettingsSection>
   );
 };
