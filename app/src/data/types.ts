@@ -7,6 +7,7 @@ export interface Channel {
   number: string;
   type: BcType;
   color: string;
+  enabled: boolean;
 }
 
 export interface Genre {

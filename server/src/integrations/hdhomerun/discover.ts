@@ -4,6 +4,24 @@
 // (model, tuner count, unique device id) without vendor-specific code.
 // Docs: https://info.hdhomerun.com/info/http_api
 
+// Resolve the HDHomeRun-style lineup URL for a registered channel_sources
+// row. For kind='iptv' the row's URL already *is* the lineup URL (that's how
+// the user registered it). For kind='mirakurun' the user registered the base
+// URL (e.g. http://host:40772), but Mirakurun's HDHomeRun emulation lives at
+// /api/iptv under that, so we append it transparently. Centralizing this
+// means sync + /tuners/live + any future probe share one rule.
+export function hdhomerunLineupUrl(kind: string, url: string): string {
+  if (kind !== 'mirakurun') return url;
+  try {
+    const u = new URL(url);
+    if (/\/api\/iptv\/?$/.test(u.pathname)) return url;
+    u.pathname = u.pathname.replace(/\/+$/, '') + '/api/iptv';
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
 export interface HdhomerunDiscover {
   friendlyName: string | null;
   manufacturer: string | null;

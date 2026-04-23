@@ -3,8 +3,10 @@ import { sql } from 'drizzle-orm';
 
 // Channels — populated from tuner scan + user config. `streamUrl` is the
 // recorder's direct source (Mirakurun service stream, raw IPTV TS URL, …).
-// `source` classifies how the row was registered; null streamUrl rows are
-// legacy Mirakurun entries that the recorder still derives from the channel id.
+// `source` classifies how the row was registered (kind label; kept for the
+// pre-FK sync pipeline). `sourceId` points at the channel_sources row that
+// owns this channel — on delete, channels + their programs cascade away.
+// Nullable only because legacy rows predated the FK; fresh upserts always set it.
 export const channels = pgTable('channels', {
   id:     text('id').primaryKey(),
   name:   text('name').notNull(),
@@ -16,6 +18,7 @@ export const channels = pgTable('channels', {
   sortOrder: integer('sort_order').notNull().default(0),
   streamUrl: text('stream_url'),
   source:    varchar('source', { length: 16 }).notNull().default('mirakurun'),
+  sourceId:  integer('source_id').references(() => channelSources.id, { onDelete: 'cascade' }),
   m3uGroup:  text('m3u_group'),
 });
 

@@ -5,6 +5,8 @@
 // when a button is clicked. Pages is static so mutations are ephemeral.
 import {
   CHANNELS,
+  CHANNEL_SOURCES,
+  DEVICE_LIVE_STATUS,
   RULES,
   SYSTEM,
   TUNERS,
@@ -88,6 +90,8 @@ export function handleMockRequest(req: Request): Response | null {
       return method === 'GET' ? ok(TUNERS) : null;
     case '/api/tuners/allocation':
       return method === 'GET' ? ok(TUNER_ALLOCATION) : null;
+    case '/api/tuners/live':
+      return method === 'GET' ? ok(DEVICE_LIVE_STATUS) : null;
     case '/api/now-recording':
       return method === 'GET' ? ok(nowRecording(today)) : null;
     case '/api/system':
@@ -105,16 +109,41 @@ export function handleMockRequest(req: Request): Response | null {
     case '/api/admin/expand-rules':
       return method === 'POST' ? ok({ matched: 0, created: 0, duplicate: 0, tunerFull: 0 }) : null;
     case '/api/admin/channel-sources':
-      return method === 'GET' ? ok([]) : method === 'POST' ? ok({ id: 1 }) : null;
+      return method === 'GET' ? ok(CHANNEL_SOURCES) : method === 'POST' ? ok({ id: 1 }) : null;
     case '/api/admin/gpu/status':
       return method === 'GET' ? ok({ enabled: false, preferred: null, available: [] }) : null;
     case '/api/admin/gpu/probe':
       return method === 'POST' ? ok({ available: [], chosen: null }) : null;
+    case '/api/tvdb': {
+      if (method !== 'GET') return null;
+      // Library + Discover need the full catalog keyed by id so client-side
+      // grouping (r.tvdbId → series/movie) resolves without extra fetches.
+      const map: Record<string, unknown> = {};
+      for (const e of TVDB_CATALOG) map[String((e as { id: number }).id)] = e;
+      return ok(map);
+    }
   }
 
   if (url.pathname.startsWith('/api/recordings')) {
     const hit = handleRecordings(method, url);
     if (hit) return hit;
+  }
+
+  // Per-device sub-routes (sync / delete) — keep the device list stable
+  // since the mock has no real disk persistence.
+  if (url.pathname.startsWith('/api/admin/channel-sources/')) {
+    if (url.pathname.endsWith('/sync') && method === 'POST') {
+      return ok({ id: 1, channelsAdded: 0, channelsUpdated: 0, channelsRemoved: 0 });
+    }
+    if (method === 'DELETE') return noContent();
+    if (method === 'PATCH') return ok((CHANNEL_SOURCES as unknown[])[0] ?? {});
+  }
+
+  // Per-channel PATCH (enable/disable toggles inside DeviceDetailModal).
+  if (url.pathname.startsWith('/api/channels/') && method === 'PATCH') {
+    const id = decodeURIComponent(url.pathname.replace('/api/channels/', ''));
+    const ch = (CHANNELS as Array<{ id: string }>).find((c) => c.id === id);
+    return ok(ch ?? {});
   }
 
   if (url.pathname.startsWith('/api/tvdb/search')) {

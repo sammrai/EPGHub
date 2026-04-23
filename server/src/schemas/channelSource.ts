@@ -82,7 +82,7 @@ export const ProbeChannelSourceResultSchema = z
     model: z.string().nullable(),
     tunerCount: z.number().int().nullable(),
     suggestedXmltvUrl: z.string().nullable(),
-    /** Free-form label we guessed for the UI: "Mirakurun" | "EPGStation" | null. */
+    /** Free-form label we guessed for the UI (e.g. "Mirakurun"), or null. */
     inferredKind: z.string().nullable(),
   })
   .openapi('ProbeChannelSourceResult');

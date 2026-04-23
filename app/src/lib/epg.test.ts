@@ -105,8 +105,8 @@ describe('durLabel', () => {
 
 describe('getChannel', () => {
   const channels: Channel[] = [
-    { id: 'nhk-g', name: 'NHK総合', short: 'NHK G', number: '011', type: 'GR', color: '#f00' },
-    { id: 'ex', name: 'テレビ朝日', short: 'EX', number: '051', type: 'GR', color: '#0f0' },
+    { id: 'nhk-g', name: 'NHK総合', short: 'NHK G', number: '011', type: 'GR', color: '#f00', enabled: true },
+    { id: 'ex', name: 'テレビ朝日', short: 'EX', number: '051', type: 'GR', color: '#0f0', enabled: true },
   ];
 
   it('一致するIDを返す', () => {

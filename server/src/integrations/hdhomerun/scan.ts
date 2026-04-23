@@ -1,8 +1,8 @@
-// LAN scanner — probes the local network for IPTV devices we know how to
-// speak to: Mirakurun (REST + SSE, kind='mirakurun') and EPGStation (m3u +
-// xmltv, kind='iptv'). We don't do generic HDHomeRun probing because
-// different vendors return lineup data in different shapes (JSON vs m3u),
-// and the app's downstream pipeline only handles the two shapes above.
+// LAN scanner — probes the local network for two shapes of IPTV endpoint:
+//   Mirakurun (kind='mirakurun', REST + SSE on :40772)
+//   generic m3u (kind='iptv', /api/iptv/channel.m3u8 on :8888 — the
+//     common IPTV-proxy convention; EPGStation ships this by default
+//     but we don't special-case the provider, only the URL shape)
 //
 // Scope stays modest: server's own LAN interfaces (private ranges only) +
 // optional extra /24 prefixes supplied by the caller (from existing device
@@ -88,32 +88,33 @@ async function probeMirakurun(host: string, port: number, signal: AbortSignal): 
   };
 }
 
-// -----------------------------------------------------------------
-// EPGStation: /api/version returns {version}. The IPTV proxy serves
-// m3u at /api/iptv/channel.m3u8?isHalfWidth=true&mode=1 and XMLTV at
-// /api/iptv/epg.xml?isHalfWidth=true&days=3 — these are the URLs the
-// sync pipeline stores + fetches.
-// -----------------------------------------------------------------
-async function probeEpgstation(host: string, port: number, signal: AbortSignal): Promise<RawHit | null> {
-  let version: string | null = null;
-  try {
-    const res = await fetch(`http://${host}:${port}/api/version`, { signal });
-    if (!res.ok) return null;
-    const body: unknown = await res.json().catch(() => null);
-    if (!body || typeof body !== 'object') return null;
-    const v = (body as Record<string, unknown>).version;
-    // Mirakurun also exposes /api/version but with {current}. Guard against
-    // mis-detection on ports that could plausibly run either.
-    const cur = (body as Record<string, unknown>).current;
-    if (typeof v !== 'string' || typeof cur === 'string') return null;
-    version = v;
-  } catch {
-    return null;
-  }
+// Known (port, path) combos that commonly serve an IPTV m3u playlist.
+// Every entry is treated identically by the scanner — the probe just GETs
+// the URL and accepts it if the body starts with #EXTM3U. No per-entry
+// branching or provider-specific labelling; add a row to extend support.
+// `xmltvPath` (optional) is a sibling-file convention that happens to hold
+// the XMLTV guide for the same port; probe advertises it when present so
+// the UI can one-click-add, but it's never required.
+interface IptvCandidate {
+  port: number;
+  path: string;
+  xmltvPath: string | null;
+}
 
-  // Confirm the m3u endpoint actually returns a playlist — protects against
-  // installations where IPTV proxy is disabled at build time.
-  const m3uUrl = `http://${host}:${port}/api/iptv/channel.m3u8?isHalfWidth=true&mode=1`;
+const IPTV_CANDIDATES: IptvCandidate[] = [
+  {
+    port: 8888,
+    path: '/api/iptv/channel.m3u8?isHalfWidth=true&mode=1',
+    xmltvPath: '/api/iptv/epg.xml?isHalfWidth=true&days=3',
+  },
+];
+
+async function probeIptvM3u(
+  host: string,
+  cand: IptvCandidate,
+  signal: AbortSignal
+): Promise<RawHit | null> {
+  const m3uUrl = `http://${host}:${cand.port}${cand.path}`;
   try {
     const res = await fetch(m3uUrl, { signal });
     if (!res.ok) return null;
@@ -122,20 +123,23 @@ async function probeEpgstation(host: string, port: number, signal: AbortSignal):
   } catch {
     return null;
   }
-
   return {
     kind: 'iptv',
     url: m3uUrl,
-    xmltvUrl: `http://${host}:${port}/api/iptv/epg.xml?isHalfWidth=true&days=3`,
-    friendlyName: `EPGStation ${version}`,
-    model: 'EPGStation',
+    xmltvUrl: cand.xmltvPath ? `http://${host}:${cand.port}${cand.xmltvPath}` : null,
+    friendlyName: null,
+    model: null,
     tunerCount: null,
   };
 }
 
 const CANDIDATES: ProbeSpec[] = [
-  { port: 40772, label: 'Mirakurun',  probe: probeMirakurun  },
-  { port: 8888,  label: 'EPGStation', probe: probeEpgstation },
+  { port: 40772, label: 'Mirakurun', probe: probeMirakurun },
+  ...IPTV_CANDIDATES.map((c) => ({
+    port: c.port,
+    label: 'IPTV',
+    probe: (host: string, _port: number, signal: AbortSignal) => probeIptvM3u(host, c, signal),
+  })),
 ];
 
 function localLanPrefixes(): string[] {

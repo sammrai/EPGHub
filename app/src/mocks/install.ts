@@ -2,6 +2,15 @@
 // in-bundle mock (see handler.ts). Only imported from main.tsx when the
 // build was produced with VITE_USE_FIXTURES=1, i.e. the GitHub Pages deploy.
 import { handleMockRequest } from './handler';
+import { defaultToday, demoProgramIds } from './data';
+
+// Test hook — exposes demo-case programIds so Playwright screenshot runs
+// can iterate over every variant of the reserve modal without hard-coded
+// titles. Harmless in prod (Pages deploy) since it's just a data peek.
+(window as unknown as { __epghubMock?: unknown }).__epghubMock = {
+  defaultToday,
+  demoProgramIds,
+};
 
 const realFetch = window.fetch.bind(window);
 

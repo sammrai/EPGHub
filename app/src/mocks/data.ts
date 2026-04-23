@@ -27,18 +27,18 @@ const GENRES: Record<string, { key: string; label: string; dot: string }> = {
 };
 
 export const CHANNELS = [
-  { id: 'nhk-g',  name: 'NHK総合',    short: 'NHK G', number: '011', type: 'GR', color: 'oklch(0.55 0.12 28)' },
-  { id: 'nhk-e',  name: 'NHK Eテレ',  short: 'Eテレ', number: '021', type: 'GR', color: 'oklch(0.58 0.10 140)' },
-  { id: 'ntv',    name: '日テレ',     short: '日テレ', number: '041', type: 'GR', color: 'oklch(0.58 0.12 30)' },
-  { id: 'ex',     name: 'テレビ朝日', short: 'EX',    number: '051', type: 'GR', color: 'oklch(0.58 0.12 250)' },
-  { id: 'tbs',    name: 'TBS',       short: 'TBS',   number: '061', type: 'GR', color: 'oklch(0.55 0.10 260)' },
-  { id: 'tx',     name: 'テレビ東京', short: 'TX',    number: '071', type: 'GR', color: 'oklch(0.60 0.12 150)' },
-  { id: 'cx',     name: 'フジテレビ', short: 'CX',    number: '081', type: 'GR', color: 'oklch(0.58 0.10 280)' },
-  { id: 'mx',     name: 'TOKYO MX',  short: 'MX',    number: '091', type: 'GR', color: 'oklch(0.60 0.10 200)' },
-  { id: 'bs1',    name: 'NHK BS',    short: 'BS',    number: '101', type: 'BS', color: 'oklch(0.55 0.08 220)' },
-  { id: 'bsp',    name: 'NHK BSP4K', short: 'BSP',   number: '103', type: 'BS', color: 'oklch(0.55 0.08 300)' },
-  { id: 'bs-ntv', name: 'BS日テレ',  short: 'BS日テレ', number: '141', type: 'BS', color: 'oklch(0.55 0.08 30)' },
-  { id: 'bs-tbs', name: 'BS-TBS',   short: 'BS-TBS', number: '161', type: 'BS', color: 'oklch(0.55 0.08 260)' },
+  { id: 'nhk-g',  name: 'NHK総合',    short: 'NHK G', number: '011', type: 'GR', color: 'oklch(0.55 0.12 28)',  enabled: true },
+  { id: 'nhk-e',  name: 'NHK Eテレ',  short: 'Eテレ', number: '021', type: 'GR', color: 'oklch(0.58 0.10 140)', enabled: true },
+  { id: 'ntv',    name: '日テレ',     short: '日テレ', number: '041', type: 'GR', color: 'oklch(0.58 0.12 30)',  enabled: true },
+  { id: 'ex',     name: 'テレビ朝日', short: 'EX',    number: '051', type: 'GR', color: 'oklch(0.58 0.12 250)', enabled: true },
+  { id: 'tbs',    name: 'TBS',       short: 'TBS',   number: '061', type: 'GR', color: 'oklch(0.55 0.10 260)', enabled: true },
+  { id: 'tx',     name: 'テレビ東京', short: 'TX',    number: '071', type: 'GR', color: 'oklch(0.60 0.12 150)', enabled: true },
+  { id: 'cx',     name: 'フジテレビ', short: 'CX',    number: '081', type: 'GR', color: 'oklch(0.58 0.10 280)', enabled: true },
+  { id: 'mx',     name: 'TOKYO MX',  short: 'MX',    number: '091', type: 'GR', color: 'oklch(0.60 0.10 200)', enabled: true },
+  { id: 'bs1',    name: 'NHK BS',    short: 'BS',    number: '101', type: 'BS', color: 'oklch(0.55 0.08 220)', enabled: true },
+  { id: 'bsp',    name: 'NHK BSP4K', short: 'BSP',   number: '103', type: 'BS', color: 'oklch(0.55 0.08 300)', enabled: true },
+  { id: 'bs-ntv', name: 'BS日テレ',  short: 'BS日テレ', number: '141', type: 'BS', color: 'oklch(0.55 0.08 30)',  enabled: true },
+  { id: 'bs-tbs', name: 'BS-TBS',   short: 'BS-TBS', number: '161', type: 'BS', color: 'oklch(0.55 0.08 260)', enabled: true },
 ] as unknown as ApiChannel[];
 
 // Broadcast-day anchor (JST 05:00 of the given date).
@@ -87,21 +87,22 @@ const DAY_MIN = 24 * 60;
 const SCHEDULE: Record<string, Slot[]> = {
   'nhk-g': [
     { dur: 25, title: '映像散歩 里山の春',        genre: 'doc'  },
-    { dur: 30, title: 'NHK ニュースおはよう日本 早朝', genre: 'news', series: 'ohayou-nippon', ep: '#9399', tvdbId: 269764 },
-    { dur: 90, title: 'NHK ニュース おはよう日本',    genre: 'news', series: 'ohayou-nippon', ep: '#9400', tvdbId: 269764 },
-    { dur: 15, title: '連続テレビ小説 みらい色',     genre: 'drama', series: 'asadora-miraiiro', ep: '#58', tvdbId: 270774 },
+    { dur: 30, title: 'NHK ニュースおはよう日本 早朝', genre: 'news' },
+    { dur: 90, title: 'NHK ニュース おはよう日本',    genre: 'news' },
+    { dur: 15, title: '美の壺',                      genre: 'edu',  series: 'bi-no-tsubo', ep: '#640', tvdbId: 270774 },
     { dur: 30, title: 'あさイチ オープニング',       genre: 'var',  series: 'asaichi', ep: '#3399', tvdbId: 269764 },
     { dur: 60, title: 'あさイチ',                  genre: 'var',  series: 'asaichi', ep: '#3400', tvdbId: 269764 },
     { dur: 30, title: 'ごごナマ',                  genre: 'var'  },
     { dur: 180, title: '国会中継',                 genre: 'other', desc: '予算委員会 午後の部。' },
-    { dur: 30, title: 'NHK ニュース7',              genre: 'news', series: 'nhk-news-7', ep: '#12000', tvdbId: 253195 },
+    { dur: 30, title: 'NHK ニュース7',              genre: 'news' },
     { dur: 30, title: 'クローズアップ現代',          genre: 'doc',  series: 'closeup-gendai', ep: '#3400', tvdbId: 253195 },
-    { dur: 60, title: 'ダーウィンが来た！',          genre: 'doc',   series: 'darwin', ep: '#824', desc: '深海の巨大イカに迫る。', demo: 'series-tvdb-rec', tvdbId: 339051 },
+    { dur: 60, title: 'ドキュメント72時間 深海の巨大イカに迫る', genre: 'doc', series: 'doc72h', ep: '#621', desc: '深海の巨大イカに迫る。', demo: 'series-tvdb-rec', tvdbId: 339051 },
     { dur: 30, title: 'ガッテン！',                 genre: 'var'  },
-    { dur: 55, title: 'NHK スペシャル',              genre: 'doc',   series: 'nhk-special', ep: '#1082', desc: '巨大地震 最新研究。', demo: 'series-tvdb-rec', tvdbId: 419548 },
-    { dur: 15, title: 'ニュースウオッチ9',            genre: 'news', series: 'news-watch-9', ep: '#4800', tvdbId: 419548 },
+    { dur: 55, title: '映像の世紀 巨大地震 最新研究', genre: 'doc',  series: 'eizou-seiki', ep: '#63', desc: '巨大地震 最新研究。', demo: 'series-tvdb-rec', tvdbId: 419548 },
+    { dur: 15, title: 'ニュースウオッチ9',            genre: 'news' },
     { dur: 30, title: 'きょうの料理',               genre: 'edu'  },
     { dur: 30, title: '鶴瓶の家族に乾杯',            genre: 'var',   series: 'tsurube', ep: '#986', tvdbId: 464275 },
+    { dur: 45, title: 'ブラタモリ 再放送',            genre: 'doc',   series: 'buratamori', ep: '#244', desc: '甲府盆地をゆく。', tvdbId: 165891 },
     { dur: 30, title: 'ドキュメント72時間',          genre: 'doc',   series: 'doc72h', ep: '#620', desc: '深夜のコンビニ。', tvdbId: 339051 },
     { dur: 30, title: 'NHK ニュース845',             genre: 'news' },
     { dur: 60, title: '映像の世紀 バタフライエフェクト', genre: 'doc',  series: 'eizou-seiki', ep: '#64', tvdbId: 419548 },
@@ -120,7 +121,7 @@ const SCHEDULE: Record<string, Slot[]> = {
     { dur: 45, title: '高校講座 日本史',             genre: 'edu'  },
     { dur: 15, title: '高校講座 数学',               genre: 'edu'  },
     { dur: 90, title: '国会中継 (教育)',             genre: 'other' },
-    { dur: 30, title: '趣味の園芸',                  genre: 'edu',  series: 'shumi-engei', ep: '#2800', tvdbId: 270774 },
+    { dur: 30, title: '趣味の園芸',                  genre: 'edu'  },
     { dur: 30, title: '将棋フォーカス',              genre: 'var'  },
     { dur: 90, title: 'こどもアニメ劇場',            genre: 'anime' },
     { dur: 30, title: 'サイエンスZERO',              genre: 'doc',   series: 'science-zero', ep: '#780', tvdbId: 324749 },
@@ -139,7 +140,7 @@ const SCHEDULE: Record<string, Slot[]> = {
   ],
   ntv: [
     { dur: 30, title: 'Oha!4 NEWS LIVE',           genre: 'news' },
-    { dur: 120, title: 'ZIP！',                    genre: 'news', series: 'zip', ep: '#3500', tvdbId: 384681 },
+    { dur: 120, title: 'ZIP！',                    genre: 'news' },
     { dur: 90, title: 'スッキリ',                   genre: 'var'  },
     { dur: 60, title: 'DAY DAY.',                  genre: 'var'  },
     { dur: 30, title: 'ヒルナンデス！前半',           genre: 'var',  series: 'hirunandesu', ep: '#3199', tvdbId: 384681 },
@@ -152,7 +153,7 @@ const SCHEDULE: Record<string, Slot[]> = {
     { dur: 60, title: '行列のできる相談所',           genre: 'var'  },
     { dur: 30, title: 'NEWS ZERO',                 genre: 'news' },
     { dur: 60, title: 'ヒューマングルメンタリー',       genre: 'var'  },
-    { dur: 60, title: '金曜ロードショー ナイル殺人事件', genre: 'movie', desc: '名探偵ポアロ最新作。', demo: 'movie-tvdb-rec', tvdbId: 2649 },
+    { dur: 60, title: '金曜ロードショー クィーン',    genre: 'movie', desc: '英王室を描く話題作。', demo: 'movie-tvdb-rec', tvdbId: 2649 },
     { dur: 30, title: '有吉反省会',                 genre: 'var'  },
     { dur: 30, title: '深夜バラエティ',              genre: 'var'  },
     { dur: 60, title: '潜入！リアルスコープ',         genre: 'doc'  },
@@ -188,7 +189,7 @@ const SCHEDULE: Record<string, Slot[]> = {
     { dur: 60, title: 'Nスタ 夕方',                  genre: 'news' },
     { dur: 60, title: 'Nスタ メイン',                genre: 'news' },
     { dur: 60, title: 'プレバト！！',                genre: 'var', series: 'prebat', ep: '#412', demo: 'series-tvdb-rec', tvdbId: 338042 },
-    { dur: 120, title: '金曜ドラマ 静寂の向こう',     genre: 'drama', series: 'nichigeki-2026q2', ep: '#6', desc: '急転の第6話。', demo: 'series-tvdb-rec', tvdbId: 418527 },
+    { dur: 120, title: '正直不動産',                  genre: 'drama', series: 'shojiki-fudosan', ep: '#20', desc: '急転の第20話。', demo: 'series-tvdb-rec', tvdbId: 418527 },
     { dur: 60, title: '中居正広の金スマ',            genre: 'var'  },
     { dur: 30, title: 'NEWS23',                    genre: 'news' },
     { dur: 60, title: 'A-Studio+',                  genre: 'var'  },
@@ -215,7 +216,7 @@ const SCHEDULE: Record<string, Slot[]> = {
     { dur: 30, title: '開運！なんでも鑑定団',         genre: 'var'  },
     { dur: 60, title: 'ポケットモンスター (テレ東)',  genre: 'anime', series: 'pokemon', ep: '#1288', tvdbId: 76703 },
     { dur: 60, title: '深夜のBSテレ東クロス',         genre: 'other' },
-    { dur: 90, title: '特撮シネマ ゴジラ vs モスラ',  genre: 'movie', demo: 'movie-tvdb-rec', tvdbId: 45 },
+    { dur: 90, title: 'シネマ特集 ヴェノム',           genre: 'movie', desc: 'ソニーのアンチヒーロー。', demo: 'movie-tvdb-rec', tvdbId: 45 },
     { dur: 120, title: '朝まで再放送',                genre: 'other' },
   ],
   cx: [
@@ -225,7 +226,8 @@ const SCHEDULE: Record<string, Slot[]> = {
     { dur: 90, title: 'バイキングMORE',              genre: 'var'  },
     { dur: 60, title: 'Live News it!',              genre: 'news' },
     { dur: 60, title: 'みんなのニュース',             genre: 'news' },
-    { dur: 60, title: '金曜プレミアム 劇場版アニメ特集', genre: 'movie', series: 'kinyou-cinema', desc: '劇場版アニメ特集。', demo: 'movie-tvdb-rec', tvdbId: 73 },
+    { dur: 60, title: '金曜プレミアム レディ・プレイヤー1', genre: 'movie', series: 'kinyou-cinema', desc: '週末の話題作。', demo: 'movie-tvdb-rec', tvdbId: 73 },
+    { dur: 90, title: '金曜プレミアム トムとジェリー', genre: 'movie', desc: '週末の劇場版アニメ枠。', tvdbId: 133330 },
     { dur: 60, title: 'VS 嵐 リマスター',            genre: 'var'  },
     { dur: 60, title: 'ネプリーグ',                  genre: 'var'  },
     { dur: 60, title: '世にも奇妙な物語',             genre: 'drama', series: 'yonimo-kimyo', ep: '#340', demo: 'series-tvdb-free', tvdbId: 391636 },
@@ -245,7 +247,7 @@ const SCHEDULE: Record<string, Slot[]> = {
     { dur: 30, title: 'TOKYO MX NEWS',              genre: 'news' },
     { dur: 60, title: 'バラいろダンディ',            genre: 'var'  },
     { dur: 30, title: 'アニメ (再)',                  genre: 'anime' },
-    { dur: 30, title: 'アニメイズム',                 genre: 'anime', series: 'euph-2026', ep: '#8', demo: 'series-tvdb-free', tvdbId: 352408 },
+    { dur: 30, title: '転生したらスライムだった件',   genre: 'anime', series: 'slime', ep: '#72', demo: 'series-tvdb-free', tvdbId: 352408 },
     { dur: 30, title: 'ソードアートロード',           genre: 'anime', series: 'kaiju8', ep: '#10' },
     { dur: 30, title: '新作アニメ枠',                 genre: 'anime', series: 'precure', ep: '#12' },
     { dur: 30, title: 'アニメ (後半)',                 genre: 'anime', series: 'tonari-totoro' },
@@ -262,7 +264,7 @@ const SCHEDULE: Record<string, Slot[]> = {
     { dur: 60, title: 'キャッチ！世界のトップニュース',  genre: 'news' },
     { dur: 120, title: 'MLB 中継',                   genre: 'other', series: 'mlb', ep: '#1080', desc: 'ヤンキース vs レッドソックス。', tvdbId: 319801 },
     { dur: 60, title: '国際報道 2026',                genre: 'news' },
-    { dur: 60, title: 'ダーウィンが来た！ 再放送',     genre: 'doc', series: 'darwin', ep: '#823', demo: 'series-tvdb-free', tvdbId: 339051 },
+    { dur: 60, title: 'ドキュメント72時間 再放送',    genre: 'doc', series: 'doc72h', ep: '#619', demo: 'series-tvdb-free', tvdbId: 339051 },
     { dur: 60, title: 'ワールドスポーツMLB',          genre: 'other' },
     { dur: 60, title: '世界で一番美しい瞬間',         genre: 'doc'  },
     { dur: 90, title: '地球 ドローン紀行',             genre: 'doc'  },
@@ -277,15 +279,16 @@ const SCHEDULE: Record<string, Slot[]> = {
   bsp: [
     { dur: 30, title: '美の壺 再放送',               genre: 'edu'  },
     { dur: 60, title: '新日本風土記',                 genre: 'doc'  },
-    { dur: 90, title: 'BSP シネマ 劇場版アニメ再放送', genre: 'movie', demo: 'movie-tvdb-free', tvdbId: 73 },
-    { dur: 60, title: 'NHKスペシャル 再放送',          genre: 'doc', series: 'nhk-special', ep: '#1081', demo: 'series-tvdb-free', tvdbId: 419548 },
+    { dur: 90, title: 'BSP シネマ レディ・プレイヤー1', genre: 'movie', demo: 'movie-tvdb-free', tvdbId: 73 },
+    { dur: 60, title: '映像の世紀 再放送',            genre: 'doc', series: 'eizou-seiki', ep: '#62', demo: 'series-tvdb-free', tvdbId: 419548 },
     { dur: 60, title: '世界ふれあい街歩き',            genre: 'doc'  },
-    { dur: 120, title: 'プレミアムシネマ 名探偵ポアロ', genre: 'movie', series: 'bsp-cinema', demo: 'movie-tvdb-free', tvdbId: 2649 },
+    { dur: 120, title: 'プレミアムシネマ クィーン',   genre: 'movie', series: 'bsp-cinema', demo: 'movie-tvdb-free', tvdbId: 2649 },
     { dur: 60, title: '舞台劇場',                    genre: 'other' },
     { dur: 60, title: '名曲アルバム',                 genre: 'other' },
     { dur: 60, title: 'ドキュランドへようこそ',         genre: 'doc'  },
     { dur: 60, title: 'にっぽん縦断 こころ旅',         genre: 'doc'  },
     { dur: 90, title: '名作ドラマアンコール',         genre: 'drama' },
+    { dur: 90, title: '深夜の名画座 わたしに会うまでの1600キロ', genre: 'movie', desc: '名画座アンコール。', tvdbId: 3496 },
     { dur: 90, title: '深夜の名画座',                 genre: 'movie', demo: 'movie-plain-free' },
     { dur: 120, title: '朝までリピート',              genre: 'other' },
     { dur: 60, title: '早朝のオーケストラ',           genre: 'other' },
@@ -299,6 +302,7 @@ const SCHEDULE: Record<string, Slot[]> = {
     { dur: 60, title: '奥の細道',                    genre: 'doc'  },
     { dur: 90, title: '深層ニュース',                 genre: 'news' },
     { dur: 60, title: '時代劇アワー',                 genre: 'drama', series: 'jidai-geki-hour', ep: '#24', demo: 'series-plain-rec' },
+    { dur: 120, title: 'BS日テレシネマ プラダを着た悪魔', genre: 'movie', desc: '話題作の再放送。', tvdbId: 281 },
     { dur: 90, title: 'BS日テレシネマ',              genre: 'movie', demo: 'movie-plain-free' },
     { dur: 60, title: '人生の楽園',                   genre: 'var'  },
     { dur: 60, title: 'ぶらり旅 (再)',                 genre: 'var'  },
@@ -435,6 +439,16 @@ function expandChannel(ch: string, base: number, slots: Slot[]): ApiProgram[] {
   return out;
 }
 
+export function demoProgramIds(ymd: string): Partial<Record<DemoCase, string[]>> {
+  programsForDate(ymd);
+  const out: Partial<Record<DemoCase, string[]>> = {};
+  for (const k of Object.keys(DEMO_PROGRAM_IDS) as DemoCase[]) {
+    const v = DEMO_PROGRAM_IDS[k];
+    if (v) out[k] = [...v];
+  }
+  return out;
+}
+
 export function programsForDate(ymd: string): ApiProgram[] {
   // Reset DEMO_PROGRAM_IDS before each run — expandChannel pushes into it,
   // so repeated calls (e.g. handler → programsForDate, handler again via
@@ -452,47 +466,98 @@ export function programsForDate(ymd: string): ApiProgram[] {
 // -rec suffix). Separate from programsForDate so the recordings list can
 // point at the same ProgramIDs after a schedule regen.
 const DEMO_RECORDING_CASES: DemoCase[] = [
-  'series-tvdb-rec',
-  'series-plain-rec',
-  'movie-tvdb-rec',
-  'movie-plain-rec',
+  'series-tvdb-rec',   // → scheduled (6)
+  'series-plain-rec',  // → recording (2)
+  'movie-plain-rec',   // → recording (2)  total recording=4
+  'movie-tvdb-free',   // → encoding  (2)
+  'movie-tvdb-rec',    // → failed    (3)
+  'series-tvdb-free',  // → ready     (5)
+  'series-plain-free', // → conflict  (2)
 ];
 
 function makeRecordings(today: string): ApiRecording[] {
   // Force schedule generation so DEMO_PROGRAM_IDS is populated.
   const progs = programsForDate(today) as unknown as Array<{ id: string; ch: string; title: string; startAt: string; endAt: string }>;
-  const byId = new Map(progs.map((p) => [p.id, p] as const));
+  // Keep the full program record (with `tvdb`) so recording rows carry
+  // tvdbId — the library page splits recordings into series/movie by that
+  // field, without it everything falls into "その他".
+  const byId = new Map(progs.map((p) => [p.id, p as unknown as { id: string; ch: string; title: string; startAt: string; endAt: string; tvdb?: { id: number; type: string } }] as const));
   const now = new Date();
   const stateByCase: Record<DemoCase, string> = {
-    'series-tvdb-rec':   'recording',
-    'series-plain-rec':  'scheduled',
-    'movie-tvdb-rec':    'scheduled',
-    'movie-plain-rec':   'ready',
-    'series-tvdb-free':  'scheduled',
-    'series-plain-free': 'scheduled',
-    'movie-tvdb-free':   'scheduled',
-    'movie-plain-free':  'scheduled',
+    'series-tvdb-rec':   'scheduled',
+    'series-plain-rec':  'recording',
+    'movie-plain-rec':   'recording',
+    'movie-tvdb-free':   'encoding',
+    'movie-tvdb-rec':    'failed',
+    'series-tvdb-free':  'ready',
+    'series-plain-free': 'conflict',
+    'movie-plain-free':  'ready',
   };
+  const encodeProgressByCase: Partial<Record<DemoCase, number>> = {
+    'movie-tvdb-free': 0.43,
+  };
+  // Progress ratios for each recording slot (cycled if more slots than values).
+  const recProgressRatios = [0.18, 0.52, 0.74, 0.91];
+  let recIdx = 0;
+
+  // Match epg.ts jstNowMinutes(): new Date(now + 9h).getUTCHours()*60 + minutes
+  const jstDate = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const jstNowMin = jstDate.getUTCHours() * 60 + jstDate.getUTCMinutes();
+  const pad2 = (n: number) => String(n).padStart(2, '0');
+  const todayStr = now.toISOString().slice(0, 10);
+
+  // Cap per-case slot count so the total stays around 9 with full variety.
+  const maxPerCase: Partial<Record<DemoCase, number>> = {
+    'series-tvdb-rec':   1, // scheduled ×1
+    'series-plain-rec':  2, // recording ×2
+    'movie-plain-rec':   1, // recording ×1  → recording total 3
+    'movie-tvdb-free':   2, // encoding  ×2
+    'movie-tvdb-rec':    1, // failed    ×1
+    'series-tvdb-free':  1, // ready     ×1
+    'series-plain-free': 1, // conflict  ×1
+  };
+
   const rows: unknown[] = [];
   let seq = 1;
   for (const caseId of DEMO_RECORDING_CASES) {
-    const ids = DEMO_PROGRAM_IDS[caseId] ?? [];
+    const limit = maxPerCase[caseId] ?? 1;
+    const ids = (DEMO_PROGRAM_IDS[caseId] ?? []).slice(0, limit);
     ids.forEach((pid) => {
       const p = byId.get(pid);
       if (!p) return;
+      const state = stateByCase[caseId];
+      // For recording rows, build fake startAt/endAt where the UTC HH:MM
+      // equals the desired JST HH:MM — because the UI falls back to
+      // r.startAt.slice(11,16) when programId isn't in the schedule, and
+      // compares against MOCK_NOW_MIN which is also in JST minutes.
+      let startAt = p.startAt;
+      let endAt = p.endAt;
+      let programId = p.id;
+      if (state === 'recording') {
+        const ratio = recProgressRatios[recIdx % recProgressRatios.length]!;
+        recIdx++;
+        const durMin = 55;
+        const startJst = Math.max(0, jstNowMin - Math.round(ratio * durMin));
+        const endJst = startJst + durMin;
+        startAt = `${todayStr}T${pad2(Math.floor(startJst / 60))}:${pad2(startJst % 60)}:00.000Z`;
+        endAt   = `${todayStr}T${pad2(Math.floor(endJst   / 60))}:${pad2(endJst   % 60)}:00.000Z`;
+        programId = `fake-rec-${seq}`;
+      }
       rows.push({
         id: `rec-${caseId}-${seq++}`,
-        programId: p.id,
+        programId,
         ch: p.ch,
         title: p.title,
-        startAt: p.startAt,
-        endAt: p.endAt,
+        startAt,
+        endAt,
+        tvdbId: p.tvdb?.id ?? null,
         priority: caseId.startsWith('series-tvdb') ? 'high' : 'medium',
         quality: '1080i',
         keepRaw: false,
         marginPre: 0,
         marginPost: 30,
         state: stateByCase[caseId],
+        ...(encodeProgressByCase[caseId] != null ? { encodeProgress: encodeProgressByCase[caseId] } : {}),
         source: { kind: 'once' },
         createdAt: now.toISOString(),
         updatedAt: now.toISOString(),
@@ -517,6 +582,50 @@ export const TUNERS = [
 // Not typed against the generated schema — it lands on branches where the
 // ApiTunerAllocation export may lag. The UI only cares about `slots: []`.
 export const TUNER_ALLOCATION = { slots: [] } as unknown;
+
+// One pre-registered device so the settings → デバイス tab has something
+// the user can click into (DeviceDetailModal).
+export const CHANNEL_SOURCES = [
+  {
+    id: 1,
+    name: 'Mirakurun (録画サーバ)',
+    kind: 'mirakurun',
+    url: 'http://192.168.1.50:40772',
+    xmltvUrl: null,
+    friendlyName: 'Mirakurun',
+    model: 'Mirakurun 3.9.0',
+    deviceId: 'mirakurun-1',
+    tunerCount: 8,
+    enabled: true,
+    lastSyncAt: '2026-04-22T12:00:00.000Z',
+    lastError: null,
+    channelCount: 24,
+    createdAt: '2026-04-15T10:00:00.000Z',
+  },
+] as unknown;
+
+// DeviceDetailModal calls /api/tuners/live and matches by sourceId. Showing
+// a mix of in-use / idle tuners makes the modal preview meaningful.
+export const DEVICE_LIVE_STATUS = [
+  {
+    sourceId: 1,
+    name: 'Mirakurun (録画サーバ)',
+    model: 'Mirakurun 3.9.0',
+    friendlyName: 'Mirakurun',
+    tunerCount: 8,
+    reachable: true,
+    tuners: [
+      { tunerIdx: 0, inUse: true,  channelName: 'NHK総合',    channelNumber: '011', clientIp: '127.0.0.1' },
+      { tunerIdx: 1, inUse: true,  channelName: 'TOKYO MX',  channelNumber: '091', clientIp: '127.0.0.1' },
+      { tunerIdx: 2, inUse: true,  channelName: 'TBS',        channelNumber: '061', clientIp: '127.0.0.1' },
+      { tunerIdx: 3, inUse: false, channelName: null,         channelNumber: null,  clientIp: null        },
+      { tunerIdx: 4, inUse: false, channelName: null,         channelNumber: null,  clientIp: null        },
+      { tunerIdx: 5, inUse: true,  channelName: 'NHK BSP4K', channelNumber: '103', clientIp: '127.0.0.1' },
+      { tunerIdx: 6, inUse: false, channelName: null,         channelNumber: null,  clientIp: null        },
+      { tunerIdx: 7, inUse: false, channelName: null,         channelNumber: null,  clientIp: null        },
+    ],
+  },
+] as unknown;
 
 export function nowRecording(today: string): ApiNowRecording[] {
   // Only the `series-tvdb-rec` case uses state='recording' in makeRecordings,
@@ -649,12 +758,22 @@ const RANKING_SEEDS: Record<string, RankingSeed[]> = {
 export function rankingsForGenre(genre: string): ApiRankingList {
   const seeds = RANKING_SEEDS[genre] ?? RANKING_SEEDS.all;
   const now = new Date().toISOString();
+  const ymd = todayJstYmd();
+  const progs = programsForDate(ymd);
+  // tvdbId → earliest upcoming program id
+  const tvdbToNextId = new Map<number, string>();
+  for (const p of progs) {
+    const tv = (p as unknown as { tvdb?: { id: number } }).tvdb;
+    if (!tv) continue;
+    if (!tvdbToNextId.has(tv.id)) tvdbToNextId.set(tv.id, p.id);
+  }
   const items = seeds.map((s, i) => ({
     rank: i + 1,
     title: s.title,
     channelName: s.channelName,
     delta: s.delta,
     quote: s.quote ?? null,
+    nextProgramId: s.tvdbId != null ? tvdbToNextId.get(s.tvdbId) : undefined,
     tvdb: s.tvdbId != null
       ? (TVDB_CATALOG_RAW.find((t) => t.id === s.tvdbId) ?? null)
       : null,

@@ -6,7 +6,7 @@ import { parseM3u, type M3uEntry } from '../integrations/m3u/parser.ts';
 import { HttpMirakurunClient } from '../integrations/mirakurun/client.ts';
 import { dedupeServices, serviceToChannel } from '../integrations/mirakurun/adapter.ts';
 import { parseXmltv } from '../integrations/xmltv/parser.ts';
-import { fetchHdhomerunDiscover } from '../integrations/hdhomerun/discover.ts';
+import { fetchHdhomerunDiscover, hdhomerunLineupUrl } from '../integrations/hdhomerun/discover.ts';
 import { scanLocalNetwork, extractPrivatePrefix } from '../integrations/hdhomerun/scan.ts';
 import { programService } from './programService.ts';
 import { genreFromKey } from '../lib/genreRegistry.ts';
@@ -106,7 +106,7 @@ function inferType(group?: string): 'GR' | 'BS' | 'CS' {
 
 const HUE_PALETTE = [28, 140, 30, 250, 260, 150, 280, 200, 220, 300, 0, 340];
 
-function m3uToChannelValues(entry: M3uEntry): {
+function m3uToChannelValues(entry: M3uEntry, sourceId: number): {
   id: string;
   name: string;
   short: string;
@@ -115,6 +115,7 @@ function m3uToChannelValues(entry: M3uEntry): {
   color: string;
   streamUrl: string;
   source: 'm3u';
+  sourceId: number;
   m3uGroup: string | null;
 } {
   const id = m3uChannelId(entry);
@@ -135,6 +136,7 @@ function m3uToChannelValues(entry: M3uEntry): {
     color: `oklch(0.58 0.11 ${hue})`,
     streamUrl: entry.streamUrl,
     source: 'm3u',
+    sourceId,
     m3uGroup: entry.groupTitle ?? null,
   };
 }
@@ -154,21 +156,13 @@ function buildXmltvToInternalChannelMap(entries: M3uEntry[]): Map<string, string
 
 const XMLTV_FALLBACK_GENRE = genreFromKey('info');
 
-// Given a device URL, return a best-guess XMLTV feed URL for known providers.
-// Mirakurun    /api/iptv         → /api/iptv/xmltv
-// EPGStation   /api/iptv/channel.m3u8?... → /api/iptv/epg.xml?isHalfWidth=true&days=3
-// others → null (user supplies manually)
+// Given a device URL, return a best-guess XMLTV feed URL for Mirakurun-style
+// providers (/api/iptv → /api/iptv/xmltv). Anything else → null; the user
+// supplies the XMLTV URL manually.
 export function deriveSuggestedXmltvUrl(rawUrl: string): string | null {
   try {
     const u = new URL(rawUrl);
     const p = u.pathname.toLowerCase();
-    if (p.endsWith('/api/iptv/channel.m3u8')) {
-      const out = new URL(rawUrl);
-      out.pathname = u.pathname.replace(/channel\.m3u8$/i, 'epg.xml');
-      out.searchParams.delete('mode');
-      if (!out.searchParams.has('days')) out.searchParams.set('days', '3');
-      return out.toString();
-    }
     if (p.endsWith('/api/iptv') || p.endsWith('/api/iptv/')) {
       return `${rawUrl.replace(/\/+$/, '')}/xmltv`;
     }
@@ -211,7 +205,7 @@ async function upsertXmltvPrograms(
   return out.length;
 }
 
-async function upsertM3uChannels(entries: M3uEntry[]): Promise<number> {
+async function upsertM3uChannels(entries: M3uEntry[], sourceId: number): Promise<number> {
   let count = 0;
   for (const entry of entries) {
     if (!entry.streamUrl) continue;
@@ -222,7 +216,7 @@ async function upsertM3uChannels(entries: M3uEntry[]): Promise<number> {
         `[channelSync] m3u entry ${entry.name || entry.tvgId} points at .m3u8; recorder does not yet support HLS`
       );
     }
-    const values = m3uToChannelValues(entry);
+    const values = m3uToChannelValues(entry, sourceId);
     try {
       await db
         .insert(channels)
@@ -237,6 +231,7 @@ async function upsertM3uChannels(entries: M3uEntry[]): Promise<number> {
             color: values.color,
             streamUrl: values.streamUrl,
             source: values.source,
+            sourceId: values.sourceId,
             m3uGroup: values.m3uGroup,
           },
         });
@@ -248,7 +243,7 @@ async function upsertM3uChannels(entries: M3uEntry[]): Promise<number> {
   return count;
 }
 
-async function syncMirakurun(url: string): Promise<number> {
+async function syncMirakurun(url: string, sourceId: number): Promise<number> {
   const base = url.replace(/\/$/, '');
   const client = new HttpMirakurunClient(base);
   const services = await client.services();
@@ -269,6 +264,7 @@ async function syncMirakurun(url: string): Promise<number> {
           color: mapped.color,
           streamUrl,
           source: 'mirakurun',
+          sourceId,
           m3uGroup: null,
         })
         .onConflictDoUpdate({
@@ -281,6 +277,7 @@ async function syncMirakurun(url: string): Promise<number> {
             color: mapped.color,
             streamUrl,
             source: 'mirakurun',
+            sourceId,
           },
         });
       count++;
@@ -354,7 +351,7 @@ export const channelSyncService = {
       if (row.kind === 'iptv') {
         const text = await fetchWithTimeout(row.url);
         const entries = parseM3u(text);
-        channelCount = await upsertM3uChannels(entries);
+        channelCount = await upsertM3uChannels(entries, row.id);
         // Optional XMLTV guide: pull after channels are in place so the
         // programme-row foreign key (ch → channels.id) resolves. Failures
         // here are logged as partial errors rather than aborting the sync.
@@ -369,25 +366,28 @@ export const channelSyncService = {
             console.warn(`[channelSync] source ${id} xmltv fetch/parse failed:`, xmlErr);
           }
         }
-        // Best-effort HDHomeRun discover — tells us FriendlyName, ModelNumber,
-        // TunerCount, DeviceID. Providers that don't implement it (plain m3u
-        // playlists) return null and we just leave the metadata fields alone.
-        const disc = await fetchHdhomerunDiscover(row.url);
-        if (disc) {
-          await db
-            .update(channelSources)
-            .set({
-              friendlyName: disc.friendlyName,
-              model: disc.modelNumber ?? disc.modelName ?? disc.manufacturer,
-              deviceId: disc.deviceId,
-              tunerCount: disc.tunerCount,
-            })
-            .where(eq(channelSources.id, id));
-        }
       } else if (row.kind === 'mirakurun') {
-        channelCount = await syncMirakurun(row.url);
+        channelCount = await syncMirakurun(row.url, row.id);
       } else {
         throw new Error(`unknown source kind: ${row.kind}`);
+      }
+
+      // Best-effort HDHomeRun discover — populates FriendlyName, ModelNumber,
+      // TunerCount, DeviceID so the Device modal can show hardware state +
+      // /tuners/live can probe. Mirakurun exposes the HDHomeRun surface at
+      // /api/iptv, hdhomerunLineupUrl() handles the path join. Providers that
+      // don't implement it (plain m3u) return null and we leave fields alone.
+      const disc = await fetchHdhomerunDiscover(hdhomerunLineupUrl(row.kind, row.url));
+      if (disc) {
+        await db
+          .update(channelSources)
+          .set({
+            friendlyName: disc.friendlyName,
+            model: disc.modelNumber ?? disc.modelName ?? disc.manufacturer,
+            deviceId: disc.deviceId,
+            tunerCount: disc.tunerCount,
+          })
+          .where(eq(channelSources.id, id));
       }
     } catch (err) {
       error = (err as Error)?.message ?? String(err);
@@ -407,12 +407,10 @@ export const channelSyncService = {
   },
 
   // Auto-probe a prospective m3u URL before the user saves the device.
-  // Tries HDHomeRun /discover.json for metadata, and heuristically suggests
-  // a matching XMLTV URL based on known URL patterns:
-  //   Mirakurun base  /api/iptv        → /api/iptv/xmltv
-  //   EPGStation      /api/iptv/channel.m3u8?... → /api/iptv/epg.xml?isHalfWidth=true&days=3
-  //   anything else   → null (user types it manually)
-  // Runs cheap probes — no writes.
+  // Tries HDHomeRun /discover.json for metadata, and suggests an XMLTV URL
+  // for the /api/iptv → /api/iptv/xmltv pattern. `inferredKind` is Mirakurun
+  // when the discover payload self-identifies; anything else gets null so
+  // the operator picks a kind manually.
   async probe(rawUrl: string): Promise<ProbeChannelSourceResult> {
     const url = rawUrl.trim();
     const disc = await fetchHdhomerunDiscover(url).catch(() => null);
@@ -421,15 +419,12 @@ export const channelSyncService = {
     let inferredKind: string | null = null;
     try {
       const p = new URL(url).pathname.toLowerCase();
-      if (p.endsWith('/api/iptv/channel.m3u8')) inferredKind = 'EPGStation';
-      else if (p.endsWith('/api/iptv') || p.endsWith('/api/iptv/')) inferredKind = 'Mirakurun';
+      if (p.endsWith('/api/iptv') || p.endsWith('/api/iptv/')) inferredKind = 'Mirakurun';
     } catch {}
 
-    // Discover payload refines the kind label when available.
     if (disc?.friendlyName) {
       const fn = disc.friendlyName.toLowerCase();
       if (fn.includes('mirakurun')) inferredKind = inferredKind ?? 'Mirakurun';
-      else if (fn.includes('epgstation')) inferredKind = inferredKind ?? 'EPGStation';
     }
 
     return {
@@ -462,8 +457,8 @@ export const channelSyncService = {
       model: d.model,
       tunerCount: d.tunerCount,
       label: d.label,
-      // The probe itself now carries xmltv for EPGStation; fall back to the
-      // URL-pattern heuristic for anything else (future providers).
+      // The scanner may have already derived an xmltv URL; fall back to the
+      // URL-pattern heuristic for anything else.
       suggestedXmltvUrl: d.xmltvUrl ?? deriveSuggestedXmltvUrl(d.url),
     }));
     return { devices };

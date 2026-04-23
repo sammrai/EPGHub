@@ -404,7 +404,7 @@ const scanChannelSources = createRoute({
   tags: ['admin'],
   summary: 'ローカルネットワーク自動検出',
   description:
-    'サーバーのローカル IPv4 サブネットを走査し、Mirakurun / EPGStation / HDHomeRun など HDHomeRun HTTP 互換デバイスを検出する。1 サブネット /24 で最長 25 秒程度かかる。',
+    'サーバーのローカル IPv4 サブネットを走査し、Mirakurun など HDHomeRun HTTP 互換デバイスを検出する。1 サブネット /24 で最長 25 秒程度かかる。',
   responses: {
     200: {
       description: '検出されたデバイス一覧',
@@ -419,7 +419,7 @@ const probeChannelSource = createRoute({
   tags: ['admin'],
   summary: 'チャンネルソース URL の自動検出',
   description:
-    'HDHomeRun /discover.json を叩いてデバイス情報を取得し、既知の URL パターン (Mirakurun / EPGStation) から XMLTV URL を推測する。追加モーダルの自動入力用。',
+    'HDHomeRun /discover.json を叩いてデバイス情報を取得し、既知の URL パターン (Mirakurun) から XMLTV URL を推測する。追加モーダルの自動入力用。',
   request: {
     body: {
       required: true,

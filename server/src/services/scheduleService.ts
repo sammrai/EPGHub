@@ -1,4 +1,4 @@
-import { sql } from 'drizzle-orm';
+import { desc, sql } from 'drizzle-orm';
 import type { Program } from '../schemas/program.ts';
 import type { Channel } from '../schemas/channel.ts';
 import { createMirakurunClient } from '../integrations/mirakurun/client.ts';
@@ -10,7 +10,7 @@ import {
 import { channelService } from './channelService.ts';
 import { programService } from './programService.ts';
 import { db } from '../db/client.ts';
-import { channels as channelsTable } from '../db/schema.ts';
+import { channels as channelsTable, channelSources } from '../db/schema.ts';
 import { useFixtures } from '../config/fixtures.ts';
 
 export interface ScheduleService {
@@ -32,7 +32,10 @@ class DbScheduleService implements ScheduleService {
 
   async refresh(): Promise<{ count: number }> {
     const { channels, programs } = await fetchLiveFeed();
-    if (channels.length > 0) await upsertChannels(channels);
+    if (channels.length > 0) {
+      const sourceId = await resolveMirakurunSourceId();
+      await upsertChannels(channels, sourceId);
+    }
     if (programs.length === 0) return { count: 0 };
     await programService.upsertMany(programs);
     // Clean up programs whose endAt is more than 24h in the past — keeps the
@@ -42,7 +45,28 @@ class DbScheduleService implements ScheduleService {
   }
 }
 
-async function upsertChannels(list: Channel[]): Promise<void> {
+// Find the channel_sources row this env-driven Mirakurun feed should be tied
+// to. Prefers a kind='mirakurun' row; falls back to any row (typically the
+// 'iptv' seed created by seedFromEnvIfEmpty). Returns null when no source is
+// registered — callers then insert channels with source_id NULL, which means
+// no cascade-delete owner but sync still completes.
+async function resolveMirakurunSourceId(): Promise<number | null> {
+  const [pref] = await db
+    .select({ id: channelSources.id })
+    .from(channelSources)
+    .where(sql`${channelSources.kind} = 'mirakurun'`)
+    .orderBy(desc(channelSources.createdAt))
+    .limit(1);
+  if (pref) return pref.id;
+  const [any] = await db
+    .select({ id: channelSources.id })
+    .from(channelSources)
+    .orderBy(desc(channelSources.createdAt))
+    .limit(1);
+  return any?.id ?? null;
+}
+
+async function upsertChannels(list: Channel[], sourceId: number | null): Promise<void> {
   const values = list.map((c, i) => ({
     id: c.id,
     name: c.name,
@@ -52,6 +76,7 @@ async function upsertChannels(list: Channel[]): Promise<void> {
     color: c.color,
     enabled: true,
     sortOrder: i,
+    sourceId,
   }));
   await db
     .insert(channelsTable)
@@ -64,6 +89,7 @@ async function upsertChannels(list: Channel[]): Promise<void> {
         number: sql`excluded.number`,
         type: sql`excluded.type`,
         color: sql`excluded.color`,
+        sourceId: sql`excluded.source_id`,
       },
     });
 }

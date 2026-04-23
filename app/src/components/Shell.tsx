@@ -47,7 +47,7 @@ export function Sidebar({ active, onNav, counts, system, recordingCount }: Sideb
       <Icon name={n.icon} size={14} />
       <span>{n.label}</span>
       {n.recBadge != null && n.recBadge > 0 && (
-        <span className="nav-badge rec">{n.recBadge}</span>
+        <span className="nav-badge rec"><span className="pulse-dot" /></span>
       )}
       {n.count != null && <span className="count">{n.count}</span>}
     </button>

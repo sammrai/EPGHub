@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
+    "screenshots": "SCREENSHOTS=1 playwright test tests/e2e/screenshots.spec.ts --reporter=list",
     "gen:api": "openapi-typescript ../server/openapi.yaml -o src/api/epghub.gen.ts"
   },
   "dependencies": {

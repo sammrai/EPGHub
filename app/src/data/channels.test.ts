@@ -3,8 +3,8 @@ import type { Channel } from './types';
 import { clearStoredChannels, loadStoredChannels, saveChannels } from './channels';
 
 const SAMPLE: Channel[] = [
-  { id: 'nhk-g', name: 'NHK総合', short: 'NHK G', number: '011', type: 'GR', color: '#f00' },
-  { id: 'ex', name: 'テレビ朝日', short: 'EX', number: '051', type: 'GR', color: '#ffa' },
+  { id: 'nhk-g', name: 'NHK総合', short: 'NHK G', number: '011', type: 'GR', color: '#f00', enabled: true },
+  { id: 'ex', name: 'テレビ朝日', short: 'EX', number: '051', type: 'GR', color: '#ffa', enabled: true },
 ];
 
 describe('channels localStorage helpers', () => {

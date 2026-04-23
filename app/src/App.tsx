@@ -226,7 +226,7 @@ export function App() {
     [programs, genreFilter]
   );
   const visibleChannels = useMemo(
-    () => channels.filter((c) => bcType === 'all' || c.type === bcType),
+    () => channels.filter((c) => c.enabled && (bcType === 'all' || c.type === bcType)),
     [channels, bcType]
   );
 

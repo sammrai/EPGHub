@@ -37,6 +37,7 @@ import type {
   ApiTvdbEntry,
   ApiChannel,
   ApiChannelSource,
+  ApiDeviceLiveStatus,
   ApiProbeChannelSourceResult,
   ApiScannedDevice,
   ApiGpuEncoder,
@@ -1149,18 +1150,8 @@ interface StatusBadgeProps {
 }
 
 const StatusBadge = ({ status, progress }: StatusBadgeProps) => {
-  // Recording: show just a pulsing red dot (no pill, no "録画中" text).
-  // The column already groups these rows under the 録画中 filter, and the
-  // status-row background itself is rec-tinted — a standalone dot reads
-  // more calmly in a list than a bright red badge next to the title.
-  if (status === 'recording') {
-    return (
-      <span className="rec-dot" role="status" aria-label="録画中">
-        <span className="pulse-dot" />
-      </span>
-    );
-  }
-  const cfgMap: Record<Exclude<ReserveStatus, 'recording'>, { cls: string; label: string; dot: boolean }> = {
+  const cfgMap: Record<ReserveStatus, { cls: string; label: string; dot: boolean }> = {
+    recording: { cls: 'rec', label: '録画中', dot: true },
     encoding: { cls: 'enc', label: 'エンコード中', dot: true },
     upcoming: { cls: 'up', label: '予約済', dot: false },
     conflict: { cls: 'con', label: '競合', dot: false },
@@ -2803,6 +2794,8 @@ const DeviceDetailModal = ({
   const [channels, setChannels] = useState<ApiChannel[] | null>(null);
   const [loadingCh, setLoadingCh] = useState(true);
   const [toggling, setToggling] = useState<string | null>(null);
+  const [liveStatus, setLiveStatus] = useState<ApiDeviceLiveStatus | null>(null);
+  const [loadingLive, setLoadingLive] = useState(false);
 
   const channelSource = KIND_TO_CHANNEL_SOURCE[device.kind] ?? device.kind;
 
@@ -2818,8 +2811,21 @@ const DeviceDetailModal = ({
     }
   };
 
+  const loadLiveStatus = async () => {
+    setLoadingLive(true);
+    try {
+      const all = await api.tuners.live();
+      setLiveStatus(all.find((s) => s.sourceId === device.id) ?? null);
+    } catch (e) {
+      onToastError(`チューナー状態取得失敗: ${(e as Error).message}`);
+    } finally {
+      setLoadingLive(false);
+    }
+  };
+
   useEffect(() => {
     void loadChannels();
+    void loadLiveStatus();
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
@@ -2890,6 +2896,17 @@ const DeviceDetailModal = ({
               {device.lastError && (
                 <span className="device-modal-error" title={device.lastError}>エラー</span>
               )}
+              {liveStatus && (
+                <>
+                  <span className="stat-sep">·</span>
+                  <span
+                    className={`device-modal-reach ${liveStatus.reachable ? 'ok' : 'ng'}`}
+                    title={liveStatus.reachable ? '応答あり' : '応答なし'}
+                  >
+                    {liveStatus.reachable ? '接続OK' : '到達不可'}
+                  </span>
+                </>
+              )}
             </div>
             <div className="device-modal-action-buttons">
               <button
@@ -2906,6 +2923,53 @@ const DeviceDetailModal = ({
                 削除
               </button>
             </div>
+          </div>
+
+          <div className="device-tuner-status">
+            <div className="device-tuner-status-head">
+              <span className="device-tuner-status-title">チューナー状態</span>
+              <button
+                className="btn btn-sm ghost"
+                onClick={() => void loadLiveStatus()}
+                disabled={loadingLive}
+              >
+                {loadingLive ? '取得中…' : '更新'}
+              </button>
+            </div>
+            {loadingLive && !liveStatus && <div className="src-empty">読み込み中…</div>}
+            {!loadingLive && !liveStatus && (
+              <div className="src-empty">チューナー状態を取得できませんでした。</div>
+            )}
+            {liveStatus && liveStatus.tuners.length === 0 && (
+              <div className="src-empty">
+                {liveStatus.reachable
+                  ? 'この機器はチューナー状態の取得に対応していません。'
+                  : '機器に到達できませんでした。'}
+              </div>
+            )}
+            {liveStatus && liveStatus.tuners.length > 0 && (
+              <div className="device-tuner-list">
+                {liveStatus.tuners.map((t) => (
+                  <div
+                    key={t.tunerIdx}
+                    className={`device-tuner-row${t.inUse ? ' in-use' : ''}`}
+                  >
+                    <span className="device-tuner-idx">#{t.tunerIdx}</span>
+                    <span className={`device-tuner-state ${t.inUse ? 'on' : 'off'}`}>
+                      {t.inUse ? '使用中' : 'アイドル'}
+                    </span>
+                    <span className="device-tuner-ch">
+                      {t.inUse
+                        ? [t.channelNumber, t.channelName].filter(Boolean).join(' ') || '—'
+                        : '—'}
+                    </span>
+                    <span className="device-tuner-client" title={t.clientIp ?? ''}>
+                      {t.clientIp ?? ''}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="device-channel-list">

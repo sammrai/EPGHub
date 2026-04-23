@@ -6,6 +6,10 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   testDir: './tests/e2e',
   testMatch: /.*\.spec\.ts$/,
+  // screenshots.spec.ts is a manual UI tour, not a regression test.
+  // Default test:e2e skips it; `npm run screenshots` sets SCREENSHOTS=1 to
+  // bypass the ignore.
+  testIgnore: process.env.SCREENSHOTS ? [] : ['screenshots.spec.ts'],
   timeout: 30_000,
   expect: { timeout: 5_000 },
   fullyParallel: false,
