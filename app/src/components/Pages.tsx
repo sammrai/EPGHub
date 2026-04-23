@@ -2809,7 +2809,7 @@ export const SettingsPage = ({ pushToast }: SettingsPageProps = {}) => {
           <div className="settings-nav-heading">開発者</div>
           <a
             className="settings-nav-item"
-            href={import.meta.env.VITE_USE_FIXTURES === '1' ? 'api-docs.html' : '/docs'}
+            href={import.meta.env.BASE_URL !== '/' ? `${import.meta.env.BASE_URL}api-docs.html` : '/docs'}
             target="_blank"
             rel="noopener noreferrer"
             style={{ textDecoration: 'none' }}
