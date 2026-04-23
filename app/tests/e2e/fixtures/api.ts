@@ -24,6 +24,8 @@ export interface Channel {
   number: string;
   type: BcType;
   color: string;
+  enabled: boolean;
+  source: string;
 }
 
 export interface Genre {
@@ -163,8 +165,8 @@ export const GENRE_DRAMA: Genre = { key: 'drama', label: 'ドラマ', dot: 'oklc
 export const GENRE_VAR: Genre = { key: 'var', label: 'バラエティ', dot: 'oklch(0.7 0.13 80)' };
 
 export const defaultChannels = (): Channel[] => [
-  { id: 'nhk-g', name: 'NHK総合', short: 'NHK G', number: '011', type: 'GR', color: 'oklch(0.55 0.12 28)' },
-  { id: 'ex', name: 'テレビ朝日', short: 'EX', number: '051', type: 'GR', color: 'oklch(0.55 0.14 25)' },
+  { id: 'nhk-g', name: 'NHK総合', short: 'NHK G', number: '011', type: 'GR', color: 'oklch(0.55 0.12 28)', enabled: true, source: 'mirakurun' },
+  { id: 'ex', name: 'テレビ朝日', short: 'EX', number: '051', type: 'GR', color: 'oklch(0.55 0.14 25)', enabled: true, source: 'mirakurun' },
 ];
 
 // 現在の JST 放送日 (05:00 境界) を YYYY-MM-DD で返す。
