@@ -16,6 +16,20 @@ interface SearchResult {
   country?: string;
 }
 
+// TVDB v4 characters attached to series / movie extended payloads. Only
+// the fields the UI needs (actor name / character name / avatar path).
+// `image` is a relative /banners/v4/... path — artworks.thetvdb.com is the
+// host, filled in by the adapter.
+export interface TvdbCharacter {
+  id: number;
+  name?: string;          // character name (役名)
+  peopleType?: string;    // 'Actor' | 'Director' | 'Writer' | …
+  personName?: string;    // real actor name
+  personImgURL?: string;
+  image?: string;
+  sort?: number;
+}
+
 interface SeriesExtended {
   id: number;
   name: string;
@@ -41,6 +55,7 @@ interface SeriesExtended {
     overview?: string;
     runtime?: number;
   }>;
+  characters?: TvdbCharacter[];
   translations?: {
     nameTranslations?: Array<{ language: string; name: string }>;
     overviewTranslations?: Array<{ language: string; overview: string }>;
@@ -61,6 +76,7 @@ interface MovieExtended {
     nameTranslations?: Array<{ language: string; name: string }>;
   };
   crew?: Array<{ name: string; peopleType: string }>;
+  characters?: TvdbCharacter[];
 }
 
 export interface TvdbLoginResponse {

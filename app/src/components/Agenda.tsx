@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
 import { Icon } from './Icon';
+import { PageHead } from './Pages';
 import { toMin, durLabel, MOCK_NOW_MIN, progId, getChannel, seriesCounts } from '../lib/epg';
 import type { Channel, Program, Recording, Rule, TvdbSeries } from '../data/types';
 
@@ -195,24 +196,7 @@ export function AgendaView({ programs, channels, onSelect, selectedId, reservedI
   );
 }
 
-// ============ Helpers (local — equivalent to PageHead/StatPill in original pages.jsx) ============
-interface PageHeadProps {
-  title: string;
-  desc?: string;
-  children?: ReactNode;
-}
-
-function PageHead({ title, desc, children }: PageHeadProps) {
-  return (
-    <div className="page-head">
-      <div>
-        <h1>{title}</h1>
-        {desc && <p>{desc}</p>}
-      </div>
-      {children && <div style={{ display: 'flex', gap: 8 }}>{children}</div>}
-    </div>
-  );
-}
+// ============ Helpers (local — StatPill only; PageHead now comes from ./Pages) ============
 
 type StatTone = 'ok' | 'accent' | 'rec';
 
@@ -289,11 +273,7 @@ export function RulesPage({ rules, channels, recordings, toggleRule, onCreate, u
   const totalRecorded = rules.reduce((s, r) => s + r.matches, 0);
   return (
     <div className="page">
-      <PageHead title="ルール録画" desc="条件マッチで自動予約するルールと、TVDBに紐付いたシリーズ自動録画。">
-        <button className="btn primary" onClick={onCreate}>
-          <Icon name="plus" size={13} /> 新規ルール
-        </button>
-      </PageHead>
+      <PageHead title="ルール録画" />
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 18, alignItems: 'center', flexWrap: 'wrap' }}>
         <StatPill label="合計" value={rules.length} />
@@ -585,15 +565,6 @@ export function RuleEditModal({ rule, channels, onClose, onSave, onDelete }: Rul
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="ルール名"
-              style={{
-                padding: '8px 10px',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius)',
-                background: 'var(--bg-elev)',
-                fontSize: 13,
-                color: 'var(--fg)',
-                fontFamily: 'inherit',
-              }}
             />
           </label>
 
@@ -606,15 +577,7 @@ export function RuleEditModal({ rule, channels, onClose, onSave, onDelete }: Rul
               onChange={(e) => setKeyword(e.target.value)}
               disabled={isSeries}
               placeholder="タイトル含有文字列"
-              style={{
-                padding: '8px 10px',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius)',
-                background: isSeries ? 'var(--bg-muted)' : 'var(--bg-elev)',
-                fontSize: 13,
-                color: isSeries ? 'var(--fg-muted)' : 'var(--fg)',
-                fontFamily: 'var(--font-mono)',
-              }}
+              style={{ fontFamily: 'var(--font-mono)' }}
             />
           </label>
 

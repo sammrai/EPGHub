@@ -1,5 +1,5 @@
-import type { TvdbEntry } from '../schemas/tvdb.ts';
-import { TvdbV4HttpClient } from '../integrations/tvdb/client.ts';
+import type { TvdbCastMember, TvdbEntry } from '../schemas/tvdb.ts';
+import { TvdbV4HttpClient, type TvdbCharacter } from '../integrations/tvdb/client.ts';
 import {
   searchHitToEntry,
   seriesExtendedToEntry,
@@ -7,6 +7,35 @@ import {
   seriesEpisodesLite,
   type SeriesEpisodeLite,
 } from '../integrations/tvdb/adapter.ts';
+
+// Absolute URL host for TVDB actor photos. The /series/:id/extended payload
+// returns relative paths like `/banners/v4/actor/9150712/photo/abc.jpg`.
+const TVDB_ARTWORKS_HOST = 'https://artworks.thetvdb.com';
+
+// Build the absolute URL for a TVDB character image. Empty string when no
+// artwork is on file — the UI falls back to a letter avatar in that case.
+function absoluteImageUrl(raw: string | undefined): string {
+  if (!raw) return '';
+  if (/^https?:\/\//.test(raw)) return raw;
+  if (raw.startsWith('/')) return `${TVDB_ARTWORKS_HOST}${raw}`;
+  return `${TVDB_ARTWORKS_HOST}/${raw}`;
+}
+
+// Normalize a TVDB v4 character array → cast rows the UI consumes.
+// We only surface "Actor"-typed entries (so director/writer don't show up
+// on a 出演者 grid), sort by TVDB's `sort` field, and cap at 12.
+export function charactersToCast(raw: TvdbCharacter[] | undefined): TvdbCastMember[] {
+  if (!raw || raw.length === 0) return [];
+  const actors = raw.filter((c) => !c.peopleType || c.peopleType === 'Actor');
+  const sorted = [...actors].sort(
+    (a, b) => (a.sort ?? Number.MAX_SAFE_INTEGER) - (b.sort ?? Number.MAX_SAFE_INTEGER),
+  );
+  return sorted.slice(0, 12).map((c) => ({
+    name: c.personName ?? '',
+    role: c.name ?? '',
+    image: absoluteImageUrl(c.personImgURL ?? c.image),
+  }));
+}
 
 // Pluggable TVDB provider. Swap the fixture with the real v4 client when
 // TVDB_API_KEY is set.
@@ -16,6 +45,9 @@ export interface TvdbProvider {
   catalog(): Promise<Record<string, TvdbEntry>>;
   /** Episode list (aired order) for a series id, empty for movies. */
   getSeriesEpisodes(id: number): Promise<SeriesEpisodeLite[]>;
+  /** Actor cast for a series / movie id. Empty when no data is cached or
+   *  the provider can't look it up (fixture mode). */
+  getCast(id: number): Promise<TvdbCastMember[]>;
 }
 
 export class FixtureTvdbProvider implements TvdbProvider {
@@ -42,6 +74,10 @@ export class FixtureTvdbProvider implements TvdbProvider {
   }
 
   async getSeriesEpisodes(): Promise<SeriesEpisodeLite[]> {
+    return [];
+  }
+
+  async getCast(): Promise<TvdbCastMember[]> {
     return [];
   }
 }
@@ -153,6 +189,24 @@ export class TvdbV4Provider implements TvdbProvider {
       return [];
     }
   }
+
+  async getCast(id: number): Promise<TvdbCastMember[]> {
+    // The extended payload already includes `characters` for both series
+    // and movies, so we just reuse whichever endpoint resolves. Callers
+    // don't necessarily know the kind, so we try series then movie.
+    try {
+      const ex = await this.client.getSeriesExtended(id);
+      return charactersToCast(ex.characters);
+    } catch {
+      // fall through to movie
+    }
+    try {
+      const ex = await this.client.getMovieExtended(id);
+      return charactersToCast(ex.characters);
+    } catch {
+      return [];
+    }
+  }
 }
 
 // Runtime provider cache. The concrete provider depends on whether a TVDB
@@ -214,5 +268,8 @@ export const tvdbService: TvdbProvider = {
   },
   async getSeriesEpisodes(id) {
     return (await getProvider()).getSeriesEpisodes(id);
+  },
+  async getCast(id) {
+    return (await getProvider()).getCast(id);
   },
 };

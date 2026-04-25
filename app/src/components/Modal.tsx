@@ -9,6 +9,7 @@ import { toMin, durLabel, MOCK_NOW_MIN, findSeries, progId, getChannel } from '.
 import { jpAirDate } from '../lib/adapters';
 import { api, ApiError } from '../api/epghub';
 import type { ApiTvdbEntry, ApiTvdbEpisode } from '../api/epghub';
+import { hasPoster, posterStyle, heroBgStyle, tvdbHomepage } from '../lib/tvdbVisual';
 import type {
   Channel,
   Program,
@@ -649,21 +650,6 @@ function ReserveNewModal({
   );
 }
 
-// Poster helpers — prefer the real TVDB jacket, fall back to a procedural
-// oklch gradient keyed on tvdb.id so cards stay visually distinct even when
-// an image is missing. fixtures + /search hits often ship empty `poster`.
-function hasPoster(tvdb: TvdbEntry): boolean {
-  return !!tvdb.poster && /^https?:\/\//.test(tvdb.poster);
-}
-
-// Public TVDB page for an entry. Slug is the canonical key; fall back to the
-// numeric id when the slug is missing/empty.
-function tvdbHomepage(tvdb: TvdbEntry): string {
-  const kind = tvdb.type === 'movie' ? 'movies' : 'series';
-  const key = tvdb.slug && tvdb.slug.trim() ? tvdb.slug : String(tvdb.id);
-  return `https://thetvdb.com/${kind}/${key}`;
-}
-
 // Small "TVDB" badge that links to the entry's public page. Renders the
 // entry's id inline so users can see which match is linked. noreferrer so
 // TVDB can't correlate the click back to us.
@@ -688,37 +674,6 @@ function TvdbBadge({ tvdb }: { tvdb: TvdbEntry }) {
       <Icon name="external" size={10} /> TVDB #{tvdb.id}
     </a>
   );
-}
-
-function gradientBg(tvdb: TvdbEntry, variant: 'a' | 'b' = 'a'): string {
-  const m = variant === 'b' ? 3 : 2;
-  return `linear-gradient(145deg, oklch(0.55 0.14 ${tvdb.id % 360}), oklch(0.32 0.11 ${(tvdb.id * m) % 360}))`;
-}
-
-function posterStyle(tvdb: TvdbEntry): CSSProperties {
-  if (hasPoster(tvdb)) {
-    return {
-      backgroundImage: `url("${tvdb.poster}")`,
-      backgroundSize: 'cover',
-      backgroundPosition: 'center',
-      backgroundColor: 'var(--bg-muted)',
-    };
-  }
-  return { background: gradientBg(tvdb) };
-}
-
-function heroBgStyle(tvdb: TvdbEntry): CSSProperties {
-  // The blurred hero backdrop. Real poster when available; fall back to the
-  // gradient. The container CSS already applies blur/opacity so the poster
-  // doesn't fight the foreground type.
-  if (hasPoster(tvdb)) {
-    return {
-      backgroundImage: `url("${tvdb.poster}")`,
-      backgroundSize: 'cover',
-      backgroundPosition: 'center',
-    };
-  }
-  return { background: gradientBg(tvdb) };
 }
 
 interface MovieHeroProps {
@@ -817,7 +772,6 @@ function SeriesHero({ program, tvdb, ch, seriesEps, onEditTvdb }: SeriesHeroProp
   // Hide the duplicate English title when it equals the Japanese one
   // (common for Japanese-only shows where TVDB reuses the Japanese name).
   const showTitleEn = tvdb.titleEn && tvdb.titleEn !== tvdb.title;
-  const upcoming = seriesEps.length;
   const statusJa = tvdb.status === 'continuing' ? '放送中' : tvdb.status === 'ended' ? '完結' : '放送中';
   const networkYear = tvdb.network
     ? (tvdb.year > 0 ? `${tvdb.network} · ${tvdb.year}年〜` : tvdb.network)
@@ -901,11 +855,6 @@ function SeriesHero({ program, tvdb, ch, seriesEps, onEditTvdb }: SeriesHeroProp
                 />
               </div>
               <span className="sh-progress-label">{progress}%</span>
-            </div>
-          )}
-          {upcoming > 1 && (
-            <div className="sh-airing">
-              <span style={{ color: 'var(--fg-muted)' }}>今後{upcoming}回予定</span>
             </div>
           )}
         </div>
@@ -1567,15 +1516,7 @@ function TvdbEditModal({ program, entry, onClose, onChange }: TvdbEditModalProps
               onKeyDown={(e) => { if (e.key === 'Enter') void runSearch(); }}
               placeholder="TVDB を検索"
               autoFocus
-              style={{
-                flex: 1,
-                padding: '8px 10px',
-                fontSize: 13,
-                border: '1px solid var(--border)',
-                borderRadius: 6,
-                background: 'var(--bg)',
-                color: 'var(--fg)',
-              }}
+              style={{ flex: 1 }}
             />
             <button
               className="btn"
@@ -1697,21 +1638,14 @@ function TvdbEditModal({ program, entry, onClose, onChange }: TvdbEditModalProps
                     S
                     {seasonOpts.length > 0 ? (
                       <select
+                        className="control-sm"
                         value={selSeason ?? ''}
                         onChange={(e) => {
                           const v = e.target.value === '' ? null : Number(e.target.value);
                           setSelSeason(v);
                           setSelEpisode(null);
                         }}
-                        style={{
-                          padding: '4px 8px',
-                          fontSize: 12,
-                          border: '1px solid var(--border)',
-                          borderRadius: 6,
-                          background: 'var(--bg)',
-                          color: 'var(--fg)',
-                          fontFamily: 'var(--font-mono)',
-                        }}
+                        style={{ fontFamily: 'var(--font-mono)' }}
                       >
                         <option value="">—</option>
                         {seasonOpts.map((s) => (
@@ -1720,22 +1654,14 @@ function TvdbEditModal({ program, entry, onClose, onChange }: TvdbEditModalProps
                       </select>
                     ) : (
                       <input
+                        className="control-sm"
                         type="number"
                         placeholder="-"
                         value={selSeason ?? ''}
                         onChange={(e) =>
                           setSelSeason(e.target.value === '' ? null : Number(e.target.value))
                         }
-                        style={{
-                          width: 64,
-                          padding: '4px 8px',
-                          fontSize: 12,
-                          border: '1px solid var(--border)',
-                          borderRadius: 6,
-                          background: 'var(--bg)',
-                          color: 'var(--fg)',
-                          fontFamily: 'var(--font-mono)',
-                        }}
+                        style={{ width: 64, fontFamily: 'var(--font-mono)' }}
                       />
                     )}
                   </label>
@@ -1743,20 +1669,12 @@ function TvdbEditModal({ program, entry, onClose, onChange }: TvdbEditModalProps
                     E
                     {epsForSeason.length > 0 ? (
                       <select
+                        className="control-sm"
                         value={selEpisode ?? ''}
                         onChange={(e) =>
                           setSelEpisode(e.target.value === '' ? null : Number(e.target.value))
                         }
-                        style={{
-                          padding: '4px 8px',
-                          fontSize: 12,
-                          border: '1px solid var(--border)',
-                          borderRadius: 6,
-                          background: 'var(--bg)',
-                          color: 'var(--fg)',
-                          fontFamily: 'var(--font-mono)',
-                          maxWidth: 320,
-                        }}
+                        style={{ fontFamily: 'var(--font-mono)', maxWidth: 320 }}
                       >
                         <option value="">—</option>
                         {epsForSeason.map((ep) => (
@@ -1767,22 +1685,14 @@ function TvdbEditModal({ program, entry, onClose, onChange }: TvdbEditModalProps
                       </select>
                     ) : (
                       <input
+                        className="control-sm"
                         type="number"
                         placeholder="-"
                         value={selEpisode ?? ''}
                         onChange={(e) =>
                           setSelEpisode(e.target.value === '' ? null : Number(e.target.value))
                         }
-                        style={{
-                          width: 64,
-                          padding: '4px 8px',
-                          fontSize: 12,
-                          border: '1px solid var(--border)',
-                          borderRadius: 6,
-                          background: 'var(--bg)',
-                          color: 'var(--fg)',
-                          fontFamily: 'var(--font-mono)',
-                        }}
+                        style={{ width: 64, fontFamily: 'var(--font-mono)' }}
                       />
                     )}
                   </label>

@@ -8,18 +8,20 @@ import {
   useParams,
   useSearchParams,
 } from 'react-router-dom';
-import { Brand, Header, Sidebar } from './components/Shell';
+import { Sidebar } from './components/Shell';
+import { Icon } from './components/Icon';
 import { GridView, Subheader } from './components/Grid';
 import type { GridLayout, GridDensity, GridBcType } from './components/Grid';
 import { TimelineView } from './components/Timeline';
 import type { ScrubRange } from './components/Timeline';
 import { AgendaView, RulesPage } from './components/Agenda';
-import { ReserveModal } from './components/Modal';
+import { GuidePanel } from './components/GuidePanel';
 import { SearchPalette } from './components/SearchPalette';
 import type { SearchAction } from './components/SearchPalette';
 import {
   DiscoverPage,
   LibraryPage,
+  PageHead,
   ReservesPage,
   SettingsPage,
 } from './components/Pages';
@@ -553,6 +555,14 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [closeModal, modalProg, searchOpen]);
 
+  // PageHead's search pill dispatches this event (it can't hold a ref to
+  // setSearchOpen without prop-drilling through every page).
+  useEffect(() => {
+    const handler = () => setSearchOpen(true);
+    window.addEventListener('epghub:open-search', handler);
+    return () => window.removeEventListener('epghub:open-search', handler);
+  }, []);
+
   const counts = {
     series: rules.filter((r) => r.kind === 'series' && r.enabled).length,
     rules: rules.filter((r) => r.enabled).length,
@@ -576,19 +586,6 @@ export function App() {
     (systemR.data == null && systemR.loading) ||
     (channelsR.data == null && channelsR.loading);
 
-  // Header/breadcrumb: on /library/:tvdbId show the series title crumb.
-  const libraryIdMatch = location.pathname.match(/^\/library\/(\d+)/);
-  const libraryView = libraryIdMatch ? Number(libraryIdMatch[1]) : null;
-  const crumbs =
-    page === 'library' && libraryView != null
-      ? [
-          {
-            label:
-              (Object.values(tvdbCatalog).find((t) => t.id === libraryView) ?? { title: '' })
-                .title,
-          },
-        ]
-      : [];
 
   const existingSeriesIdSet = new Set(
     rules.flatMap((r) => (r.kind === 'series' && r.tvdb ? [r.tvdb.id] : []))
@@ -622,17 +619,6 @@ export function App() {
 
   return (
     <div className="app">
-      <Brand />
-      <Header
-        page={page}
-        crumbs={crumbs}
-        onCrumb={(idx) => {
-          if (idx === null) navigate('/');
-          else if (idx === 0) navigate('/library');
-        }}
-        onOpenSearch={() => setSearchOpen(true)}
-        onCreateRule={() => navigate('/rules')}
-      />
       <Sidebar
         active={page}
         onNav={(p) => {
@@ -654,60 +640,67 @@ export function App() {
             <Route
               path="/"
               element={
-                <>
-                  <Subheader
-                    density={density}
-                    layout={layout}
-                    onLayout={setLayout}
-                    filter={genreFilter}
-                    setFilter={setGenreFilter}
-                    bcType={bcType}
-                    setBcType={setBcType}
-                    selectedDate={selectedDate}
-                    onSelectDate={setSelectedDate}
-                    displayedDate={displayedDate}
-                  />
-                  <div className="view-wrap">
-                    {layout === 'grid' && (
-                      <GridView
-                        programs={filteredPrograms}
-                        channels={visibleChannels}
-                        onSelect={openModal}
-                        selectedId={selectedProg}
-                        reservedIds={reservedIds}
-                        density={density}
-                        baseDate={selectedDate}
-                        daysLoaded={Math.max(1, schedule.loadedDays)}
-                        onLoadMore={loadMoreDays}
-                        onVisibleDateChange={setDisplayedDate}
-                      />
-                    )}
-                    {layout === 'timeline' && (
-                      <TimelineView
-                        programs={filteredPrograms}
-                        channels={visibleChannels}
-                        onSelect={openModal}
-                        selectedId={selectedProg}
-                        reservedIds={reservedIds}
-                        scrubRange={scrubRange}
-                        setScrubRange={setScrubRange}
-                        baseDate={selectedDate}
-                        daysLoaded={Math.max(1, schedule.loadedDays)}
-                        onLoadMore={loadMoreDays}
-                        onVisibleDateChange={setDisplayedDate}
-                      />
-                    )}
-                    {layout === 'agenda' && (
-                      <AgendaView
-                        programs={filteredPrograms}
-                        channels={visibleChannels}
-                        onSelect={openModal}
-                        selectedId={selectedProg}
-                        reservedIds={reservedIds}
-                      />
-                    )}
+                <div className="guide-shell">
+                  <div className="guide-shell-main">
+                    <div className="page-head-strip">
+                      <PageHead title="番組表" />
+                    </div>
+                    <Subheader
+                      density={density}
+                      layout={layout}
+                      onLayout={setLayout}
+                      filter={genreFilter}
+                      setFilter={setGenreFilter}
+                      bcType={bcType}
+                      setBcType={setBcType}
+                      selectedDate={selectedDate}
+                      onSelectDate={setSelectedDate}
+                      displayedDate={displayedDate}
+                    />
+                    <div className="view-wrap">
+                      {layout === 'grid' && (
+                        <GridView
+                          programs={programs}
+                          channels={visibleChannels}
+                          onSelect={openModal}
+                          selectedId={selectedProg}
+                          reservedIds={reservedIds}
+                          density={density}
+                          baseDate={selectedDate}
+                          daysLoaded={Math.max(1, schedule.loadedDays)}
+                          onLoadMore={loadMoreDays}
+                          onVisibleDateChange={setDisplayedDate}
+                          genreFilter={genreFilter}
+                        />
+                      )}
+                      {layout === 'timeline' && (
+                        <TimelineView
+                          programs={programs}
+                          channels={visibleChannels}
+                          onSelect={openModal}
+                          selectedId={selectedProg}
+                          reservedIds={reservedIds}
+                          scrubRange={scrubRange}
+                          setScrubRange={setScrubRange}
+                          baseDate={selectedDate}
+                          daysLoaded={Math.max(1, schedule.loadedDays)}
+                          onLoadMore={loadMoreDays}
+                          onVisibleDateChange={setDisplayedDate}
+                          genreFilter={genreFilter}
+                        />
+                      )}
+                      {layout === 'agenda' && (
+                        <AgendaView
+                          programs={filteredPrograms}
+                          channels={visibleChannels}
+                          onSelect={openModal}
+                          selectedId={selectedProg}
+                          reservedIds={reservedIds}
+                        />
+                      )}
+                    </div>
                   </div>
-                </>
+                </div>
               }
             />
             <Route
@@ -805,25 +798,20 @@ export function App() {
       </main>
 
       {modalProg && (
-        <ReserveModal
+        <GuidePanel
           program={modalProg}
+          channels={channels}
+          programs={programs}
+          reservedIds={reservedIds}
+          existingSeriesIds={existingSeriesIdSet}
+          recordingIdForProgram={recordingIdForProgram}
           onClose={closeModal}
           onReserve={(p) => void handleReserve(p)}
           onCreateRule={(kw, p, ch) => void handleCreateRule(kw, p, ch)}
           onCreateSeriesLink={(tv, p, ch) => void handleCreateSeriesLink(tv, p, ch)}
-          reservedIds={reservedIds}
-          channels={channels}
-          programs={programs}
-          tvdb={tvdbCatalog}
-          existingSeriesIds={existingSeriesIdSet}
           onUnsubscribeSeries={(tvdbId) => void handleUnsubscribeSeries(tvdbId)}
-          recordingIdForProgram={recordingIdForProgram}
           onStopRecording={(recordingId) => void handleStopRecording(recordingId)}
-          onTvdbChange={() => {
-            void schedule.refresh();
-            void tvdbR.refresh();
-            pushToast('TVDB 紐付けを更新しました');
-          }}
+          onSelectProgram={openModal}
         />
       )}
 

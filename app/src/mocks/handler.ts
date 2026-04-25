@@ -153,11 +153,12 @@ export function handleMockRequest(req: Request): Response | null {
     );
     return ok(hits);
   }
-  const tvdbIdMatch = url.pathname.match(/^\/api\/tvdb\/(\d+)(\/episodes)?$/);
+  const tvdbIdMatch = url.pathname.match(/^\/api\/tvdb\/(\d+)(\/episodes|\/cast)?$/);
   if (tvdbIdMatch) {
     const id = Number(tvdbIdMatch[1]);
     const hit = TVDB_CATALOG.find((e) => e.id === id);
-    if (tvdbIdMatch[2]) return ok([]);
+    if (tvdbIdMatch[2] === '/episodes') return ok([]);
+    if (tvdbIdMatch[2] === '/cast') return ok([]);
     return hit ? ok(hit) : new Response(null, { status: 404 });
   }
 

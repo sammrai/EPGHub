@@ -1105,6 +1105,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tvdb/{id}/cast": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * TVDB シリーズ/映画のキャスト
+         * @description /series/:id/extended (または /movies/:id/extended) の characters を正規化して俳優名・役名・顔写真URLを返す。登録がない場合は空配列。FixtureTvdbProvider は常に []。
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number | null;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description キャスト */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TvdbCast"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tuners": {
         parameters: {
             query?: never;
@@ -2533,6 +2574,21 @@ export interface components {
             name?: string;
         };
         TvdbEpisodeList: components["schemas"]["TvdbEpisode"][];
+        TvdbCastMember: {
+            /** @example 安倍里葎子 */
+            name: string;
+            /**
+             * @description 役名。なければ空文字。
+             * @example 榎本 ハル
+             */
+            role: string;
+            /**
+             * @description 俳優の顔写真 URL。TVDB に登録が無い場合は空文字。
+             * @example https://artworks.thetvdb.com/banners/v4/actor/9150712/photo/696771fa71e6e.jpg
+             */
+            image: string;
+        };
+        TvdbCast: components["schemas"]["TvdbCastMember"][];
         TunerState: {
             type: components["schemas"]["BcType"];
             total: number;

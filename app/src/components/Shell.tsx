@@ -28,14 +28,16 @@ interface NavItem {
 }
 
 export function Sidebar({ active, onNav, counts, system, recordingCount }: SidebarProps) {
-  const navMain: NavItem[] = [
+  // Labels match each page's actual h1 — no parenthetical sub-labels.
+  const navPrimary: NavItem[] = [
     { id: 'guide',    label: '番組表',     icon: 'grid',     count: null },
-    { id: 'library',  label: 'ライブラリ',  icon: 'disk',     count: counts.recorded },
-    { id: 'rules',    label: 'ルール',     icon: 'folder',   count: counts.rules },
-  ];
-  const navSec: NavItem[] = [
+    { id: 'rules',    label: 'ルール録画', icon: 'folder',   count: counts.rules },
+    { id: 'library',  label: 'ライブラリ', icon: 'disk',     count: counts.recorded },
     { id: 'discover', label: '発見',       icon: 'sparkle',  count: null },
-    { id: 'reserves', label: '予約・状態',  icon: 'calendar', count: counts.reserves, recBadge: recordingCount },
+  ];
+  // Secondary — state / config surfaces, kept quiet at the bottom.
+  const navSecondary: NavItem[] = [
+    { id: 'reserves', label: '予約一覧',   icon: 'calendar', count: counts.reserves, recBadge: recordingCount },
     { id: 'settings', label: '設定',       icon: 'settings', count: null },
   ];
   const NavBtn = (n: NavItem) => (
@@ -44,40 +46,48 @@ export function Sidebar({ active, onNav, counts, system, recordingCount }: Sideb
       className={`nav-item ${active === n.id ? 'active' : ''}`}
       onClick={() => onNav(n.id)}
     >
-      <Icon name={n.icon} size={14} />
-      <span>{n.label}</span>
+      <span className="nav-icon">
+        <Icon name={n.icon} size={18} />
+      </span>
+      <span className="nav-label-wrap">
+        <span className="nav-label">{n.label}</span>
+      </span>
       {n.recBadge != null && n.recBadge > 0 && (
         <span className="nav-badge rec"><span className="pulse-dot" /></span>
       )}
-      {n.count != null && <span className="count">{n.count}</span>}
+      {n.count != null && n.count > 0 && <span className="count">{n.count}</span>}
+    </button>
+  );
+  const MiniLink = (n: NavItem) => (
+    <button
+      key={n.id}
+      className={`nav-mini ${active === n.id ? 'active' : ''}`}
+      onClick={() => onNav(n.id)}
+    >
+      <span className="nav-mini-label">{n.label}</span>
+      {n.recBadge != null && n.recBadge > 0 && (
+        <span className="nav-badge rec"><span className="pulse-dot" /></span>
+      )}
+      {n.count != null && n.count > 0 && <span className="count">{n.count}</span>}
     </button>
   );
   return (
     <aside className="sidebar">
-      <div>
-        <div className="side-section-label">メイン</div>
-        <div className="side-group">{navMain.map(NavBtn)}</div>
-      </div>
-      <div>
-        <div className="side-section-label">ツール</div>
-        <div className="side-group">{navSec.map(NavBtn)}</div>
-      </div>
+      <Brand />
+      <nav className="side-group">{navPrimary.map(NavBtn)}</nav>
 
       <div style={{ flex: 1 }} />
 
-      <div>
-        <div className="side-section-label">リファレンス</div>
-        <div className="side-group">
-          <a
-            className="nav-item"
-            href="/docs"
-            target="_blank"
-            rel="noreferrer noopener"
-          >
-            <Icon name="external" size={14} />
-            <span>API 仕様書</span>
-          </a>
-        </div>
+      <div className="side-footer">
+        {navSecondary.map(MiniLink)}
+        <a
+          className="nav-mini"
+          href="/docs"
+          target="_blank"
+          rel="noreferrer noopener"
+        >
+          <span className="nav-mini-label">API 仕様書</span>
+        </a>
       </div>
 
       <SysWidget system={system} />

@@ -4,6 +4,20 @@ import { BrowserRouter } from 'react-router-dom';
 import { App } from './App';
 import './styles/app.css';
 
+// Measure the native scrollbar width once and expose it as
+// --scrollbar-width on :root. Used by .page-head-strip to mirror the
+// gutter that .page reserves via scrollbar-gutter: stable — keeps the
+// centered search pill in the exact same position on every page.
+(function measureScrollbar(): void {
+  const probe = document.createElement('div');
+  probe.style.cssText =
+    'position:absolute;top:-9999px;width:100px;height:100px;overflow-y:scroll;visibility:hidden;';
+  document.body.appendChild(probe);
+  const width = probe.offsetWidth - probe.clientWidth;
+  document.body.removeChild(probe);
+  document.documentElement.style.setProperty('--scrollbar-width', `${width}px`);
+})();
+
 // When deployed as a sub-path site (GH Pages at /EPGHub/), Vite sets
 // BASE_URL accordingly; pass it through so react-router's routes stay
 // relative to the site root instead of the repo host root.

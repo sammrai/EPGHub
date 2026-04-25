@@ -384,6 +384,10 @@ export interface GridViewProps {
    *  Subheader can show a live "表示中: MM/DD" chip (課題#13). Receives
    *  `baseDate`, `baseDate+1`, … as YYYY-MM-DD. */
   onVisibleDateChange?: (ymd: string) => void;
+  /** 'all' renders everything at full strength. Any other value renders
+   *  non-matching programs faded (they stay in place to preserve grid
+   *  context rather than being fully removed). */
+  genreFilter?: string;
 }
 
 interface GridCssVars extends CSSProperties {
@@ -405,7 +409,7 @@ function findScrollParent(el: HTMLElement | null): HTMLElement | null {
   return null;
 }
 
-export function GridView({ programs, channels, onSelect, selectedId, density, reservedIds, baseDate, daysLoaded, onLoadMore, onVisibleDateChange }: GridViewProps) {
+export function GridView({ programs, channels, onSelect, selectedId, density, reservedIds, baseDate, daysLoaded, onLoadMore, onVisibleDateChange, genreFilter = 'all' }: GridViewProps) {
   // 放送日連続ビュー: baseDate 05:00 JST を 0 分起点に、daysLoaded × 24時間分
   // を一枚のタイムラインで描画。スクロールが底近くに達すると onLoadMore で
   // 更に 1 日追加読み込みする (無限スクロール)。
@@ -426,8 +430,40 @@ export function GridView({ programs, channels, onSelect, selectedId, density, re
     return raw < START_HOUR * 60 ? raw + 24 * 60 - START_HOUR * 60 : raw - START_HOUR * 60;
   };
 
-  const nowOffset = ((Date.now() - baseMs) / 60000) * pxPerMin;
-  const nowVisible = nowOffset >= 0 && nowOffset <= totalMins * pxPerMin;
+  // Focus zone: from "now" to +3h is rendered at 2× scale so currently-
+  // airing and the next ~3 hours of programs dominate the viewport. Past
+  // programs and anything 3h+ ahead use the regular pxPerMin density. The
+  // zone is only active when `now` lands inside the loaded broadcast-day
+  // range (i.e. viewing today) — past/future base dates scale linearly so
+  // the view stays predictable.
+  const nowMinFromBase = (Date.now() - baseMs) / 60000;
+  const focusActive = nowMinFromBase > 0 && nowMinFromBase < totalMins;
+  const FOCUS_AHEAD_MIN = 180;
+  const FOCUS_SCALE = 2;
+  const focusStart = focusActive ? nowMinFromBase : -1;
+  const focusEnd = focusActive ? Math.min(totalMins, nowMinFromBase + FOCUS_AHEAD_MIN) : -1;
+
+  // Convert a minute-from-baseMs value into the corresponding Y pixel.
+  // Piecewise linear: identity×pxPerMin before focusStart, ×(pxPerMin*SCALE)
+  // inside the focus window, identity×pxPerMin after focusEnd (with the
+  // focus-zone width added back in).
+  const focusGrowthPx = focusActive
+    ? (focusEnd - focusStart) * pxPerMin * (FOCUS_SCALE - 1)
+    : 0;
+  const timeToPx = (min: number): number => {
+    if (!focusActive) return min * pxPerMin;
+    if (min <= focusStart) return min * pxPerMin;
+    if (min >= focusEnd) {
+      return focusStart * pxPerMin
+        + (focusEnd - focusStart) * pxPerMin * FOCUS_SCALE
+        + (min - focusEnd) * pxPerMin;
+    }
+    return focusStart * pxPerMin + (min - focusStart) * pxPerMin * FOCUS_SCALE;
+  };
+  const totalHeightPx = totalMins * pxPerMin + focusGrowthPx;
+
+  const nowOffset = timeToPx(nowMinFromBase);
+  const nowVisible = focusActive;
   const nowLabel = (() => {
     const d = new Date(Date.now() + 9 * 60 * 60 * 1000);
     return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
@@ -480,7 +516,19 @@ export function GridView({ programs, channels, onSelect, selectedId, density, re
         onLoadMore();
       }
       if (onVisibleDateChange) {
-        const mins = Math.max(0, scroller.scrollTop) / pxPerMin;
+        // Invert timeToPx for the scroll position. The focus zone is a
+        // simple piecewise function so the inverse is also piecewise.
+        const y = Math.max(0, scroller.scrollTop);
+        let mins: number;
+        if (!focusActive) {
+          mins = y / pxPerMin;
+        } else {
+          const yFocusStart = focusStart * pxPerMin;
+          const yFocusEnd = yFocusStart + (focusEnd - focusStart) * pxPerMin * FOCUS_SCALE;
+          if (y <= yFocusStart) mins = y / pxPerMin;
+          else if (y >= yFocusEnd) mins = focusEnd + (y - yFocusEnd) / pxPerMin;
+          else mins = focusStart + (y - yFocusStart) / (pxPerMin * FOCUS_SCALE);
+        }
         const ymd = broadcastDayAt(baseDate, mins);
         if (ymd !== lastVisibleDate.current) {
           lastVisibleDate.current = ymd;
@@ -507,13 +555,21 @@ export function GridView({ programs, channels, onSelect, selectedId, density, re
           </div>
         ))}
       </div>
-      <div className="grid-body" style={{ height: totalMins * pxPerMin }}>
+      <div className="grid-body" style={{ height: totalHeightPx }}>
         <div className="time-col">
-          {hourTicks.map(h => (
-            <div key={h} className="time-tick">
-              {String(h % 24).padStart(2, '0')}
-            </div>
-          ))}
+          {hourTicks.map((h) => {
+            // Tick heights follow the same focus-zone mapping as program
+            // blocks so the time axis stays aligned — hours inside the
+            // ±90-min window around now are drawn 2× taller than outside.
+            const startMin = (h - START_HOUR) * 60;
+            const endMin = startMin + 60;
+            const tickH = timeToPx(endMin) - timeToPx(startMin);
+            return (
+              <div key={h} className="time-tick" style={{ height: tickH }}>
+                {String(h % 24).padStart(2, '0')}
+              </div>
+            );
+          })}
         </div>
         {channels.map(ch => {
           const progs = programs.filter(p => p.ch === ch.id);
@@ -524,12 +580,18 @@ export function GridView({ programs, channels, onSelect, selectedId, density, re
                 const endOffRaw = offsetMin(p.endAt, p.end);
                 const endOff = !p.endAt && endOffRaw < startOff ? endOffRaw + 24 * 60 : endOffRaw;
                 if (endOff <= 0 || startOff >= totalMins) return null;
-                const top = startOff * pxPerMin;
-                const height = (endOff - startOff) * pxPerMin - 1;
+                // Positions respect the non-linear focus zone so programs
+                // inside ±90 min of now get 2× vertical real estate.
+                const top = timeToPx(startOff);
+                const rawH = timeToPx(endOff) - top;
+                // Cards float on a tinted body — 3px gap so adjacent
+                // programs don't touch.
+                const height = Math.max(18, rawH - 3);
                 const isReserved = reservedIds.has(progId(p));
                 const isPast = p.endAt ? Date.parse(p.endAt) < Date.now() : false;
                 const isRec = p.recording;
                 const short = height < 34;
+                const isDimmed = genreFilter !== 'all' && p.genre.key !== genreFilter;
                 return (
                   <div
                     key={idx}
@@ -539,20 +601,23 @@ export function GridView({ programs, channels, onSelect, selectedId, density, re
                       isReserved && !isRec && 'reserved',
                       isRec && 'recording',
                       isPast && 'past',
+                      isDimmed && 'dimmed',
                       selectedId === progId(p) && 'selected',
                     ].filter(Boolean).join(' ')}
                     style={{ top, height }}
                     onClick={() => onSelect(p)}
                   >
-                    <div className="prog-meta">
-                      <span style={{ color: 'var(--fg-secondary)', fontWeight: 600 }}>{p.start}</span>
-                      {p.genre && <span className="g-dot" style={{ background: p.genre.dot }} />}
-                      {p.hd && <span>HD</span>}
-                      {isRec && <span style={{ color: 'var(--rec)', fontWeight: 700 }}>● REC</span>}
+                    <div className="prog-content">
+                      <div className="prog-meta">
+                        <span style={{ color: 'var(--fg-secondary)', fontWeight: 600 }}>{p.start}</span>
+                        {p.genre && <span className="g-dot" style={{ background: p.genre.dot }} />}
+                        {p.hd && <span>HD</span>}
+                        {isRec && <span style={{ color: 'var(--rec)', fontWeight: 700 }}>● REC</span>}
+                      </div>
+                      {!short && <div className="prog-title">{p.title}</div>}
+                      {short && <div className="prog-title" style={{ fontSize: 11 }}>{p.title}</div>}
+                      {!short && p.ep && height > 90 && <div className="prog-sub">{p.ep}</div>}
                     </div>
-                    {!short && <div className="prog-title">{p.title}</div>}
-                    {short && <div className="prog-title" style={{ fontSize: 11 }}>{p.title}</div>}
-                    {!short && p.ep && height > 60 && <div className="prog-sub">{p.ep}</div>}
                   </div>
                 );
               })}

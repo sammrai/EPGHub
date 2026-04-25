@@ -1,7 +1,7 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
 import { eq } from 'drizzle-orm';
-import { TvdbEntrySchema, TvdbListSchema } from '../schemas/tvdb.ts';
+import { TvdbCastSchema, TvdbEntrySchema, TvdbListSchema } from '../schemas/tvdb.ts';
 import { ErrorSchema } from '../schemas/common.ts';
 import { tvdbService } from '../services/tvdbService.ts';
 import { db } from '../db/client.ts';
@@ -112,4 +112,26 @@ tvdbRouter.openapi(episodes, async (c) => {
     .where(eq(tvdbEntries.tvdbId, id))
     .limit(1);
   return c.json(row?.episodes ?? [], 200);
+});
+
+const cast = createRoute({
+  method: 'get',
+  path: '/tvdb/{id}/cast',
+  tags: ['tvdb'],
+  summary: 'TVDB シリーズ/映画のキャスト',
+  description:
+    '/series/:id/extended (または /movies/:id/extended) の characters を正規化して俳優名・役名・顔写真URLを返す。登録がない場合は空配列。FixtureTvdbProvider は常に []。',
+  request: {
+    params: z.object({
+      id: z.coerce.number().int().openapi({ param: { in: 'path' }, example: 389042 }),
+    }),
+  },
+  responses: {
+    200: { description: 'キャスト', content: { 'application/json': { schema: TvdbCastSchema } } },
+  },
+});
+
+tvdbRouter.openapi(cast, async (c) => {
+  const { id } = c.req.valid('param');
+  return c.json(await tvdbService.getCast(id), 200);
 });

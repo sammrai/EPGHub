@@ -62,6 +62,8 @@ export interface ApiTvdbEpisode {
   name?: string;
 }
 
+export type ApiTvdbCastMember = components['schemas']['TvdbCastMember'];
+
 const BASE = '/api';
 
 export class ApiError extends Error {
@@ -147,6 +149,8 @@ export const api = {
     getById: (id: number) => req<ApiTvdbEntry>('GET', `/tvdb/${id}`),
     listEpisodes: (tvdbId: number) =>
       req<ApiTvdbEpisode[]>('GET', `/tvdb/${tvdbId}/episodes`),
+    getCast: (tvdbId: number) =>
+      req<ApiTvdbCastMember[]>('GET', `/tvdb/${tvdbId}/cast`),
   },
   programs: {
     get: (id: string) => req<ApiProgram>('GET', `/programs/${encodeURIComponent(id)}`),

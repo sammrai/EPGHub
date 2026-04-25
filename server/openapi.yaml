@@ -859,6 +859,28 @@ components:
       type: array
       items:
         $ref: "#/components/schemas/TvdbEpisode"
+    TvdbCastMember:
+      type: object
+      properties:
+        name:
+          type: string
+          example: 安倍里葎子
+        role:
+          type: string
+          description: 役名。なければ空文字。
+          example: 榎本 ハル
+        image:
+          type: string
+          description: 俳優の顔写真 URL。TVDB に登録が無い場合は空文字。
+          example: https://artworks.thetvdb.com/banners/v4/actor/9150712/photo/696771fa71e6e.jpg
+      required:
+        - name
+        - role
+        - image
+    TvdbCast:
+      type: array
+      items:
+        $ref: "#/components/schemas/TvdbCastMember"
     TunerState:
       type: object
       properties:
@@ -2357,6 +2379,29 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TvdbEpisodeList"
+  /tvdb/{id}/cast:
+    get:
+      tags:
+        - tvdb
+      summary: TVDB シリーズ/映画のキャスト
+      description: /series/:id/extended (または /movies/:id/extended) の characters
+        を正規化して俳優名・役名・顔写真URLを返す。登録がない場合は空配列。FixtureTvdbProvider は常に []。
+      parameters:
+        - schema:
+            type:
+              - integer
+              - "null"
+            example: 389042
+          required: false
+          in: path
+          name: id
+      responses:
+        "200":
+          description: キャスト
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TvdbCast"
   /tuners:
     get:
       tags:

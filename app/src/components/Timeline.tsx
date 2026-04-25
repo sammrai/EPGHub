@@ -24,6 +24,10 @@ export interface TimelineViewProps {
   /** 表示中の放送日を親に通知する (課題#13). baseDate を 0 日目として、
    *  scrollLeft の位置から放送日境界 (JST 05:00) を判定し、またぐたびに発火。 */
   onVisibleDateChange?: (ymd: string) => void;
+  /** When set to a genre key, programs that don't match are kept in
+   *  place but rendered dimmed so the surrounding grid context stays
+   *  visible (`all` = no dim). */
+  genreFilter?: string;
 }
 
 export function TimelineView({
@@ -38,6 +42,7 @@ export function TimelineView({
   daysLoaded,
   onLoadMore,
   onVisibleDateChange,
+  genreFilter = 'all',
 }: TimelineViewProps) {
   const START_HOUR = 5;
   const END_HOUR = START_HOUR + 24 * daysLoaded;
@@ -237,10 +242,13 @@ export function TimelineView({
                     const b = !p.endAt && bRaw < a ? bRaw + 24 * 60 : bRaw;
                     if (b <= 0 || a >= totalMins) return null;
                     const left = a * pxPerMin;
-                    const w = Math.max(28, (b - a) * pxPerMin - 2);
+                    // +1 so each program's right-border overlaps the next
+                    // program's left-border on the same pixel (single line).
+                    const w = Math.max(28, (b - a) * pxPerMin + 1);
                     const isRes = reservedIds.has(progId(p));
                     const isRec = p.recording;
                     const isPast = p.endAt ? Date.parse(p.endAt) < Date.now() : false;
+                    const isDimmed = genreFilter !== 'all' && p.genre.key !== genreFilter;
                     return (
                       <div
                         key={i}
@@ -249,6 +257,7 @@ export function TimelineView({
                           isRes && !isRec && 'reserved',
                           isRec && 'recording',
                           isPast && 'past',
+                          isDimmed && 'dimmed',
                           selectedId === progId(p) && 'selected',
                         ].filter(Boolean).join(' ')}
                         style={{ left, width: w }}
