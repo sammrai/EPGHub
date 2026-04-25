@@ -39,7 +39,7 @@ test('search palette: opens, hits API, highlights matches, Enter opens modal', a
   });
 
   await page.goto('/');
-  await page.locator('.search').first().click();
+  await page.locator('.body-search').first().click();
   await expect(page.locator('.search-palette')).toBeVisible();
 
   // Open state: hints render, no console error.
@@ -78,7 +78,7 @@ test('search palette: IME 変換中 Enter で確定しない', async ({ page }) 
   );
 
   await page.goto('/');
-  await page.locator('.search').first().click();
+  await page.locator('.body-search').first().click();
   const input = page.locator('.search-palette-head input');
   await input.fill('ど');
 

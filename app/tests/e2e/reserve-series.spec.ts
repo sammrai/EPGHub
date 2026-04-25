@@ -26,11 +26,9 @@ test('TVDB シリーズ紐付け済み番組 → シリーズ登録 でルール
   const cell = page.getByTestId(`prog-${prog.id}`);
   await cell.click();
 
-  // "シリーズを追加" カードを選択
+  // GuidePanel の "シリーズを追加" カードをクリックすると即座に
+  // onCreateSeriesLink が走り、ルール POST が発火する (確認ステップなし)。
   await page.getByRole('button', { name: /シリーズを追加/ }).click();
-
-  // "シリーズ登録" ボタンが出るので押す
-  await page.getByRole('button', { name: /シリーズ登録/ }).click();
 
   // ルールが作成されたこと (kind='series', 紐付け TVDB が渡っている)
   await expect.poll(() => mock.state.rules.length).toBe(1);

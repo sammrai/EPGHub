@@ -51,6 +51,6 @@ test('Discover のランキング quote 押下 → /discover 上で Modal が開
 
   // Modal が開いていることを特徴的なボタンで検証 (TVDB シリーズの Modal は
   // ヒーローに series.title を出すため、program.title を直接は assert しない)。
-  await expect(page.getByRole('button', { name: '予約する' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'この回のみ録画' })).toBeVisible();
   await expect(page.getByText(series.title, { exact: false }).first()).toBeVisible();
 });
