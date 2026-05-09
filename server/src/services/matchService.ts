@@ -928,11 +928,16 @@ class DbMatchService implements MatchService {
     }
     // With episodes: resolve S/E per program using the cached episode list,
     // then update row-by-row. N is typically <= a few hundred.
+    //
+    // When `findEpisodeForProgram` returns null we leave (s,e) NULL on
+    // purpose — matchService is responsible for honest confidence, the
+    // recording filename layer (`plexNaming.plexPath`) handles uniqueness
+    // for null-tagged airings via `<title> - <stamp>_<id8>.<ext>`. This
+    // avoids the historical "rerun-pattern fallback" that estimated S/E
+    // from chronological order; that fallback was wrong far more often
+    // than right and poisoned the Plex library with confident-looking
+    // wrong metadata.
     const CHUNK = 1000;
-    // Collect unresolved programs (neither title #N nor aired-day matched) so
-    // we can optionally apply a rerun-pattern sequential fallback below.
-    const unresolved: Array<{ id: string; startAt: Date; title: string }> = [];
-    let totalForThisTvdb = 0;
     for (let i = 0; i < programIds.length; i += CHUNK) {
       const slice = programIds.slice(i, i + CHUNK);
       const rows = await db
@@ -940,16 +945,12 @@ class DbMatchService implements MatchService {
         .from(programs)
         .where(inArray(programs.id, slice));
       for (const row of rows) {
-        totalForThisTvdb++;
         const ep = findEpisodeForProgram(
           episodes,
           row.startAt.toISOString(),
           row.title,
           showTitles
         );
-        if (!ep) {
-          unresolved.push({ id: row.id, startAt: row.startAt, title: row.title });
-        }
         await db
           .update(programs)
           .set({
@@ -960,118 +961,6 @@ class DbMatchService implements MatchService {
             tvdbEpisodeName: ep?.name ?? null,
           })
           .where(eq(programs.id, row.id));
-      }
-    }
-    // Rerun-pattern sequential fallback. When a broadcaster re-airs an old
-    // series (e.g. a 2021 Korean drama shown on テレビ大阪 in 2026) the EPG
-    // titles usually omit episode numbers and the broadcast days don't match
-    // TVDB's original `aired` dates — so the per-program matcher above misses
-    // most of the slate. When the miss rate crosses 50% of a non-trivial
-    // sample (>=3 programs) we assume a sequential rerun starting at S1E1 and
-    // map unresolved[i] → episodes[i] in chronological order.
-    //
-    // Two preconditions guard against false-positive misfires:
-    //   (a) The cached `aired` dates must be old relative to when the
-    //       programs are airing. A current series with a stale TVDB cache
-    //       (latest cached aired only weeks behind today) is NOT a rerun;
-    //       firing the fallback would mass-mislabel ongoing-series episodes
-    //       as S1E1, S1E2, ...
-    //   (b) The unresolved programs must NOT carry explicit episode markers
-    //       (`第N話`, `（NN）`, `#N`, etc.). Marker-bearing misses indicate
-    //       a parse gap or cache gap, not an unnumbered rerun.
-    const RECENT_AIRED_DAYS = 60;
-    const dayMs = 86_400_000;
-    const airedTimes = episodes
-      .map((ep) => (ep.aired ? Date.parse(`${ep.aired}T00:00:00Z`) : NaN))
-      .filter((t) => Number.isFinite(t));
-    const latestAired = airedTimes.length > 0 ? Math.max(...airedTimes) : 0;
-    const earliestProgramStart = unresolved.length > 0
-      ? Math.min(...unresolved.map((p) => p.startAt.getTime()))
-      : 0;
-    const isStaleRerun =
-      latestAired > 0 &&
-      earliestProgramStart - latestAired > RECENT_AIRED_DAYS * dayMs;
-    const anyMarkerBearing = unresolved.some(
-      (p) => parseTitleEpisodeNumber(p.title) != null
-    );
-    if (
-      totalForThisTvdb >= 3 &&
-      unresolved.length / totalForThisTvdb >= 0.5 &&
-      isStaleRerun &&
-      !anyMarkerBearing
-    ) {
-      // Group programs by broadcast day. Multiple channels (svc-/m3u-) carry
-      // the same airing on the same day; sequential mapping must NOT advance
-      // the episode index for cross-channel duplicates of the same broadcast.
-      // Programs at the same broadcast day are treated as one airing slot
-      // and all assigned to the same episode.
-      const slots = new Map<string, Array<{ id: string; startAt: Date; title: string }>>();
-      for (const u of unresolved) {
-        const day = jstBroadcastDay(u.startAt.toISOString());
-        const arr = slots.get(day) ?? [];
-        arr.push(u);
-        slots.set(day, arr);
-      }
-      const slotDays = [...slots.keys()].sort();
-
-      // Verify the broadcast days form a regular cadence — typical reruns
-      // of an ongoing series air weekly (~7 days) or daily (~1 day). If
-      // gaps deviate wildly from the median (>50%) the sequential mapping
-      // is unreliable; abstain rather than estimate.
-      let cadenceOk = true;
-      if (slotDays.length >= 3) {
-        const dayTimes = slotDays.map((d) => Date.parse(`${d}T00:00:00Z`));
-        const gaps = dayTimes.slice(1).map((t, i) => t - dayTimes[i]);
-        const sortedGaps = [...gaps].sort((a, b) => a - b);
-        const median = sortedGaps[Math.floor(sortedGaps.length / 2)];
-        const isWeekly = median > 5 * dayMs && median < 10 * dayMs;
-        const isDaily = median > 0.5 * dayMs && median < 2 * dayMs;
-        const isFortnightly = median > 12 * dayMs && median < 17 * dayMs;
-        if (!isWeekly && !isDaily && !isFortnightly) {
-          cadenceOk = false;
-        } else {
-          // Reject if any single gap deviates >50% from the median —
-          // skipped weeks (`#5, #11`) make the chronological mapping
-          // shift and we lose track of which N maps to which (s,e).
-          const tol = median * 0.5;
-          if (gaps.some((g) => Math.abs(g - median) > tol)) {
-            cadenceOk = false;
-          }
-        }
-      }
-      if (!cadenceOk) {
-        return;
-      }
-
-      // Prefer real seasons (s >= 1) over specials (s === 0). Within that,
-      // ascending by (s, e) yields S1E1, S1E2, … then S2E1, … — correct for
-      // "rerun from the start" airings that may span multiple seasons.
-      const realSeasons = episodes.filter((ep) => ep.s >= 1);
-      const pool = realSeasons.length > 0 ? realSeasons : [...episodes];
-      const sortedEpisodes = [...pool].sort((a, b) =>
-        a.s !== b.s ? a.s - b.s : a.e - b.e
-      );
-      const pairs = Math.min(slotDays.length, sortedEpisodes.length);
-      if (pairs > 0) {
-        for (let i = 0; i < pairs; i++) {
-          const ep = sortedEpisodes[i];
-          for (const prog of slots.get(slotDays[i]) ?? []) {
-            await db
-              .update(programs)
-              .set({
-                tvdbId,
-                tvdbMatchedAt: now,
-                tvdbSeason: ep.s,
-                tvdbEpisode: ep.e,
-                tvdbEpisodeName: ep.name ?? null,
-              })
-              .where(eq(programs.id, prog.id));
-          }
-        }
-        const first = sortedEpisodes[0];
-        console.info(
-          `[match] rerun pattern: tvdbId=${tvdbId}, mapped ${pairs} broadcast days starting ${slotDays[0]} → S${first.s}E${first.e}..`
-        );
       }
     }
   }
