@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Icon } from './Icon';
 import { broadcastDayAt, progId } from '../lib/epg';
+import { addDays, jstTodayYmd } from '../lib/broadcastDay';
 import { seriesRuleCovers } from '../lib/seriesRule';
 import type { BcType, Channel, Program } from '../data/types';
 
@@ -38,19 +39,22 @@ interface DayEntry {
 
 const DOW = ['日', '月', '火', '水', '木', '金', '土'];
 
-// JST calendar arithmetic. JavaScript's Date is UTC-based; we add 9h so
-// getUTC* returns JST components, then treat the result as a pure calendar.
+// JST 放送日基準 (05:00 境界) で today + offsetDays を返す。App.tsx の
+// `selectedDate` は jstTodayYmd() で「いま放送中の日」を起点に計算され
+// るので、サブヘッダの日付ピルもそれに揃える必要がある。`+9h` の純粋
+// カレンダー日で計算すると、JST 00:00–05:00 帯で 1 日ずれて「明日」を
+// 押した結果が放送日 +2 になってしまう (e2e date-nav が落ちた原因)。
 function jstDateParts(offsetDays: number): { ymd: string; mmdd: string; dow: string; y: number; m: number; d: number } {
-  const d = new Date(Date.now() + 9 * 60 * 60 * 1000 + offsetDays * 86400_000);
-  const y = d.getUTCFullYear();
-  const m = d.getUTCMonth() + 1;
-  const day = d.getUTCDate();
+  const ymd = addDays(jstTodayYmd(), offsetDays);
+  const [y, m, day] = ymd.split('-').map(Number);
   const mm = String(m).padStart(2, '0');
   const dd = String(day).padStart(2, '0');
+  // 曜日は YYYY-MM-DD を UTC とみなして算出 (タイムゾーンに依らない).
+  const dow = DOW[new Date(Date.UTC(y, m - 1, day)).getUTCDay()];
   return {
-    ymd: `${y}-${mm}-${dd}`,
+    ymd,
     mmdd: `${mm}/${dd}`,
-    dow: DOW[d.getUTCDay()],
+    dow,
     y,
     m,
     d: day,
