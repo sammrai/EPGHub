@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 会話ガイド
+
+日本語で会話して
+
 ## Repository layout
 
 Two top-level workspaces, each with its own `package.json`:
