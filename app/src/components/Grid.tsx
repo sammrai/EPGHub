@@ -584,13 +584,15 @@ export function GridView({ programs, channels, onSelect, selectedId, density, re
                 // inside ±90 min of now get 2× vertical real estate.
                 const top = timeToPx(startOff);
                 const rawH = timeToPx(endOff) - top;
-                // Cards float on a tinted body — 3px gap so adjacent
-                // programs don't touch.
-                const height = Math.max(18, rawH - 3);
+                // Cells must touch exactly so each `border-bottom` hairline
+                // sits at the next cell's top edge — no gap (the design
+                // guide stitches cells into a continuous grid via
+                // border-bottom + border-right).
+                const height = Math.max(18, rawH);
                 const isReserved = reservedIds.has(progId(p));
                 const isPast = p.endAt ? Date.parse(p.endAt) < Date.now() : false;
                 const isRec = p.recording;
-                const short = height < 34;
+                const short = height < 38;
                 const isDimmed = genreFilter !== 'all' && p.genre.key !== genreFilter;
                 return (
                   <div
@@ -611,12 +613,17 @@ export function GridView({ programs, channels, onSelect, selectedId, density, re
                       <div className="prog-meta">
                         <span style={{ color: 'var(--fg-secondary)', fontWeight: 600 }}>{p.start}</span>
                         {p.genre && <span className="g-dot" style={{ background: p.genre.dot }} />}
-                        {p.hd && <span>HD</span>}
-                        {isRec && <span style={{ color: 'var(--rec)', fontWeight: 700 }}>● REC</span>}
+                        {isRec && <span className="prog-rec-tag">● REC</span>}
+                        {isReserved && !isRec && <span className="prog-resv-tag">予約</span>}
                       </div>
-                      {!short && <div className="prog-title">{p.title}</div>}
-                      {short && <div className="prog-title" style={{ fontSize: 11 }}>{p.title}</div>}
-                      {!short && p.ep && height > 90 && <div className="prog-sub">{p.ep}</div>}
+                      {short ? (
+                        <div className="prog-title compact">{p.title}</div>
+                      ) : (
+                        <div className="prog-title">{p.title}</div>
+                      )}
+                      {!short && height > 64 && (p.desc || p.ep) && (
+                        <div className="prog-desc">{p.desc ?? p.ep}</div>
+                      )}
                     </div>
                   </div>
                 );

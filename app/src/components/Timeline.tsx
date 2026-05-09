@@ -47,7 +47,7 @@ export function TimelineView({
   const START_HOUR = 5;
   const END_HOUR = START_HOUR + 24 * daysLoaded;
   const totalMins = (END_HOUR - START_HOUR) * 60;
-  const pxPerMin = 2.6;
+  const pxPerMin = 4.0;
   const width = totalMins * pxPerMin;
 
   const baseMs = Date.parse(`${baseDate}T05:00:00+09:00`);
@@ -235,25 +235,29 @@ export function TimelineView({
                     {progs.length}本 · {Math.round(totalDurMin / 60)}時間
                   </div>
                 </div>
-                <div className="tl-strip" style={{ width, minHeight: 78 }}>
+                <div className="tl-strip" style={{ width, minHeight: 140 }}>
                   {progs.map((p, i) => {
                     const a = offsetMin(p.startAt, p.start);
                     const bRaw = offsetMin(p.endAt, p.end);
                     const b = !p.endAt && bRaw < a ? bRaw + 24 * 60 : bRaw;
                     if (b <= 0 || a >= totalMins) return null;
                     const left = a * pxPerMin;
-                    // +1 so each program's right-border overlaps the next
-                    // program's left-border on the same pixel (single line).
-                    const w = Math.max(28, (b - a) * pxPerMin + 1);
+                    // Cells must NOT overlap — adjacent cells touch exactly
+                    // at the time boundary so each cell's `border-right`
+                    // hairline stays visible (a +1 overlap would let the
+                    // next cell's white background paint over the line).
+                    const w = Math.max(28, (b - a) * pxPerMin);
                     const isRes = reservedIds.has(progId(p));
                     const isRec = p.recording;
                     const isPast = p.endAt ? Date.parse(p.endAt) < Date.now() : false;
                     const isDimmed = genreFilter !== 'all' && p.genre.key !== genreFilter;
+                    const narrow = w < 130;
                     return (
                       <div
                         key={i}
                         className={[
                           'tl-prog',
+                          narrow && 'narrow',
                           isRes && !isRec && 'reserved',
                           isRec && 'recording',
                           isPast && 'past',
@@ -263,16 +267,15 @@ export function TimelineView({
                         style={{ left, width: w }}
                         onClick={() => onSelect(p)}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-muted)' }}>
-                          {p.genre && <span className="g-dot" style={{ background: p.genre.dot }} />}
-                          <strong style={{ color: 'var(--fg-secondary)' }}>{p.start}</strong>
-                          <span>–{p.end}</span>
-                          {isRes && <span className="agenda-badge resv" style={{ padding: '0 4px', fontSize: 8, marginLeft: 'auto' }}>RESV</span>}
+                        <div className="tl-prog-meta">
+                          <strong>{p.start}</strong>
+                          {isRec && <span className="prog-rec-tag">REC</span>}
+                          {isRes && !isRec && <span className="prog-resv-tag">予約</span>}
                         </div>
-                        <div style={{ fontWeight: 500, color: 'var(--fg)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: w < 140 ? 'nowrap' : 'normal', lineHeight: 1.3 }}>
-                          {p.title}
-                        </div>
-                        {w > 160 && p.ep && <div style={{ fontSize: 10.5, color: 'var(--fg-muted)' }}>{p.ep}</div>}
+                        <div className="tl-prog-title">{p.title}</div>
+                        {!narrow && (p.desc || p.ep) && (
+                          <div className="tl-prog-desc">{p.desc ?? p.ep}</div>
+                        )}
                       </div>
                     );
                   })}

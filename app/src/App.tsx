@@ -299,9 +299,13 @@ export function App() {
   const openModal = useCallback(
     (p: Program) => {
       setSelectedProg(progId(p));
-      pushModalToUrl(setSearchParams, progId(p));
+      // モーダルが既に開いている状態で別番組へ切り替える (関連番組リンク等)
+      // 場合は replace。push してしまうと「× で閉じる → 直前に見ていた番組
+      // モーダルに戻る」という連鎖が起きる。
+      const alreadyOpen = !!searchParams.get('modal');
+      pushModalToUrl(setSearchParams, progId(p), { replace: alreadyOpen });
     },
-    [setSearchParams],
+    [searchParams, setSearchParams],
   );
 
   // close は「自分で push したエントリなら navigate(-1)」「deep link なら
@@ -349,7 +353,9 @@ export function App() {
         pushToast(`エラー: ${(e as Error).message}`, 'err');
       }
     }
-    closeModal();
+    // Keep the modal open so the user sees the state change in place
+    // (ReserveBlock → ReservedBlock as reservedIds re-derives from the
+    // refreshed recordings).
   };
 
   const handleCreateRule = async (keyword: string, p: Program, channels?: string[]) => {
@@ -369,7 +375,6 @@ export function App() {
     } catch (e) {
       pushToast(`ルール作成失敗: ${(e as Error).message}`, 'err');
     }
-    closeModal();
   };
 
   const handleUnsubscribeSeries = async (tvdbId: number) => {
@@ -386,7 +391,6 @@ export function App() {
     } catch (e) {
       pushToast(`シリーズ解除失敗: ${(e as Error).message}`, 'err');
     }
-    closeModal();
   };
 
   const handleCreateSeriesLink = async (tvdb: TvdbSeries, p: Program, channels?: string[]) => {
@@ -407,7 +411,6 @@ export function App() {
     } catch (e) {
       pushToast(`シリーズ紐付け失敗: ${(e as Error).message}`, 'err');
     }
-    closeModal();
   };
 
   const toggleRule = async (id: number) => {
@@ -467,10 +470,9 @@ export function App() {
     } catch (e) {
       pushToast(`予約取消失敗: ${(e as Error).message}`, 'err');
     }
-    // Close the modal so a re-open triggers a fresh lookup against the
-    // just-refreshed recordings list (否則 stale modalProg が残って "reserved"
-    // 判定が遅れ、同じ番組を開き直したときに古いボタンが表示される). 課題#2.
-    closeModal();
+    // Keep the modal open — reservedIds re-derives from the refreshed
+    // recordings, so the panel automatically swaps ReservedBlock for
+    // ReserveBlock without losing the user's place.
   };
 
   const handleUpdateReserve = async (
@@ -508,7 +510,8 @@ export function App() {
         pushToast(`録画停止失敗: ${(e as Error).message}`, 'err');
       }
     }
-    closeModal();
+    // Keep the modal open so the user sees the post-stop state without
+    // having to re-open the program.
   };
 
   const recordingIdForProgram = useCallback(
@@ -600,7 +603,8 @@ export function App() {
   const handleSearchPick = useCallback(
     (action: SearchAction) => {
       if (action.kind === 'program') {
-        pushModalToUrl(setSearchParams, action.program.id);
+        const alreadyOpen = !!searchParams.get('modal');
+        pushModalToUrl(setSearchParams, action.program.id, { replace: alreadyOpen });
       } else if (action.kind === 'series') {
         navigate(`/library/${action.entry.id}`);
       } else if (action.kind === 'channel') {
@@ -614,7 +618,7 @@ export function App() {
         else navigate('/library');
       }
     },
-    [navigate, setSearchParams, setBcType],
+    [navigate, searchParams, setSearchParams, setBcType],
   );
 
   return (

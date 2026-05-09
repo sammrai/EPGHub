@@ -1,10 +1,11 @@
-// Right-side detail/reserve panel for the program guide. Replaces
-// ReserveModal on the `/` route — when a program is selected (?modal=<id>),
-// the guide route mounts this in place of the overlay so the user can
-// browse rich TVDB info (jacket, cast, related episodes) and act on it
-// (reserve / cancel / stop) without losing the grid context.
+// Floating detail/reserve panel for the program guide. Sits anchored to
+// the bottom of the viewport in landscape orientation so the guide above
+// remains visible — and crucially, clickable — while the panel is open.
+// The user can pick another program in the grid and the panel re-keys to
+// it without an intervening close. Glass-tinted hero (poster bleed +
+// soft fade-to-elev) is preserved from the prior centered modal.
 import { useEffect, useState } from 'react';
-import type { CSSProperties, MouseEvent } from 'react';
+import type { CSSProperties } from 'react';
 import { Icon } from './Icon';
 import { durLabel, getChannel, progId, findSeries, MOCK_NOW_MIN, toMin } from '../lib/epg';
 import { jpAirDate } from '../lib/adapters';
@@ -98,212 +99,222 @@ function GuidePanelInner({
       ? `S${program.tvdbSeason} · 第${program.tvdbEpisode}話${program.tvdbEpisodeName ? `「${program.tvdbEpisodeName}」` : ''}`
       : program.tvdbEpisodeName ?? program.ep ?? null;
 
-  return (
-    <div className="guide-modal-backdrop" onClick={onClose} data-testid="guide-panel">
-      <div
-        className="guide-modal"
-        role="dialog"
-        aria-modal="true"
-        onClick={(e: MouseEvent<HTMLDivElement>) => e.stopPropagation()}
-      >
-        <button
-          type="button"
-          className="gp-close"
-          onClick={onClose}
-          aria-label="閉じる"
-          title="閉じる"
-        >
-          <Icon name="x" size={14} />
-        </button>
+  const hasGlass = !!(tvdb && hasPoster(tvdb));
+  const hasExtras =
+    !!program.desc || tvdbCast.length > 0 || staff.length > 0 || related.length > 0;
+  const stateChip = program.recording ? (
+    <span className="gp-state-chip rec">
+      <span className="gp-state-dot" /> 録画中
+    </span>
+  ) : reserved ? (
+    <span className="gp-state-chip resv">
+      <Icon name="check" size={10} /> 予約済
+    </span>
+  ) : null;
 
-        <div
-          className={`gp-hero${tvdb && hasPoster(tvdb) ? ' has-poster' : ''}`}
-          style={
-            tvdb && hasPoster(tvdb)
-              ? ({ '--gp-hero-bg': `url("${tvdb.poster}")` } as CSSProperties)
-              : undefined
-          }
-        >
-          <div className="gp-hero-inner">
-            {tvdb && hasPoster(tvdb) ? (
-              <div className="gp-hero-poster" style={posterStyle(tvdb)} />
+  return (
+    <div
+      className="guide-panel-floating"
+      role="dialog"
+      aria-modal="false"
+      aria-label="番組詳細"
+      data-testid="guide-panel"
+    >
+      <button
+        type="button"
+        className="gp-close"
+        onClick={onClose}
+        aria-label="閉じる"
+        title="閉じる"
+      >
+        <Icon name="x" size={14} />
+      </button>
+
+      <div
+        className={`gp-main${hasGlass ? ' has-poster' : ''}`}
+        style={
+          hasGlass
+            ? ({ '--gp-hero-bg': `url("${tvdb!.poster}")` } as CSSProperties)
+            : undefined
+        }
+      >
+        {hasGlass ? (
+          <div className="gp-poster" style={posterStyle(tvdb!)} />
+        ) : (
+          <div
+            className="gp-poster gp-poster-fallback"
+            style={neutralHeroBg(program)}
+          >
+            {isMovie ? 'MOVIE' : 'TV'}
+          </div>
+        )}
+
+        <div className="gp-info">
+          <div className="gp-meta-row">
+            {tvdb ? (
+              <span className="gp-kind-pill">{isMovie ? '映画' : 'シリーズ'}</span>
             ) : (
-              <div
-                className="gp-hero-poster gp-hero-poster-fallback"
-                style={neutralHeroBg(program)}
+              <span
+                className="gp-kind-pill ghost"
+                style={{ '--tag-dot': program.genre.dot } as CSSProperties}
               >
-                {isMovie ? 'MOVIE' : 'TV'}
-              </div>
+                <span className="gp-kind-dot" />
+                {program.genre.label}
+              </span>
             )}
-            <div className="gp-hero-meta">
-              <div className="gp-kind-row">
-                {tvdb && (
-                  <span className="gp-kind-pill">{isMovie ? '映画' : 'シリーズ'}</span>
-                )}
-                {tvdb?.year && tvdb.year > 0 && <span>{tvdb.year}</span>}
-                {tvdb?.network && (
-                  <>
-                    {tvdb.year > 0 && <span className="gp-meta-sep">·</span>}
-                    <span>{tvdb.network}</span>
-                  </>
-                )}
-                {!tvdb && <span>{program.genre.label}</span>}
-              </div>
-              <h2 className="gp-title">{tvdb?.title ?? program.title}</h2>
-              {tvdb?.titleEn && tvdb.titleEn !== tvdb.title && (
-                <div className="gp-title-en">{tvdb.titleEn}</div>
-              )}
-              {subtitle && <div className="gp-subtitle">{subtitle}</div>}
-              <div className="gp-channel-row">
-                {ch && (
-                  <span className="gp-channel">
-                    <span className="gp-channel-dot" style={{ background: ch.color }} />
-                    {ch.name}
-                  </span>
-                )}
+            {stateChip}
+            <span className="gp-meta-sep">·</span>
+            <span className="gp-time">{program.start}–{program.end}</span>
+            <span className="gp-meta-sep">·</span>
+            <span>{durLabel(program)}</span>
+            {program.hd && (
+              <>
                 <span className="gp-meta-sep">·</span>
-                <span className="gp-time">{program.start}–{program.end}</span>
+                <span className="gp-hd">HD</span>
+              </>
+            )}
+            {tvdb?.year && tvdb.year > 0 && (
+              <>
                 <span className="gp-meta-sep">·</span>
-                <span>{durLabel(program)}</span>
-                {program.hd && (
-                  <>
-                    <span className="gp-meta-sep">·</span>
-                    <span className="gp-hd">HD</span>
-                  </>
-                )}
-              </div>
-              <div className="gp-tag-row">
-                <span
-                  className="gp-tag"
-                  style={{ '--tag-dot': program.genre.dot } as CSSProperties}
-                >
-                  <span className="gp-tag-dot" />
-                  {program.genre.label}
+                <span>{tvdb.year}</span>
+              </>
+            )}
+          </div>
+
+          <h2 className="gp-title">{tvdb?.title ?? program.title}</h2>
+          {tvdb?.titleEn && tvdb.titleEn !== tvdb.title && (
+            <div className="gp-title-en">{tvdb.titleEn}</div>
+          )}
+          {subtitle && <div className="gp-subtitle">{subtitle}</div>}
+
+          <div className="gp-channel-row">
+            {ch && (
+              <span className="gp-channel">
+                <span className="gp-channel-dot" style={{ background: ch.color }} />
+                {ch.name}
+              </span>
+            )}
+            {tvdb?.network && (
+              <>
+                <span className="gp-meta-sep">·</span>
+                <span>{tvdb.network}</span>
+              </>
+            )}
+            {tvdb && (
+              <>
+                <span className="gp-meta-sep">·</span>
+                <span className="gp-tvdb-tag">
+                  <Icon name="sparkle" size={10} /> TVDB #{tvdb.id}
                 </span>
-                {tvdb && (
-                  <span className="gp-tag tvdb">
-                    <Icon name="sparkle" size={10} /> TVDB #{tvdb.id}
-                  </span>
-                )}
-                {program.recording && (
-                  <span className="gp-tag rec">
-                    <span className="gp-tag-rec-dot" /> REC
-                  </span>
-                )}
-                {reserved && !program.recording && (
-                  <span className="gp-tag reserved">
-                    <Icon name="check" size={10} /> 予約済
-                  </span>
-                )}
-              </div>
-            </div>
+              </>
+            )}
           </div>
         </div>
 
-        <div className="gp-body">
-
-        {reserved || coveredBySeriesRule ? (
-          <ReservedBlock
-            program={program}
-            tvdb={tvdb}
-            isLive={isLive}
-            coveredBySeriesRule={coveredBySeriesRule}
-            apiRecordingId={apiRecordingId}
-            onCancel={() => onReserve(program)}
-            onStopRecording={onStopRecording}
-            onUnsubscribeSeries={onUnsubscribeSeries}
-          />
-        ) : (
-          <ReserveBlock
-            program={program}
-            channel={ch ?? null}
-            tvdb={tvdb}
-            isMovie={isMovie}
-            isSeriesTvdb={isSeriesTvdb}
-            isMovieGenre={isMovieGenre}
-            isMovieTvdb={isMovieTvdb}
-            seriesEps={seriesEps}
-            existingSeriesIds={existingSeriesIds}
-            onReserve={onReserve}
-            onCreateRule={onCreateRule}
-            onCreateSeriesLink={onCreateSeriesLink}
-          />
-        )}
-
-        {program.desc && (
-          <Section title="あらすじ">
-            <p className="gp-desc">{program.desc}</p>
-          </Section>
-        )}
-
-        {tvdbCast.length > 0 && (
-          <Section title="出演者">
-            <div className="gp-cast-grid">
-              {tvdbCast.slice(0, 8).map((c, i) => (
-                <div
-                  key={`${c.name}-${i}`}
-                  className="gp-cast-item"
-                  title={c.role ? `${c.name} — ${c.role}` : c.name}
-                >
-                  <div
-                    className={`gp-cast-avatar${c.image ? ' has-photo' : ''}`}
-                    style={c.image ? { backgroundImage: `url("${c.image}")` } : undefined}
-                  >
-                    {!c.image && (c.name.slice(0, 1) || '?')}
-                  </div>
-                  <div className="gp-cast-name">{c.name || c.role || '—'}</div>
-                  {c.role && <div className="gp-cast-role">{c.role}</div>}
-                </div>
-              ))}
-            </div>
-          </Section>
-        )}
-
-        {staff.length > 0 && (
-          <Section title="スタッフ">
-            <dl className="gp-staff-list">
-              {staff.slice(0, 6).map(([k, v]) => (
-                <div key={k} className="gp-staff-row">
-                  <dt>{k}</dt>
-                  <dd>{v}</dd>
-                </div>
-              ))}
-            </dl>
-          </Section>
-        )}
-
-        {related.length > 0 && (
-          <Section title="関連番組">
-            <ul className="gp-related-list">
-              {related.map((rel) => {
-                const rch = getChannel(channels, rel.ch);
-                return (
-                  <li key={progId(rel)}>
-                    <button
-                      type="button"
-                      className="gp-related-item"
-                      onClick={() => onSelectProgram(rel)}
-                    >
-                      <div className="gp-related-when">
-                        {rel.startAt ? jpAirDate(rel.startAt).slice(5, 16) : rel.start}
-                      </div>
-                      <div className="gp-related-main">
-                        <div className="gp-related-title">{rel.title}</div>
-                        <div className="gp-related-meta">
-                          <span>{rch?.name ?? rel.ch}</span>
-                          <span className="gp-meta-sep">·</span>
-                          <span>{rel.start}–{rel.end}</span>
-                        </div>
-                      </div>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          </Section>
-        )}
+        <div className="gp-action-col">
+          {reserved || coveredBySeriesRule ? (
+            <ReservedBlock
+              program={program}
+              tvdb={tvdb}
+              isLive={isLive}
+              coveredBySeriesRule={coveredBySeriesRule}
+              apiRecordingId={apiRecordingId}
+              onCancel={() => onReserve(program)}
+              onStopRecording={onStopRecording}
+              onUnsubscribeSeries={onUnsubscribeSeries}
+            />
+          ) : (
+            <ReserveBlock
+              program={program}
+              channel={ch ?? null}
+              tvdb={tvdb}
+              isMovie={isMovie}
+              isSeriesTvdb={isSeriesTvdb}
+              isMovieGenre={isMovieGenre}
+              isMovieTvdb={isMovieTvdb}
+              seriesEps={seriesEps}
+              existingSeriesIds={existingSeriesIds}
+              onReserve={onReserve}
+              onCreateRule={onCreateRule}
+              onCreateSeriesLink={onCreateSeriesLink}
+            />
+          )}
         </div>
       </div>
+
+      {hasExtras && (
+        <div className="gp-extras">
+          {program.desc && (
+            <Section title="あらすじ">
+              <p className="gp-desc">{program.desc}</p>
+            </Section>
+          )}
+          {tvdbCast.length > 0 && (
+            <Section title="出演者">
+              <div className="gp-cast-grid">
+                {tvdbCast.slice(0, 8).map((c, i) => (
+                  <div
+                    key={`${c.name}-${i}`}
+                    className="gp-cast-item"
+                    title={c.role ? `${c.name} — ${c.role}` : c.name}
+                  >
+                    <div
+                      className={`gp-cast-avatar${c.image ? ' has-photo' : ''}`}
+                      style={c.image ? { backgroundImage: `url("${c.image}")` } : undefined}
+                    >
+                      {!c.image && (c.name.slice(0, 1) || '?')}
+                    </div>
+                    <div className="gp-cast-name">{c.name || c.role || '—'}</div>
+                    {c.role && <div className="gp-cast-role">{c.role}</div>}
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
+          {staff.length > 0 && (
+            <Section title="スタッフ">
+              <dl className="gp-staff-list">
+                {staff.slice(0, 6).map(([k, v]) => (
+                  <div key={k} className="gp-staff-row">
+                    <dt>{k}</dt>
+                    <dd>{v}</dd>
+                  </div>
+                ))}
+              </dl>
+            </Section>
+          )}
+          {related.length > 0 && (
+            <Section title="関連番組">
+              <ul className="gp-related-list">
+                {related.map((rel) => {
+                  const rch = getChannel(channels, rel.ch);
+                  return (
+                    <li key={progId(rel)}>
+                      <button
+                        type="button"
+                        className="gp-related-item"
+                        onClick={() => onSelectProgram(rel)}
+                      >
+                        <div className="gp-related-when">
+                          {rel.startAt ? jpAirDate(rel.startAt).slice(5, 16) : rel.start}
+                        </div>
+                        <div className="gp-related-main">
+                          <div className="gp-related-title">{rel.title}</div>
+                          <div className="gp-related-meta">
+                            <span>{rch?.name ?? rel.ch}</span>
+                            <span className="gp-meta-sep">·</span>
+                            <span>{rel.start}–{rel.end}</span>
+                          </div>
+                        </div>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </Section>
+          )}
+        </div>
+      )}
     </div>
   );
 }

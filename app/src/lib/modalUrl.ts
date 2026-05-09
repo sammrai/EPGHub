@@ -9,9 +9,14 @@ import type { SetURLSearchParams } from 'react-router-dom';
 // は「自分で push したエントリ (= navigate(-1) で対称に戻せる)」と「deep link
 // からの初回エントリ (= 戻っても以前の入口には戻らないので setSearchParams
 // で param を剥がす)」を判別できる。closeModal 側は App.tsx に集約。
+//
+// `replace: true` はモーダル内で別番組へ切り替えるとき (関連番組クリック等)
+// に使う — push してしまうと history が積み上がり、× で閉じても navigate(-1)
+// が直前に見ていた番組モーダルに戻ってしまうため。
 export function pushModalToUrl(
   setSearchParams: SetURLSearchParams,
   modalId: string,
+  options?: { replace?: boolean },
 ): void {
   setSearchParams(
     (prev) => {
@@ -19,7 +24,7 @@ export function pushModalToUrl(
       next.set('modal', modalId);
       return next;
     },
-    { state: { modalOpenedInApp: true } },
+    { state: { modalOpenedInApp: true }, replace: options?.replace ?? false },
   );
 }
 

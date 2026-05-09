@@ -1037,82 +1037,74 @@ select.control-sm {
   border-right: none;
 }
 
-/* Tint the grid body so the white cards visibly float above it. */
+/* Tint the grid body to the same gray bedrock the Timeline uses, so
+   the white program cells read as cards on a hairline-ruled gray sheet
+   (design guide's `.grid { background: var(--bg) }`). */
 .grid-body {
-  background: var(--bg-muted);
+  background: var(--bg);
 }
 .grid-body .time-col {
-  background: var(--bg-elev);
+  background: var(--bg);
 }
 
 /* ============================================================
    PROGRAM BLOCKS
    ============================================================ */
 
+/* Grid program cell — same visual language as `.tl-prog` (Timeline view).
+   - Fills the column edge-to-edge so cells stitch into a continuous grid
+     (no inset gap, no rounded corners, no float-card shadow).
+   - `border-bottom` provides the vertical-axis time-slot divider; the
+     channel column's own `border-right` handles the horizontal one.
+   - State stripe (3px on the left) for reserved/recording — direct port
+     of the design guide's `.p.reserved::before / .p.recording::before`. */
 .prog {
   position: absolute;
-  /* Inset 3px on each side so cards have a visible gap from the column
-     divider and from each other (height is shrunk by 3px in Grid.tsx). */
-  left: 3px;
-  right: 3px;
-  border-radius: 6px;
-  padding: 5px 7px;
+  left: 0;
+  right: 0;
+  padding: 10px 14px;
   overflow: hidden;
   cursor: pointer;
   background: var(--bg-elev);
-  border: 1px solid var(--border);
-  box-shadow: 0 1px 2px oklch(0.25 0.04 255 / 0.06);
-  transition: box-shadow 140ms var(--ease), transform 140ms var(--ease), border-color 140ms var(--ease);
+  border-bottom: 1px solid var(--border);
+  transition: background 140ms var(--ease);
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  font-size: 11.5px;
-  line-height: 1.35;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  letter-spacing: 0.005em;
   z-index: 2;
 }
 
 .prog:hover {
-  border-color: var(--border-strong);
-  box-shadow: 0 4px 12px oklch(0.25 0.04 255 / 0.12), 0 1px 2px oklch(0.25 0.04 255 / 0.08);
-  transform: translateY(-1px);
+  background: var(--bg-muted);
   z-index: 5;
 }
 
+/* Selected — accent-soft fill + inset 1.5px accent ring (design guide). */
 .prog.selected {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--accent-soft), 0 4px 12px oklch(0.6 0.18 250 / 0.18);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1.5px var(--accent) inset;
   z-index: 6;
 }
-
-.prog.reserved {
-  background: var(--accent-soft);
-  border-color: var(--accent);
+.prog.selected .prog-meta {
+  color: var(--accent);
 }
 
-.prog.reserved::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: 3px;
-  background: var(--accent);
-}
-
-.prog.recording {
-  background: var(--rec-soft);
-  border-color: oklch(0.7 0.16 25);
-}
-
+/* state stripes — direct port of design's `.p.reserved::before /
+   .p.recording::before` (styles.css L455). */
+.prog.reserved::before,
 .prog.recording::before {
   content: '';
   position: absolute;
+  left: 0;
   top: 0;
   bottom: 0;
-  left: 0;
   width: 3px;
-  background: var(--rec);
 }
+.prog.reserved::before { background: var(--accent); }
+.prog.recording::before { background: var(--rec); }
 
 .prog.past {
   opacity: 0.55;
@@ -1133,18 +1125,76 @@ select.control-sm {
 .prog-meta {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 10.5px;
   color: var(--fg-muted);
   flex-shrink: 0;
 }
 
 .prog-title {
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 600;
   color: var(--fg);
+  letter-spacing: -0.005em;
+  line-height: 1.35;
   word-break: break-word;
-  /* fills remaining */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.prog-title.compact {
+  font-size: 11.5px;
+  -webkit-line-clamp: 1;
+}
+
+.prog-desc {
+  font-size: 11px;
+  color: var(--fg-muted);
+  line-height: 1.5;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+}
+
+/* state chip in the time row — REC pulses, 予約 sits as a coloured pill */
+.prog-rec-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--rec);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.prog-rec-tag::before {
+  content: '';
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--rec);
+  animation: prog-pulse 1.6s ease-in-out infinite;
+}
+.prog-resv-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.prog-resv-tag::before {
+  content: '';
+  width: 0; height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 6px solid var(--accent);
+}
+@keyframes prog-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
 }
 
 .prog-sub {
@@ -1241,6 +1291,10 @@ select.control-sm {
   flex-direction: column;
   height: 100%;
   overflow: hidden;
+  /* Light-gray bedrock so the white program cells read as cards on a
+     hairline-ruled gray sheet — matching the design guide's
+     `.grid { background: var(--bg) }`. */
+  background: var(--bg);
 }
 
 /* The ruler is now a direct child of the scroll body and sticks to the
@@ -1251,8 +1305,8 @@ select.control-sm {
   position: sticky;
   top: 0;
   height: 36px;
-  background: var(--bg-elev);
-  border-bottom: 1px solid var(--border-strong);
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
   z-index: 20;
   width: 100%;
 }
@@ -1276,13 +1330,14 @@ select.control-sm {
   user-select: none;
 }
 
+/* Row — single horizontal channel band. Divider only on the bottom so
+   adjacent rows share a hairline (matching the design guide's grid
+   look where cells stitch together via border-bottom + border-right). */
 .tl-row {
   display: flex;
-  /* No row border — program cards already carry their own 4-sided
-     inset shadow, so stacking a row separator produced 3 parallel
-     lines in the gap between channels. */
-  min-height: 78px;
+  min-height: 96px;
   position: relative;
+  border-bottom: 1px solid var(--border);
 }
 
 .tl-ch {
@@ -1290,67 +1345,139 @@ select.control-sm {
   left: 0;
   width: 160px;
   flex-shrink: 0;
-  background: var(--bg-elev);
+  background: var(--bg);
   border-right: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
   padding: 10px 12px;
   display: flex;
   flex-direction: column;
   gap: 3px;
-  /* Above .tl-now (z: 25) so the red now-line never bleeds over the
-     sticky channel column when the user scrolls past the current time. */
   z-index: 30;
 }
 
+/* Strip = the program area.
+   Background = light gray (var(--bg)) so the white program cells stand
+   out as cards on a tinted sheet — exactly like the design guide's
+   `.grid { background: var(--bg) }` layout where cells are white slabs
+   on a hairline-ruled gray field. */
 .tl-strip {
   flex: 1;
   position: relative;
-  /* Hour-mark gridline only — the 30-minute subtle line was visual
-     noise that fought with every program border. Time orientation
-     comes from `.tl-ruler` at the top and program start labels. */
-  background: repeating-linear-gradient(
-    to right,
-    transparent 0,
-    transparent calc(60 * var(--px-per-min) - 1px),
-    var(--border) calc(60 * var(--px-per-min) - 1px),
-    var(--border) calc(60 * var(--px-per-min))
-  );
+  background: var(--bg);
 }
 
+/* Timeline cell — clean rectangular slab matching the design guide.
+   White background, hairline border, generous padding. State is conveyed
+   by chips in the time row (REC dot, 予約 triangle) — no background
+   tinting on recording (pure white), and only selected/reserved get a
+   soft accent fill. */
 .tl-prog {
   position: absolute;
-  top: 6px;
-  bottom: 6px;
-  padding: 6px 10px;
-  border-radius: var(--radius-sm);
+  top: 0;
+  bottom: 0;
+  padding: 10px 14px;
+  /* Direct port of design `.p { border-bottom + border-right: 1px solid
+     var(--border-soft) }`. The bottom border doubles up with the row's
+     own bottom border at row edges (visually indistinguishable), and
+     gives gap regions (between non-contiguous programs) the same
+     hairline as filled cells. */
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
   background: var(--bg-elev);
-  border: none;
-  box-shadow: inset 0 0 0 1px var(--border);
   overflow: hidden;
   cursor: pointer;
-  transition: box-shadow 120ms var(--ease);
+  transition: background 140ms var(--ease);
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  font-size: 11.5px;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  letter-spacing: 0.005em;
 }
 
 .tl-prog:hover {
-  box-shadow: inset 0 0 0 1px var(--fg);
+  background: var(--bg-muted);
   z-index: 5;
 }
 
-.tl-prog.reserved {
-  background: var(--accent-soft);
-  box-shadow: inset 0 0 0 1px oklch(0.75 0.06 250);
-}
-
 .tl-prog.selected {
-  box-shadow: inset 0 0 0 2px var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1.5px var(--accent) inset;
   z-index: 6;
 }
 
+/* state stripes — direct port of the design's
+   `.p.reserved::before / .p.recording::before` (styles.css L455). */
+.tl-prog.reserved::before,
+.tl-prog.recording::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+}
+.tl-prog.reserved::before { background: var(--accent); }
+.tl-prog.recording::before { background: var(--rec); }
+
 .tl-prog.past { opacity: 0.5; }
+
+/* Cell content — direct port of design guide's
+   `.epg-root .p .time / .ttl / .desc` (guide-v2.css). */
+.tl-prog-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-muted);
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+.tl-prog-meta strong {
+  color: var(--fg-secondary);
+  font-weight: 600;
+}
+.tl-prog.selected .tl-prog-meta {
+  color: var(--accent);
+}
+.tl-prog.selected .tl-prog-meta strong {
+  color: var(--accent);
+}
+
+.tl-prog-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+  letter-spacing: -0.005em;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+.tl-prog.narrow .tl-prog-title {
+  font-size: 11.5px;
+  -webkit-line-clamp: 2;
+}
+
+.tl-prog-desc {
+  font-size: 11px;
+  color: var(--fg-muted);
+  line-height: 1.5;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* Narrow cells: tighten padding so the title doesn't get cut off. */
+.tl-prog.narrow {
+  padding: 8px 10px;
+  gap: 3px;
+}
 
 .tl-tick {
   position: absolute;
@@ -4192,48 +4319,53 @@ input[type=range] {
 }
 
 /* ============================================================
-   GUIDE MODAL — floating landscape dialog (replaces the side panel)
-   A centered overlay with backdrop dim. Horizontal layout: the hero
-   holds the portrait poster on the left and the title/meta on the
-   right; the body below stacks reserve UI + あらすじ / 出演者 / 関連番組.
+   GUIDE PANEL — bottom-anchored landscape sheet
+   Floats above the program guide WITHOUT a click-blocking scrim,
+   so the user can still pick another program in the grid while the
+   panel is open (the panel re-keys to the new selection). The hero
+   keeps the original glass treatment — blurred poster bleed fading
+   into the panel surface — and sits next to title/meta in landscape.
    ============================================================ */
 
-.guide-modal-backdrop {
+.guide-panel-floating {
   position: fixed;
-  inset: 0;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
   z-index: 90;
-  background: oklch(0.25 0.04 255 / 0.32);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  animation: gm-fade-in 160ms var(--ease);
-}
-@keyframes gm-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-.guide-modal {
-  width: min(560px, 100%);
-  max-height: min(90vh, 880px);
+  width: min(820px, calc(100% - 32px));
+  max-height: min(58vh, 620px);
   background: var(--bg-elev);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: 16px;
   overflow: auto;
   overflow-x: hidden;
   display: flex;
   flex-direction: column;
-  position: relative;
   box-shadow:
     0 24px 60px oklch(0.15 0.04 255 / 0.28),
     0 8px 20px oklch(0.15 0.04 255 / 0.18);
-  animation: gm-zoom-in 180ms var(--ease);
+  animation: gp-slide-up 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
-@keyframes gm-zoom-in {
-  from { transform: translateY(8px) scale(0.98); opacity: 0; }
-  to { transform: translateY(0) scale(1); opacity: 1; }
+@keyframes gp-slide-up {
+  from { transform: translate(-50%, 28px); opacity: 0; }
+  to { transform: translate(-50%, 0); opacity: 1; }
+}
+
+@media (max-width: 720px) {
+  .guide-panel-floating {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    width: auto;
+    transform: none;
+    max-height: 78vh;
+    animation: gp-slide-up-sm 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  @keyframes gp-slide-up-sm {
+    from { transform: translateY(28px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
 }
 
 .gp-close {
@@ -4258,60 +4390,67 @@ input[type=range] {
   transform: scale(1.05);
 }
 
-/* Hero — horizontal: sharp portrait poster on the left, title + channel
-   info + tags on the right. Backdrop is the original modal's soft glass
-   look — the poster, blurred at low opacity, bleeds colour into the hero
-   and fades to white at the bottom. */
-.gp-hero {
+/* Main row — single horizontal band (poster | info | actions). The whole
+   row carries the glass treatment: the blurred poster bleeds across the
+   row and fades into the panel surface at the right edge so the actions
+   column reads cleanly. No top white space — content starts at the very
+   top of the panel. */
+.gp-main {
   position: relative;
-  width: 100%;
-  overflow: hidden;
-  flex-shrink: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 20px;
+  padding: 18px 22px 16px 18px;
   background: var(--bg-elev);
-  border-bottom: 1px solid var(--border);
   isolation: isolate;
+  flex-shrink: 0;
 }
-.gp-hero.has-poster::before {
+.gp-main.has-poster::before {
   content: '';
   position: absolute;
   inset: 0;
   background-image: var(--gp-hero-bg);
   background-size: cover;
   background-position: center;
-  opacity: 0.22;
-  filter: blur(42px) saturate(1.25);
-  transform: scale(1.3);
+  opacity: 0.28;
+  filter: blur(44px) saturate(1.3);
+  transform: scale(1.25);
   z-index: -2;
   pointer-events: none;
 }
-.gp-hero.has-poster::after {
+/* Two-axis fade: the bleed is strongest on the left (anchored by the
+   poster) and at the top of the row, fading toward the actions column
+   on the right and the panel surface at the bottom so the right edge
+   reads cleanly under the action cards. */
+.gp-main.has-poster::after {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, transparent 10%, var(--bg-elev));
+  background:
+    linear-gradient(90deg,
+      transparent 0%,
+      color-mix(in oklch, var(--bg-elev) 60%, transparent) 55%,
+      var(--bg-elev) 100%),
+    linear-gradient(180deg,
+      transparent 0%,
+      color-mix(in oklch, var(--bg-elev) 70%, transparent) 100%);
   z-index: -1;
   pointer-events: none;
 }
-.gp-hero-inner {
-  display: flex;
-  gap: 22px;
-  align-items: stretch;
-  padding: 22px 24px;
-  min-height: 240px;
-}
-.gp-hero-poster {
-  width: 150px;
-  height: 214px;
+
+.gp-poster {
+  width: 130px;
+  height: 188px;
   flex-shrink: 0;
   border-radius: 8px;
   background-size: cover;
   background-position: center;
   background-color: var(--bg-muted);
   box-shadow:
-    0 10px 22px oklch(0.25 0.04 255 / 0.18),
+    0 10px 24px oklch(0.25 0.04 255 / 0.22),
     0 2px 6px oklch(0.25 0.04 255 / 0.10);
 }
-.gp-hero-poster-fallback {
+.gp-poster-fallback {
   display: grid;
   place-items: center;
   color: white;
@@ -4320,79 +4459,132 @@ input[type=range] {
   font-weight: 800;
   letter-spacing: 0.14em;
 }
-.gp-hero-meta {
+
+.gp-info {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  justify-content: center;
-  padding-right: 34px; /* reserve room for the × close button */
+  gap: 4px;
+  padding-top: 4px;
+  padding-right: 8px;
+  align-self: flex-start;
 }
 
-.gp-body {
-  display: flex;
-  flex-direction: column;
-}
-.gp-kind-row {
+.gp-meta-row {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
   font-size: 11px;
   color: var(--fg-muted);
-  font-family: var(--font-mono);
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
 }
 .gp-kind-pill {
-  display: inline-block;
-  padding: 1px 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
   background: var(--accent);
   color: white;
   border-radius: 3px;
   font-weight: 700;
-  font-size: 9.5px;
+  font-size: 10px;
   letter-spacing: 0.06em;
 }
+.gp-kind-pill.ghost {
+  background: var(--bg-subtle);
+  color: var(--fg-secondary);
+  border: 1px solid var(--border);
+  font-weight: 600;
+}
+.gp-kind-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tag-dot, var(--fg-muted));
+}
+
+.gp-state-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.gp-state-chip.resv {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.gp-state-chip.rec {
+  background: var(--rec-soft);
+  color: var(--rec);
+}
+.gp-state-chip.rec .gp-state-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--rec);
+  box-shadow: 0 0 0 2px var(--rec-soft);
+  animation: gp-pulse 1.6s ease-in-out infinite;
+}
+@keyframes gp-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
 .gp-title {
-  margin: 2px 0 0;
-  font-size: 20px;
+  margin: 1px 0 0;
+  font-size: 18px;
   font-weight: 700;
-  line-height: 1.25;
+  line-height: 1.3;
   letter-spacing: -0.01em;
   color: var(--fg);
-  word-break: break-word;
+  text-wrap: pretty;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .gp-title-en {
   font-size: 12px;
   font-style: italic;
   color: var(--fg-muted);
 }
+.gp-subtitle {
+  font-size: 12px;
+  color: var(--fg-secondary);
+  font-weight: 500;
+  margin-top: 1px;
+}
 
 .gp-channel-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  font-size: 11.5px;
+  gap: 8px;
+  font-size: 11px;
   color: var(--fg-muted);
   flex-wrap: wrap;
-  margin-top: 4px;
+  margin-top: 2px;
 }
 .gp-channel {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   font-weight: 600;
-  color: var(--fg);
+  color: var(--fg-secondary);
 }
 .gp-channel-dot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
-  box-shadow: 0 0 0 2px var(--bg-elev);
+  border-radius: 2px;
 }
 .gp-time {
   font-family: var(--font-mono);
-  color: var(--fg);
+  color: var(--fg-secondary);
   font-weight: 600;
 }
 .gp-meta-sep {
@@ -4407,79 +4599,55 @@ input[type=range] {
   letter-spacing: 0.04em;
   color: var(--fg-secondary);
 }
-
-.gp-subtitle {
-  font-size: 12.5px;
-  color: var(--fg-secondary);
-  font-weight: 500;
-  margin-top: 2px;
-}
-
-.gp-tag-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-.gp-tag {
+.gp-tvdb-tag {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 7px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--bg-subtle);
-  font-size: 10.5px;
-  color: var(--fg-secondary);
-  white-space: nowrap;
-}
-.gp-tag-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--tag-dot, var(--fg-muted));
-}
-.gp-tag.tvdb {
-  border-color: var(--accent);
+  gap: 3px;
   color: var(--accent);
-  background: var(--accent-soft);
-}
-.gp-tag.rec {
-  border-color: oklch(0.65 0.18 25);
-  color: oklch(0.55 0.2 25);
-  background: var(--rec-soft);
-  font-weight: 700;
-}
-.gp-tag-rec-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--rec);
-  box-shadow: 0 0 4px var(--rec);
-}
-.gp-tag.reserved {
-  border-color: var(--accent);
-  color: var(--accent);
-  background: var(--accent-soft);
   font-weight: 600;
 }
 
-/* ---- Reserve UI — white slab with top divider ---- */
+/* Right column — wraps the existing ReserveBlock / ReservedBlock so its
+   own layout (action cards, settings link, status strip, CTA) snaps into
+   a fixed-width column that flows down on narrower screens. The
+   padding-top reserves space for the absolute-positioned × close button
+   so action cards don't slip under it. */
+.gp-action-col {
+  flex-shrink: 0;
+  width: 244px;
+  display: flex;
+  flex-direction: column;
+  padding-top: 24px;
+  align-self: flex-start;
+}
+
+/* Below-row continuation — desc / cast / staff / related, reusing the
+   .gp-section styling. Sits inside the panel's scrollable area. */
+.gp-extras {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elev);
+}
+
+/* ---- Reserve UI — sits in the right column of .gp-main, so no top
+        divider; the column has its own visual separation via the glass
+        gradient fading to white. ---- */
 
 .gp-reserve {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px 18px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-elev);
+  gap: 8px;
+  padding: 0;
+  background: transparent;
 }
 .gp-reserved {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px 18px;
-  border-top: 1px solid var(--accent);
-  background: var(--accent-soft);
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--accent-soft) 80%, var(--bg-elev));
+  border: 1px solid var(--accent);
 }
 .gp-reserved-strip {
   display: flex;
@@ -4765,10 +4933,11 @@ input[type=range] {
   white-space: pre-wrap;
 }
 
-/* 出演者 — prominent circular avatars in a row of 4. */
+/* 出演者 — circular avatars; auto-fill so the row densifies as the
+   panel widens (4 at narrow, 6–8 at full width). */
 .gp-cast-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
   gap: 10px;
 }
 .gp-cast-item {

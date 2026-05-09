@@ -3638,8 +3638,12 @@ export const DiscoverPage = ({ existingSeriesIds, onAdded, onRemove }: DiscoverP
   // Guide への path 遷移はせず、Discover 上で `?modal=X` を push するだけ。
   // close 側は App 側の closeModal が state 印を見て navigate(-1) → /discover
   // に対称に戻る。
+  // 既にモーダルが開いている状態で別カードの「次の放送」を選び直したときは
+  // replace。push してしまうと history が積み上がり、× で閉じても直前に
+  // 見ていた番組モーダルへ戻ってしまう。
   const openNextProgramModal = (nextProgramId: string) => {
-    pushModalToUrl(setSearchParams, nextProgramId);
+    const alreadyOpen = !!searchParams.get('modal');
+    pushModalToUrl(setSearchParams, nextProgramId, { replace: alreadyOpen });
   };
 
   const handleRemove = async (tvdbId: number, title: string) => {
