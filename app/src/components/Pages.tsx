@@ -8,8 +8,8 @@ import type {
   MouseEvent as ReactMouseEvent,
   ReactNode,
 } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { pushModalToUrl } from '../lib/modalUrl';
+import { useLocation, useSearchParams } from 'react-router-dom';
+import { modalDepthOf, pushModalToUrl } from '../lib/modalUrl';
 import { Icon } from './Icon';
 import type { IconName } from './Icon';
 import { toMin, MOCK_NOW_MIN, progId, seriesCounts } from '../lib/epg';
@@ -3635,6 +3635,7 @@ const VALID_GENRE_KEYS = new Set<string>(CATEGORIES.map((c) => c.key));
 
 export const DiscoverPage = ({ existingSeriesIds, onAdded, onRemove }: DiscoverPageProps) => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
   // The selected category is URL-state (`?genre=drama`, `?genre=anime`, …)
   // so the Discover page is shareable and bookmarkable per genre. Missing
   // or unknown values fall back to the "総合" default.
@@ -3660,14 +3661,12 @@ export const DiscoverPage = ({ existingSeriesIds, onAdded, onRemove }: DiscoverP
   const [removing, setRemoving] = useState<number | null>(null);
 
   // Guide への path 遷移はせず、Discover 上で `?modal=X` を push するだけ。
-  // close 側は App 側の closeModal が state 印を見て navigate(-1) → /discover
-  // に対称に戻る。
-  // 既にモーダルが開いている状態で別カードの「次の放送」を選び直したときは
-  // replace。push してしまうと history が積み上がり、× で閉じても直前に
-  // 見ていた番組モーダルへ戻ってしまう。
+  // モーダル間の遷移も常に push し、ブラウザの戻るボタンで前のモーダルへ
+  // 辿れるようにする。modalDepth を積み上げておけば × は navigate(-depth)
+  // で一気にモーダル列を抜ける。
   const openNextProgramModal = (nextProgramId: string) => {
-    const alreadyOpen = !!searchParams.get('modal');
-    pushModalToUrl(setSearchParams, nextProgramId, { replace: alreadyOpen });
+    const depth = modalDepthOf(location.state) + 1;
+    pushModalToUrl(setSearchParams, nextProgramId, { depth });
   };
 
   const handleRemove = async (tvdbId: number, title: string) => {

@@ -46,7 +46,7 @@ import { api, ApiError } from './api/epghub';
 import type { ApiRecording, ApiUpdateRecording } from './api/epghub';
 import { progId } from './lib/epg';
 import { addDays, jstTodayYmd } from './lib/broadcastDay';
-import { pushModalToUrl, wasOpenedInApp } from './lib/modalUrl';
+import { modalDepthOf, pushModalToUrl, wasOpenedInApp } from './lib/modalUrl';
 import type { Channel, Program, Recording, Rule, TvdbEntry, TvdbSeries } from './data/types';
 
 type Page = 'guide' | 'library' | 'rules' | 'reserves' | 'discover' | 'settings';
@@ -299,22 +299,24 @@ export function App() {
   const openModal = useCallback(
     (p: Program) => {
       setSelectedProg(progId(p));
-      // モーダルが既に開いている状態で別番組へ切り替える (関連番組リンク等)
-      // 場合は replace。push してしまうと「× で閉じる → 直前に見ていた番組
-      // モーダルに戻る」という連鎖が起きる。
-      const alreadyOpen = !!searchParams.get('modal');
-      pushModalToUrl(setSearchParams, progId(p), { replace: alreadyOpen });
+      // 関連番組リンク等でモーダルを切り替えるときも push する。これで
+      // ブラウザの戻るボタンは「直前のモーダル」へ戻る。× ボタン (=
+      // closeModal) は modalDepth を見て navigate(-depth) で一気に
+      // モーダル列を抜けるので、戻るボタンと使い分けられる。
+      const depth = modalDepthOf(location.state) + 1;
+      pushModalToUrl(setSearchParams, progId(p), { depth });
     },
-    [searchParams, setSearchParams],
+    [location.state, setSearchParams],
   );
 
-  // close は「自分で push したエントリなら navigate(-1)」「deep link なら
-  // param を剥がす」を対称に切り替える。location.state.modalOpenedInApp が
-  // pushModalToUrl の印。
+  // × ボタンは「モーダル列を全部閉じる」が期待値。自分で push した深さ
+  // ぶんだけ navigate で一気に戻し、deep link 直 (= 履歴に押された印が
+  // ない) なら param を剥がす。
   const closeModal = useCallback(() => {
     if (!searchParams.get('modal')) return;
     if (wasOpenedInApp(location.state)) {
-      navigate(-1);
+      const depth = modalDepthOf(location.state);
+      navigate(-Math.max(depth, 1));
     } else {
       setSearchParams(
         (prev) => {
@@ -666,8 +668,8 @@ export function App() {
   const handleSearchPick = useCallback(
     (action: SearchAction) => {
       if (action.kind === 'program') {
-        const alreadyOpen = !!searchParams.get('modal');
-        pushModalToUrl(setSearchParams, action.program.id, { replace: alreadyOpen });
+        const depth = modalDepthOf(location.state) + 1;
+        pushModalToUrl(setSearchParams, action.program.id, { depth });
       } else if (action.kind === 'series') {
         navigate(`/library/${action.entry.id}`);
       } else if (action.kind === 'channel') {
@@ -681,7 +683,7 @@ export function App() {
         else navigate('/library');
       }
     },
-    [navigate, searchParams, setSearchParams, setBcType],
+    [navigate, location.state, setSearchParams, setBcType],
   );
 
   return (
@@ -875,6 +877,29 @@ export function App() {
           disabledSeriesIds={disabledSeriesIdSet}
           seriesRuleChannels={seriesRuleChannels}
           recordingIdForProgram={recordingIdForProgram}
+          onRefresh={async () => {
+            // Surgical single-program refetch — keeps DebugDetailsModal
+            // and GuidePanel mounted through the update. Calling the
+            // full schedule.refresh() would empty byDate momentarily
+            // and unmount the modal.
+            const id = modalProg?.id;
+            if (!id) return;
+            const inRange = programs.some((p) => progId(p) === id);
+            if (inRange) {
+              await schedule.refreshProgram(id);
+            } else {
+              // Deep-linked / out-of-range program: byDate doesn't have
+              // it so refreshProgram is a no-op. Refetch directly into
+              // deepLinkProg so the debug modal + GuidePanel reflect the
+              // new tvdbSeason / tvdbEpisode without unmounting.
+              try {
+                const fresh = await api.programs.get(id);
+                setDeepLinkProg(toProgram(fresh, reservedProgIdSet, new Date()));
+              } catch (e) {
+                console.warn('[refresh] deep-link refetch failed', (e as Error).message);
+              }
+            }
+          }}
           onClose={closeModal}
           onReserve={(p) => void handleReserve(p)}
           onCreateRule={(kw, p, ch) => void handleCreateRule(kw, p, ch)}

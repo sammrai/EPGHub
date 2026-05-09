@@ -55,7 +55,11 @@ export const useSchedule     = (date?: string) =>
 // 7 日ぶん揃うまで待たされない。
 export function useScheduleRange(
   dates: readonly string[],
-): Resource<ApiProgram[]> & { exhausted: boolean; loadedDays: number } {
+): Resource<ApiProgram[]> & {
+  exhausted: boolean;
+  loadedDays: number;
+  refreshProgram: (programId: string) => Promise<void>;
+} {
   const key = dates.join(',');
   const [byDate, setByDate] = useState<Map<string, ApiProgram[]>>(new Map());
   const [error, setError] = useState<Error | null>(null);
@@ -124,6 +128,32 @@ export function useScheduleRange(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
+  // In-place refresh of a single program — re-fetches GET /programs/:id
+  // and replaces the matching entry in byDate without clearing the rest.
+  // Used by the GuidePanel's "再マッチ" button so the modal can stay
+  // mounted through the update (a full schedule.refresh empties byDate
+  // momentarily, which unmounts GuidePanel + DebugDetailsModal).
+  const refreshProgram = useCallback(async (programId: string) => {
+    try {
+      const fresh = await api.programs.get(programId);
+      setByDate((prev) => {
+        for (const [d, list] of prev) {
+          const idx = list.findIndex((p) => p.id === programId);
+          if (idx < 0) continue;
+          const updated = [...list];
+          updated[idx] = fresh;
+          const next = new Map(prev);
+          next.set(d, updated);
+          return next;
+        }
+        return prev;
+      });
+    } catch {
+      // soft-fail — leaves the modal showing the stale program rather
+      // than tearing it down on a transient API hiccup.
+    }
+  }, []);
+
   // Signals that the currently-last requested date returned zero programs
   // — the server ran out of future EPG. Consumers use this to stop the
   // infinite-scroll loader: there's nothing beyond to load.
@@ -150,7 +180,7 @@ export function useScheduleRange(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, byDate]);
 
-  return { data, error, loading, refresh, exhausted, loadedDays };
+  return { data, error, loading, refresh, refreshProgram, exhausted, loadedDays };
 }
 // Unified post-R0 recording list. Covers the full lifecycle — consumers
 // filter client-side by state (scheduled/recording/encoding for the

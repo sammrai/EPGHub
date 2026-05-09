@@ -4,14 +4,15 @@
 // The user can pick another program in the grid and the panel re-keys to
 // it without an intervening close. Glass-tinted hero (poster bleed +
 // soft fade-to-elev) is preserved from the prior centered modal.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Icon } from './Icon';
 import { durLabel, getChannel, progId, MOCK_NOW_MIN, toMin } from '../lib/epg';
 import { jpAirDate, toProgram } from '../lib/adapters';
 import { hasPoster, posterStyle } from '../lib/tvdbVisual';
 import { seriesRuleCovers, seriesRuleOnOtherChannel, seriesRuleChannels as seriesRuleChannelsFor } from '../lib/seriesRule';
-import { DebugDetailsModal } from './Modal';
+import { channelKey } from '../lib/channelKey';
+import { DebugDetailsModal, RematchButton } from './Modal';
 import { api } from '../api/epghub';
 import type { ApiTvdbCastMember } from '../api/epghub';
 import type {
@@ -37,6 +38,10 @@ export interface GuidePanelProps {
    *  instead of pretending the airing is auto-reserved. */
   seriesRuleChannels?: Map<number, string[]>;
   recordingIdForProgram?: (programId: string) => string | null;
+  /** Called by the debug modal's 再マッチ button after a successful
+   *  re-match so the parent re-fetches the schedule and propagates
+   *  fresh tvdbSeason / tvdbEpisode back through props. */
+  onRefresh?: () => void | Promise<void>;
   onClose: () => void;
   onReserve: (p: Program) => void;
   onCreateRule: (keyword: string, p: Program, channels?: string[]) => void;
@@ -69,6 +74,7 @@ function GuidePanelInner({
   disabledSeriesIds,
   seriesRuleChannels,
   recordingIdForProgram,
+  onRefresh,
   onClose,
   onReserve,
   onCreateRule,
@@ -126,8 +132,14 @@ function GuidePanelInner({
   // small hint and keep both action buttons live so the user can decide.
   const seriesRuledOnOtherChannel =
     seriesId != null && seriesRuleOnOtherChannel(seriesRuleChannels, seriesId, program.ch);
+  // Same numeric service id (svc- / m3u- 双方) は「同じチャンネル」扱い。
+  // strict `!==` だと M3U 由来で登録したルールに対して Mirakurun 由来の
+  // 同一局放送が「他チャンネルで登録済み」と表示されてしまう。
+  const programChKey = channelKey(program.ch);
   const otherChannelIds = seriesId != null
-    ? seriesRuleChannelsFor(seriesRuleChannels, seriesId).filter((c) => c !== program.ch)
+    ? seriesRuleChannelsFor(seriesRuleChannels, seriesId).filter(
+        (c) => channelKey(c) !== programChKey,
+      )
     : [];
   const isLive = toMin(program.start) <= MOCK_NOW_MIN && toMin(program.end) > MOCK_NOW_MIN;
   const apiRecordingId = program.id && recordingIdForProgram
@@ -222,7 +234,19 @@ function GuidePanelInner({
           {tvdb?.titleEn && tvdb.titleEn !== tvdb.title && (
             <div className="gp-title-en">{tvdb.titleEn}</div>
           )}
-          {subtitle && <div className="gp-subtitle">{subtitle}</div>}
+          {(subtitle || (program.id && tvdb?.id != null)) && (
+            <div className="gp-subtitle">
+              {subtitle && <span>{subtitle}</span>}
+              {program.id && tvdb?.id != null && (
+                <RematchButton
+                  programId={program.id}
+                  tvdbId={tvdb.id}
+                  onRefresh={onRefresh}
+                  variant="subtle"
+                />
+              )}
+            </div>
+          )}
 
           <div className="gp-channel-row">
             {ch && (
@@ -255,6 +279,8 @@ function GuidePanelInner({
             seriesRuledOnOtherChannel={seriesRuledOnOtherChannel}
             otherChannelLabel={otherChannelLabel}
             apiRecordingId={apiRecordingId}
+            seriesEps={seriesEps}
+            channels={channels}
             onReserve={onReserve}
             onCreateRule={onCreateRule}
             onCreateSeriesLink={onCreateSeriesLink}
@@ -323,6 +349,10 @@ function GuidePanelInner({
               <ul className="gp-related-list">
                 {related.map((rel) => {
                   const rch = getChannel(channels, rel.ch);
+                  const se =
+                    rel.tvdbSeason != null && rel.tvdbEpisode != null
+                      ? `S${rel.tvdbSeason}E${rel.tvdbEpisode}`
+                      : null;
                   return (
                     <li key={progId(rel)}>
                       <button
@@ -341,6 +371,7 @@ function GuidePanelInner({
                             <span>{rel.start}–{rel.end}</span>
                           </div>
                         </div>
+                        {se && <div className="gp-related-se">{se}</div>}
                       </button>
                     </li>
                   );
@@ -365,6 +396,7 @@ function GuidePanelInner({
         <DebugDetailsModal
           program={program}
           recordingId={apiRecordingId}
+          onRefresh={onRefresh}
           onClose={() => setShowDebug(false)}
         />
       )}
@@ -417,6 +449,11 @@ interface ActionBarProps {
   // seriesRuledOnOtherChannel is true this fills the disabled button.
   otherChannelLabel: string;
   apiRecordingId: string | null;
+  // Episodes loaded for this tvdb id (server-wide). Used by the
+  // "シリーズを追加" split-button to preview which airings the rule
+  // would actually reserve before the user commits.
+  seriesEps: Program[];
+  channels: Channel[];
   onReserve: (p: Program) => void;
   onCreateRule: (keyword: string, p: Program, channels?: string[]) => void;
   onCreateSeriesLink: (tvdb: TvdbSeries, p: Program, channels?: string[]) => void;
@@ -443,6 +480,8 @@ function ActionBar(props: ActionBarProps) {
     seriesRuledOnOtherChannel,
     otherChannelLabel,
     apiRecordingId,
+    seriesEps,
+    channels,
     onReserve,
     onCreateRule,
     onCreateSeriesLink,
@@ -577,10 +616,36 @@ function ActionBar(props: ActionBarProps) {
   // belongs in slot2 on top of that.
   const slot2Hidden = isLive;
 
+  // The "シリーズを追加" affordance gets a split chevron so the user can
+  // preview which airings the rule would auto-reserve before committing.
+  // Detected by structural state rather than slot title-matching so the
+  // wording stays free to evolve.
+  const isSeriesAddSlot =
+    !!slot2 &&
+    !isMovie &&
+    isSeriesTvdb &&
+    !!tvdb &&
+    tvdb.type === 'series' &&
+    !coveredBySeriesRule &&
+    !seriesRuledOnOtherChannel &&
+    !seriesRuleDisabled &&
+    !reserved;
+
   return (
     <div className="gp-actions">
       {!slot1Hidden && <ActionCard {...slot1} />}
-      {slot2 && !slot2Hidden && <ActionCard {...slot2} />}
+      {slot2 && !slot2Hidden && (
+        isSeriesAddSlot
+          ? (
+            <SeriesAddSplitCard
+              spec={slot2}
+              episodes={seriesEps}
+              channels={channels}
+              channelId={program.ch}
+            />
+          )
+          : <ActionCard {...slot2} />
+      )}
     </div>
   );
 }
@@ -643,6 +708,144 @@ function ActionCard({ onClick, title, desc, kind }: ActionCardProps) {
       <span className="gp-mode-title">{title}</span>
       <span className="gp-mode-desc">{desc}</span>
     </button>
+  );
+}
+
+interface SeriesAddSplitCardProps {
+  spec: ActionCardSpec;
+  episodes: Program[];
+  channels: Channel[];
+  channelId: string;
+}
+
+// Split-button variant of ActionCard: main button commits the
+// "シリーズを追加" action; the trailing ▼ pops a preview list of the
+// airings on `channelId` that the new rule would actually reserve.
+// The popover is informational only — clicking an entry does nothing
+// (preview ≠ navigation) so the user's mental model stays simple:
+// see what's coming, then commit.
+function SeriesAddSplitCard({ spec, episodes, channels, channelId }: SeriesAddSplitCardProps) {
+  const { title, desc, kind, onClick } = spec;
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Match by the numeric service id (the part after the source
+  // prefix), not the raw channel id. The DB carries parallel channels
+  // for the same broadcaster — e.g. svc-3272202064 (Mirakurun) and
+  // m3u-3272202064 (M3U) — and a given airing may only be present on
+  // one source's EPG horizon. Matching strictly on `p.ch === channelId`
+  // hides episodes that exist for the same MBS but came in via the
+  // other source. Stripping the prefix unifies them in the preview.
+  //
+  // Otherwise mirrors rulePredicate (ruleExpander.ts): future airings
+  // only. skipReruns / ngKeywords are not replicated — the preview is
+  // a best estimate, not a hard guarantee.
+  const targetKey = useMemo(() => channelKey(channelId), [channelId]);
+  const upcoming = useMemo(() => {
+    const now = Date.now();
+    const filtered = episodes
+      .filter((p) => channelKey(p.ch) === targetKey)
+      .filter((p) => {
+        const end = p.endAt ? Date.parse(p.endAt) : NaN;
+        return !Number.isFinite(end) || end >= now;
+      })
+      .sort((a, b) => (a.startAt ?? '').localeCompare(b.startAt ?? ''));
+    // Same broadcast often appears twice (svc- and m3u- both index it).
+    // Collapse on (service-id, start instant) so each airing is one row.
+    // Date.parse normalizes ISO offsets so `+09:00` and the equivalent `Z`
+    // form merge into the same instant.
+    const seen = new Set<string>();
+    const out: Program[] = [];
+    for (const p of filtered) {
+      const t = p.startAt ? Date.parse(p.startAt) : NaN;
+      const key = `${channelKey(p.ch)}-${Number.isFinite(t) ? t : (p.startAt ?? p.start)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(p);
+    }
+    return out;
+  }, [episodes, targetKey]);
+
+  // Outside-click closes the popover. Pointerdown rather than click
+  // so the popover dismisses before the click target fires (avoids
+  // the chevron toggling back to open via the document handler).
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: PointerEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('pointerdown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const ch = getChannel(channels, channelId);
+  const MAX = 12;
+  const shown = upcoming.slice(0, MAX);
+  const overflow = upcoming.length - shown.length;
+
+  return (
+    <div className="gp-mode-split" ref={ref}>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={!onClick}
+        className={`gp-mode-card ${kind} gp-mode-split-main`}
+      >
+        <span className="gp-mode-title">{title}</span>
+        <span className="gp-mode-desc">{desc}</span>
+      </button>
+      <button
+        type="button"
+        className={`gp-mode-split-chev ${kind}${open ? ' open' : ''}`}
+        onClick={() => setOpen((v) => !v)}
+        aria-label="今すぐ予約される番組を表示"
+        aria-expanded={open}
+        title="今すぐ予約される番組を表示"
+      >
+        <Icon name="chevD" size={14} />
+      </button>
+      {open && (
+        <div className="gp-series-preview" role="dialog" aria-label="今すぐ予約される番組">
+          <div className="gp-series-preview-head">
+            <span>今すぐ予約される番組</span>
+            <span className="gp-series-preview-ch">{ch?.name ?? channelId}</span>
+          </div>
+          {shown.length === 0 ? (
+            <div className="gp-series-preview-empty">
+              このチャンネルでの今後の放送予定は見つかりません
+            </div>
+          ) : (
+            <ul className="gp-series-preview-list">
+              {shown.map((p) => {
+                const se =
+                  p.tvdbSeason != null && p.tvdbEpisode != null
+                    ? `S${p.tvdbSeason}E${p.tvdbEpisode}`
+                    : null;
+                return (
+                  <li key={progId(p)} className="gp-series-preview-row">
+                    <span className="gp-series-preview-when">
+                      {p.startAt ? jpAirDate(p.startAt).slice(5, 16) : p.start}
+                    </span>
+                    <span className="gp-series-preview-title">{p.title}</span>
+                    {se && <span className="gp-series-preview-se">{se}</span>}
+                  </li>
+                );
+              })}
+              {overflow > 0 && (
+                <li className="gp-series-preview-more">他 {overflow} 件</li>
+              )}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -5,6 +5,20 @@
 // be a flat Set<number> of tvdb ids, which over-matched — a rule
 // created from MBS would visually claim the BS11 broadcast too even
 // though the server-side predicate now refuses to reserve it.
+//
+// Channel comparison goes through `channelKey()` so `svc-3272202064`
+// and `m3u-3272202064` (parallel sources for the same MBS broadcast)
+// resolve as the same channel — otherwise a rule registered via the
+// M3U-prefixed id would visually disown its own airings on the
+// Mirakurun-prefixed twin.
+
+import { channelKey } from './channelKey';
+
+function listMatches(list: string[], ch: string): boolean {
+  const target = channelKey(ch);
+  for (const c of list) if (channelKey(c) === target) return true;
+  return false;
+}
 
 export function seriesRuleCovers(
   map: Map<number, string[]> | undefined,
@@ -15,7 +29,7 @@ export function seriesRuleCovers(
   const list = map.get(tvdbId);
   if (!list) return false;
   if (list.length === 0) return true;
-  return list.includes(ch);
+  return listMatches(list, ch);
 }
 
 // "Same TVDB id has a rule, but the rule does not cover this channel."
@@ -31,7 +45,7 @@ export function seriesRuleOnOtherChannel(
   const list = map.get(tvdbId);
   if (!list) return false;
   if (list.length === 0) return false; // wildcard already covers `ch`
-  return !list.includes(ch);
+  return !listMatches(list, ch);
 }
 
 // Channel ids the rule for `tvdbId` is registered on. Empty list when

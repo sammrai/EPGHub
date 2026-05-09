@@ -1047,6 +1047,10 @@ interface DebugDetailsModalProps {
    *  Surfaced verbatim alongside program.id so support requests carry
    *  enough context to find the row in the DB. */
   recordingId?: string | null;
+  /** Called after a successful "再マッチ" so the schedule re-fetches
+   *  and the modal contents (and the underlying GuidePanel) reflect
+   *  the new tvdbSeason / tvdbEpisode without a manual reload. */
+  onRefresh?: () => void | Promise<void>;
   onClose: () => void;
 }
 
@@ -1134,7 +1138,25 @@ function IdValue({ text, display }: { text: string; display: string }) {
 // runs findEpisodeForProgram for this program — picking up matcher logic
 // improvements (e.g. the cumulative-N fallback) without waiting for the
 // next EPG refresh, since `enrichUnmatched` only touches tvdbId-null rows.
-function RematchButton({ programId, tvdbId }: { programId: string; tvdbId: number }) {
+//
+// onRefresh is called after the server returns 200 so the parent (App)
+// can re-fetch the schedule. The new program data flows back through
+// the modal's props, updating both the debug rows AND the underlying
+// GuidePanel (title row, bottom S/E chip) without a manual reload.
+export function RematchButton({
+  programId,
+  tvdbId,
+  onRefresh,
+  variant = 'default',
+}: {
+  programId: string;
+  tvdbId: number;
+  onRefresh?: () => void | Promise<void>;
+  // 'subtle' renders as a borderless inline glyph + label sized to sit
+  // alongside the S/E subtitle without competing for attention. The
+  // default variant keeps the bordered chip used by DebugDetailsModal.
+  variant?: 'default' | 'subtle';
+}) {
   const [state, setState] = useState<'idle' | 'loading' | 'ok' | 'err'>('idle');
   const onClick = async (e: MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
@@ -1142,6 +1164,7 @@ function RematchButton({ programId, tvdbId }: { programId: string; tvdbId: numbe
     setState('loading');
     try {
       await api.programs.linkTvdb(programId, tvdbId);
+      if (onRefresh) await onRefresh();
       setState('ok');
       window.setTimeout(() => setState('idle'), 1500);
     } catch {
@@ -1154,13 +1177,27 @@ function RematchButton({ programId, tvdbId }: { programId: string; tvdbId: numbe
       : state === 'ok' ? '更新しました'
       : state === 'err' ? '失敗'
       : '再マッチ';
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={state === 'loading'}
-      title="TVDB エピソード一覧を再取得し、この番組の S/E を解決し直す"
-      style={{
+  const color =
+    state === 'ok' ? 'var(--accent)'
+      : state === 'err' ? 'var(--rec, #c0392b)'
+      : variant === 'subtle' ? 'var(--fg-subtle)'
+      : 'var(--fg-muted)';
+  const baseStyle: CSSProperties = variant === 'subtle'
+    ? {
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 3,
+        padding: 0,
+        background: 'transparent',
+        border: 'none',
+        color,
+        cursor: state === 'loading' ? 'progress' : 'pointer',
+        fontSize: 10.5,
+        fontWeight: 500,
+        lineHeight: 1,
+        opacity: state === 'idle' ? 0.7 : 1,
+      }
+    : {
         display: 'inline-flex',
         alignItems: 'center',
         gap: 4,
@@ -1169,22 +1206,27 @@ function RematchButton({ programId, tvdbId }: { programId: string; tvdbId: numbe
         background: 'transparent',
         border: '1px solid var(--border)',
         borderRadius: 6,
-        color: state === 'ok' ? 'var(--accent)'
-          : state === 'err' ? 'var(--rec, #c0392b)'
-          : 'var(--fg-muted)',
+        color,
         cursor: state === 'loading' ? 'progress' : 'pointer',
         fontSize: 11,
         fontWeight: 500,
         lineHeight: 1,
-      }}
+      };
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={state === 'loading'}
+      title="TVDB エピソード一覧を再取得し、この番組の S/E を解決し直す"
+      style={baseStyle}
     >
-      <Icon name={state === 'ok' ? 'check' : 'cycle'} size={11} />
+      <Icon name={state === 'ok' ? 'check' : 'cycle'} size={variant === 'subtle' ? 10 : 11} />
       <span>{label}</span>
     </button>
   );
 }
 
-export function DebugDetailsModal({ program: p, recordingId, onClose }: DebugDetailsModalProps) {
+export function DebugDetailsModal({ program: p, recordingId, onRefresh, onClose }: DebugDetailsModalProps) {
   const mono: CSSProperties = {
     fontFamily: 'var(--font-mono)',
     fontSize: 11,
@@ -1388,7 +1430,7 @@ export function DebugDetailsModal({ program: p, recordingId, onClose }: DebugDet
                   TVDB match
                 </div>
                 {p.id && tvdb.id != null && (
-                  <RematchButton programId={p.id} tvdbId={tvdb.id} />
+                  <RematchButton programId={p.id} tvdbId={tvdb.id} onRefresh={onRefresh} />
                 )}
               </div>
               <dl

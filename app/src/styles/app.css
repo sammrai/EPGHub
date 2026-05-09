@@ -4659,6 +4659,10 @@ input[type=range] {
   color: var(--fg-secondary);
   font-weight: 500;
   margin-top: 1px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .gp-channel-row {
@@ -4921,6 +4925,150 @@ input[type=range] {
 .gp-mode-card.danger .gp-mode-desc,
 .gp-mode-card.series .gp-mode-desc {
   color: oklch(1 0 0 / 0.78);
+}
+
+/* Split-button wrapper for "シリーズを追加" — main card on the left,
+   a slim chevron pill on the right that pops a reservation preview.
+   Visually reads as a single rounded card; the chevron's left border
+   is the only seam between them. */
+.gp-mode-split {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+}
+.gp-mode-split-main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: 0;
+}
+.gp-mode-split-chev {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-top-right-radius: 8px;
+  border-bottom-right-radius: 8px;
+  background: var(--bg-elev);
+  color: var(--fg);
+  cursor: pointer;
+  transition: background 120ms var(--ease), border-color 120ms var(--ease),
+              filter 120ms var(--ease);
+}
+.gp-mode-split-chev:hover {
+  background: var(--bg-muted);
+  border-color: var(--border-strong);
+}
+.gp-mode-split-chev.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+.gp-mode-split-chev.primary:hover {
+  filter: brightness(0.96);
+}
+.gp-mode-split-chev.series {
+  background: var(--series);
+  border-color: var(--series);
+  color: white;
+}
+.gp-mode-split-chev.danger {
+  background: var(--rec);
+  border-color: var(--rec);
+  color: white;
+}
+.gp-mode-split-chev.open svg {
+  transform: rotate(180deg);
+}
+.gp-mode-split-chev svg {
+  transition: transform 140ms var(--ease);
+}
+
+/* Preview popover anchored under the split-button. Width caps at the
+   modal's action area so it doesn't escape into the surrounding grid;
+   max-height keeps a long series list scrollable. */
+.gp-series-preview {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 280px;
+  max-width: min(420px, 90vw);
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  padding: 8px 0;
+  z-index: 120;
+}
+.gp-series-preview-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--fg-muted);
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--border);
+}
+.gp-series-preview-ch {
+  font-weight: 500;
+  color: var(--fg-subtle);
+  letter-spacing: 0;
+}
+.gp-series-preview-empty {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  text-align: center;
+}
+.gp-series-preview-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 0;
+}
+.gp-series-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.gp-series-preview-row + .gp-series-preview-row {
+  border-top: 1px solid var(--border);
+}
+.gp-series-preview-when {
+  flex: 0 0 78px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-muted);
+  font-weight: 600;
+}
+.gp-series-preview-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gp-series-preview-se {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--fg-subtle);
+}
+.gp-series-preview-more {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--fg-muted);
+  text-align: center;
+  border-top: 1px solid var(--border);
 }
 
 /* Status line — shown above the action bar when reserved/recording. */
@@ -5245,6 +5393,17 @@ input[type=range] {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+.gp-related-se {
+  flex: 0 0 auto;
+  margin-left: auto;
+  align-self: center;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--fg-subtle);
+  letter-spacing: 0.02em;
+  padding-left: 8px;
 }
 
 
