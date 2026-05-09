@@ -5,7 +5,7 @@ export type IconName =
   | 'search' | 'plus' | 'check' | 'x' | 'chevL' | 'chevR' | 'chevD'
   | 'settings' | 'disk' | 'tuner' | 'filter' | 'sparkle' | 'bell'
   | 'folder' | 'star' | 'info' | 'lightning' | 'clock' | 'menu' | 'arrow'
-  | 'external' | 'pencil' | 'link' | 'cycle';
+  | 'external' | 'pencil' | 'link' | 'cycle' | 'copy';
 
 export interface IconProps {
   name: IconName;
@@ -48,6 +48,8 @@ const paths: Record<IconName, ReactNode> = {
   // Two cyclic arrows — the universal "repeat / series" mark we re-use
   // anywhere a series-rule reservation needs to read at a glance.
   cycle:     (<><path d="M3 12a9 9 0 0 1 15.3-6.4L21 8" /><path d="M21 4v4h-4" /><path d="M21 12a9 9 0 0 1-15.3 6.4L3 16" /><path d="M3 20v-4h4" /></>),
+  // Two stacked rectangles — the standard "copy to clipboard" affordance.
+  copy:      (<><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h10" /></>),
 };
 
 export function Icon({ name, size = 14, style, className }: IconProps) {

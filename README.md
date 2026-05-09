@@ -1,6 +1,8 @@
 # EPGHub
 
-[EPGStation](https://github.com/l3tnun/EPGStation) のモダン再実装。録画と、Plex / Jellyfin 等のメディアプレイヤー向けにファイルを整理することに特化した日本向け TV 録画システム。再生は外部プレイヤーに委任。
+[EPGStation](https://github.com/l3tnun/EPGStation) をモダンに作り直した、日本向けの TV 録画システムです。録画した番組を Plex / Jellyfin などのメディアプレイヤーで扱いやすい形に整理することに特化しており、再生機能自体は持たず外部プレイヤーに委ねます。
+
+サンプル UI は [こちら](https://sammrai.github.io/EPGHub/) で確認できます。
 
 ## Stack
 
@@ -15,5 +17,3 @@ docker compose up -d
 ```
 
 UI http://localhost:8890 · API docs http://localhost:8890/docs
-
-サンプル UI（モック・バックエンド無し）: https://sammrai.github.io/EPGHub/

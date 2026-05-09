@@ -393,6 +393,25 @@ export function App() {
     }
   };
 
+  // Re-enable an existing-but-disabled series rule. The modal calls this
+  // when the user hits 「シリーズ予約を再開」 — without it, "シリーズを
+  // 追加" would 409 (duplicate, since the disabled rule still occupies
+  // the unique tvdbId slot in the rules table).
+  const handleResumeSeries = async (tvdbId: number) => {
+    const rule = rules.find((r) => r.kind === 'series' && r.tvdb?.id === tvdbId);
+    if (!rule) {
+      pushToast('対応するシリーズルールが見つかりません', 'err');
+      return;
+    }
+    try {
+      await api.rules.update(rule.id, { enabled: true });
+      await Promise.all([rulesR.refresh(), recordingsR.refresh()]);
+      pushToast(`シリーズ「${rule.tvdb?.title ?? rule.name}」の自動予約を再開しました`);
+    } catch (e) {
+      pushToast(`シリーズ再開失敗: ${(e as Error).message}`, 'err');
+    }
+  };
+
   const handleCreateSeriesLink = async (tvdb: TvdbSeries, p: Program, channels?: string[]) => {
     try {
       await api.rules.create({
@@ -421,7 +440,10 @@ export function App() {
     if (!cur) return;
     try {
       await api.rules.update(id, { enabled: !cur.enabled });
-      await rulesR.refresh();
+      // Both transitions touch reservations on the server (true→false
+      // cascade-deletes scheduled reserves; false→true re-expands), so
+      // refresh recordings alongside rules to surface the change.
+      await Promise.all([rulesR.refresh(), recordingsR.refresh()]);
     } catch (e) {
       pushToast(`ルール更新失敗: ${(e as Error).message}`, 'err');
     }
@@ -593,9 +615,47 @@ export function App() {
     (channelsR.data == null && channelsR.loading);
 
 
+  // tvdb ids covered by an *enabled* series rule. Disabled rules are
+  // intentionally excluded — toggling a rule off should hide every
+  // "is this auto-reserved?" affordance the same way removing it does
+  // (otherwise the modal still claims "シリーズは自動予約済み" even
+  // after the user disabled the rule). Mirrors the enabled-filter that
+  // seriesRuleChannels below already applies.
   const existingSeriesIdSet = new Set(
-    rules.flatMap((r) => (r.kind === 'series' && r.tvdb ? [r.tvdb.id] : []))
+    rules.flatMap((r) => (r.enabled && r.kind === 'series' && r.tvdb ? [r.tvdb.id] : []))
   );
+  // tvdb ids where a series rule already exists but is currently
+  // disabled. The modal uses this to swap the "シリーズを追加" button
+  // for "シリーズ予約を再開" so the user toggles the existing rule on
+  // instead of POSTing a new one (which would 409 against the unique
+  // tvdb_id constraint).
+  const disabledSeriesIdSet = new Set(
+    rules.flatMap((r) => (!r.enabled && r.kind === 'series' && r.tvdb ? [r.tvdb.id] : []))
+  );
+  // Channel-aware view of the same data: tvdb id → channel list (empty
+  // array = wildcard, covers every channel). When two rules exist for
+  // the same TVDB id with different channel lists we union them; the
+  // moment one is wildcard the merged value collapses back to []. The
+  // grid/timeline/modal use this to decide whether *this airing* on
+  // *this channel* is covered by a series rule, vs. covered only on
+  // another channel.
+  const seriesRuleChannels = useMemo(() => {
+    const m = new Map<number, string[]>();
+    for (const r of rules) {
+      if (!r.enabled || r.kind !== 'series' || !r.tvdb) continue;
+      const prev = m.get(r.tvdb.id);
+      if (prev == null) {
+        m.set(r.tvdb.id, [...r.channels]);
+        continue;
+      }
+      if (prev.length === 0 || r.channels.length === 0) {
+        m.set(r.tvdb.id, []);
+        continue;
+      }
+      m.set(r.tvdb.id, Array.from(new Set([...prev, ...r.channels])));
+    }
+    return m;
+  }, [rules]);
 
   // Global search の "選択" を実際の遷移に振り分ける。
   // - program → 予約モーダルを開く (deep-link 経路と同じ ?modal=<id>)
@@ -672,7 +732,7 @@ export function App() {
                           onSelect={openModal}
                           selectedId={selectedProg}
                           reservedIds={reservedIds}
-                          seriesTvdbIds={existingSeriesIdSet}
+                          seriesRuleChannels={seriesRuleChannels}
                           density={density}
                           baseDate={selectedDate}
                           daysLoaded={Math.max(1, schedule.loadedDays)}
@@ -688,7 +748,7 @@ export function App() {
                           onSelect={openModal}
                           selectedId={selectedProg}
                           reservedIds={reservedIds}
-                          seriesTvdbIds={existingSeriesIdSet}
+                          seriesRuleChannels={seriesRuleChannels}
                           scrubRange={scrubRange}
                           setScrubRange={setScrubRange}
                           baseDate={selectedDate}
@@ -812,12 +872,15 @@ export function App() {
           channels={channels}
           programs={programs}
           existingSeriesIds={existingSeriesIdSet}
+          disabledSeriesIds={disabledSeriesIdSet}
+          seriesRuleChannels={seriesRuleChannels}
           recordingIdForProgram={recordingIdForProgram}
           onClose={closeModal}
           onReserve={(p) => void handleReserve(p)}
           onCreateRule={(kw, p, ch) => void handleCreateRule(kw, p, ch)}
           onCreateSeriesLink={(tv, p, ch) => void handleCreateSeriesLink(tv, p, ch)}
           onUnsubscribeSeries={(tvdbId) => void handleUnsubscribeSeries(tvdbId)}
+          onResumeSeries={(tvdbId) => void handleResumeSeries(tvdbId)}
           onStopRecording={(recordingId) => void handleStopRecording(recordingId)}
           onSelectProgram={openModal}
         />

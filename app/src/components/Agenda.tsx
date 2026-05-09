@@ -4,7 +4,31 @@ import type { MouseEvent, ReactNode } from 'react';
 import { Icon } from './Icon';
 import { PageHead } from './Pages';
 import { toMin, durLabel, MOCK_NOW_MIN, progId, getChannel, seriesCounts } from '../lib/epg';
+import { addDays, jstTodayYmd } from '../lib/broadcastDay';
+import { hhmm } from '../lib/adapters';
 import type { Channel, Program, Recording, Rule, TvdbSeries } from '../data/types';
+
+// "Next match" datetime label — broadcast-day-aware so the user can
+// distinguish 今夜 22:00 / 明日 22:00 / 5/12 (月) 22:00 at a glance.
+// Mirrors the upcomingLabel helper used in the reserves list.
+const DOW = ['日', '月', '火', '水', '木', '金', '土'] as const;
+function nextMatchLabel(iso: string): string {
+  const time = hhmm(iso);
+  const targetYmd = jstTodayYmd(new Date(iso));
+  const today = jstTodayYmd();
+  if (targetYmd === today) return time;
+  if (targetYmd === addDays(today, 1)) return `明日 ${time}`;
+  if (targetYmd === addDays(today, 2)) return `明後日 ${time}`;
+  for (let n = 3; n <= 6; n++) {
+    if (targetYmd === addDays(today, n)) {
+      const d = new Date(`${targetYmd}T00:00:00+09:00`);
+      return `${n}日後 (${DOW[d.getUTCDay()]}) ${time}`;
+    }
+  }
+  // Beyond a week or already past — show MM/DD.
+  const [, m, d] = targetYmd.split('-');
+  return `${Number(m)}/${Number(d)} ${time}`;
+}
 
 // Partial patch shape passed to onSave. Kept loose here because the API
 // accepts Partial<Rule> and TS unifies to string-ish at the call site.
@@ -385,7 +409,7 @@ export function RuleCard({ rule, channels, recordings, onToggle, onEdit }: RuleC
         <span className="kv">再放送 <strong>{rule.skipReruns ? 'スキップ' : '録画'}</strong></span>
         {rule.nextMatch && rule.enabled && (
           <span className="kv" style={{ marginLeft: 'auto', color: 'var(--accent)', fontFamily: 'var(--font-jp)' }}>
-            <Icon name="clock" size={11} /> 次回 {rule.nextMatch.at} · {rule.nextMatch.title.length > 20 ? rule.nextMatch.title.slice(0, 20) + '…' : rule.nextMatch.title}
+            <Icon name="clock" size={11} /> 次回 {nextMatchLabel(rule.nextMatch.at)} · {rule.nextMatch.title.length > 20 ? rule.nextMatch.title.slice(0, 20) + '…' : rule.nextMatch.title}
           </span>
         )}
       </div>
@@ -462,7 +486,7 @@ export function SeriesRuleCard({ rule, recordings, onToggle, onEdit }: SeriesRul
         <span className="kv">再放送 <strong>{rule.skipReruns ? 'スキップ' : '録画'}</strong></span>
         {rule.nextMatch && rule.enabled && (
           <span className="kv" style={{ marginLeft: 'auto', color: 'var(--accent)', fontFamily: 'var(--font-jp)' }}>
-            <Icon name="clock" size={11} /> 次回 {rule.nextMatch.at} · {rule.nextMatch.title.length > 20 ? rule.nextMatch.title.slice(0, 20) + '…' : rule.nextMatch.title}
+            <Icon name="clock" size={11} /> 次回 {nextMatchLabel(rule.nextMatch.at)} · {rule.nextMatch.title.length > 20 ? rule.nextMatch.title.slice(0, 20) + '…' : rule.nextMatch.title}
           </span>
         )}
       </div>

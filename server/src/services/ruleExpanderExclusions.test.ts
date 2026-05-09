@@ -183,3 +183,57 @@ describe('rulePredicate — exclusions (Phase 7)', () => {
     assert.equal(rulePredicate(rule, prog, NOW_MS), false);
   });
 });
+
+// Series rules carry their own channel list (rule.channels). A series rule
+// created from MBS must not auto-reserve the BS11 broadcast of the same
+// TVDB episode. The channels guard belongs in the predicate so both the
+// cron expansion and the synchronous post-create expansion see it.
+describe('rulePredicate — series channel filter', () => {
+  const TV = {
+    id: 4242,
+    title: '黄泉のツガイ',
+    type: 'series' as const,
+    status: 'continuing' as const,
+    slug: 'yomi-no-tsugai',
+    titleEn: 'Yomi no Tsugai',
+    network: 'MBS',
+    year: 2024,
+    poster: '',
+    matchedBy: 'manual',
+    totalSeasons: 1,
+    currentSeason: 1,
+    currentEp: 7,
+    totalEps: 12,
+  };
+  const series = (over: Partial<Rule> = {}): Rule =>
+    mkRule({ kind: 'series', keyword: TV.title, name: TV.title, tvdb: TV, ...over });
+  const epOnCh = (ch: string): Program =>
+    mkProgram({
+      id: `${ch}_2026-04-19T02:08`,
+      ch,
+      title: TV.title,
+      startAt: '2026-04-19T02:08:00+09:00',
+      endAt:   '2026-04-19T02:38:00+09:00',
+      tvdb: TV,
+      tvdbSeason: 1,
+      tvdbEpisode: 6,
+    });
+
+  test('channels=[] wildcards across every channel', () => {
+    const rule = series({ channels: [] });
+    assert.equal(rulePredicate(rule, epOnCh('mbs'), NOW_MS), true);
+    assert.equal(rulePredicate(rule, epOnCh('bs11'), NOW_MS), true);
+  });
+
+  test('channels=[mbs] matches MBS but not BS11', () => {
+    const rule = series({ channels: ['mbs'] });
+    assert.equal(rulePredicate(rule, epOnCh('mbs'), NOW_MS), true);
+    assert.equal(rulePredicate(rule, epOnCh('bs11'), NOW_MS), false);
+  });
+
+  test('channels=[mbs,tx] still excludes BS11', () => {
+    const rule = series({ channels: ['mbs', 'tx'] });
+    assert.equal(rulePredicate(rule, epOnCh('tx'), NOW_MS), true);
+    assert.equal(rulePredicate(rule, epOnCh('bs11'), NOW_MS), false);
+  });
+});

@@ -190,42 +190,61 @@ export class DrizzleRuleService implements RuleService {
       return this.findById(id);
     }
 
+    // Snapshot the rule BEFORE updating so we can detect an enabled
+    // true→false transition. When the toggle goes off the user expects
+    // the matching reservations to disappear too — same cleanup as
+    // remove() (which the modal's "シリーズ解除" button calls). The
+    // shared cancelScheduledReservesFor helper keeps both paths bit-
+    // identical so toggle-off and unsubscribe can never drift apart.
+    const before = await this.findById(id);
+
     const updated = await db.update(rules).set(patch).where(eq(rules.id, id)).returning({ id: rules.id });
     if (updated.length === 0) return null;
+
+    if (before && before.enabled && input.enabled === false) {
+      await this.cancelScheduledReservesFor(before);
+    }
+
     return this.findById(id);
   }
 
   async remove(id: number): Promise<boolean> {
     // Cancel the pending reservations this rule produced before dropping
-    // the rule itself.
-    //   - keyword rules → recordings carry sourceRuleId = rule.id
-    //   - series  rules → recordings carry sourceTvdbId = rule.tvdb.id
-    //                     (recordingService normalises series-source to the
-    //                     tvdb id, so sourceRuleId stays NULL)
-    // Only `scheduled` rows are dropped — anything already in flight
-    // (`recording`/`encoding`/...) keeps its lineage. The FK has
-    // `onDelete: 'set null'` so without this cleanup the rows would
-    // outlive the rule as orphan reserves, which surprised users who
-    // unsubscribed from a series and expected future episodes to clear.
+    // the rule itself. Identical cleanup to update()'s true→false branch
+    // — both call cancelScheduledReservesFor so we can never have one
+    // path remember to clean up while the other forgets.
     const target = await this.findById(id);
+    if (target) await this.cancelScheduledReservesFor(target);
+    const deleted = await db.delete(rules).where(eq(rules.id, id)).returning({ id: rules.id });
+    return deleted.length > 0;
+  }
 
+  // Single source of truth for "drop scheduled reserves that this rule
+  // produced." Called from both remove() and update()'s disable branch.
+  //   - keyword rules → recordings carry sourceRuleId = rule.id
+  //   - series  rules → recordings carry sourceTvdbId = rule.tvdb.id
+  //                     (recordingService normalises series-source to
+  //                     the tvdb id, so sourceRuleId stays NULL for
+  //                     these — both deletes are needed for cohorts
+  //                     mixed across the two source kinds)
+  // Only `scheduled` rows are dropped — anything already in flight
+  // (`recording`/`encoding`/...) keeps its lineage. Hard delete; not
+  // logical deletion. The FK has `onDelete: 'set null'` so without this
+  // cleanup the rows would outlive the rule as orphan reserves.
+  private async cancelScheduledReservesFor(rule: Rule): Promise<void> {
     await db
       .delete(recordings)
-      .where(and(eq(recordings.sourceRuleId, id), eq(recordings.state, 'scheduled')));
-
-    if (target?.kind === 'series' && target.tvdb?.id != null) {
+      .where(and(eq(recordings.sourceRuleId, rule.id), eq(recordings.state, 'scheduled')));
+    if (rule.kind === 'series' && rule.tvdb?.id != null) {
       await db
         .delete(recordings)
         .where(
           and(
-            eq(recordings.sourceTvdbId, target.tvdb.id),
+            eq(recordings.sourceTvdbId, rule.tvdb.id),
             eq(recordings.state, 'scheduled'),
           ),
         );
     }
-
-    const deleted = await db.delete(rules).where(eq(rules.id, id)).returning({ id: rules.id });
-    return deleted.length > 0;
   }
 }
 

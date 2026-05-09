@@ -82,8 +82,13 @@ export function toRule(r: ApiRule): Rule {
     channels: r.channels,
     enabled: r.enabled,
     matches: r.matches,
+    // Carry the full ISO timestamp through — the renderer derives both
+    // the HH:MM and the "today / 明日 / N日後 / MM/DD" prefix from it
+    // so disabled rules and 1-week-out matches are distinguishable
+    // (previously this was collapsed to HH:MM and the user couldn't
+    // tell whether 次回 22:00 meant tonight or next week).
     nextMatch: r.nextMatch
-      ? { ch: r.nextMatch.ch, title: r.nextMatch.title, at: hhmm(r.nextMatch.at) }
+      ? { ch: r.nextMatch.ch, title: r.nextMatch.title, at: r.nextMatch.at }
       : null,
     priority: r.priority,
     quality: r.quality,

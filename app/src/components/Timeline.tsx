@@ -2,6 +2,7 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import type { UIEvent, MouseEvent } from 'react';
 import { broadcastDayAt, toMin, progId } from '../lib/epg';
+import { seriesRuleCovers } from '../lib/seriesRule';
 import { Icon } from './Icon';
 import type { Channel, Program } from '../data/types';
 
@@ -17,9 +18,10 @@ export interface TimelineViewProps {
   onSelect: (p: Program) => void;
   selectedId: string | null;
   reservedIds: Set<string>;
-  /** TVDB ids covered by an enabled series rule — drives the orange
-   *  series-reserved variant on cells (vs blue single-reserved). */
-  seriesTvdbIds?: Set<number>;
+  /** Channel-aware series-rule coverage: tvdb id → channel list (empty
+   *  list = wildcard). Cells render the orange series-reserved variant
+   *  only when the rule's channels include the program's channel. */
+  seriesRuleChannels?: Map<number, string[]>;
   scrubRange: ScrubRange;
   setScrubRange: (range: ScrubRange) => void;
   baseDate: string;
@@ -40,7 +42,7 @@ export function TimelineView({
   onSelect,
   selectedId,
   reservedIds,
-  seriesTvdbIds,
+  seriesRuleChannels,
   scrubRange,
   setScrubRange,
   baseDate,
@@ -254,7 +256,7 @@ export function TimelineView({
                     const w = Math.max(28, (b - a) * pxPerMin);
                     const isRes = reservedIds.has(progId(p));
                     const isSeriesRes =
-                      isRes && p.tvdb?.id != null && !!seriesTvdbIds?.has(p.tvdb.id);
+                      isRes && p.tvdb?.id != null && seriesRuleCovers(seriesRuleChannels, p.tvdb.id, p.ch);
                     const isRec = p.recording;
                     const isPast = p.endAt ? Date.parse(p.endAt) < Date.now() : false;
                     const isDimmed = genreFilter !== 'all' && p.genre.key !== genreFilter;
@@ -290,6 +292,11 @@ export function TimelineView({
                         <div className="tl-prog-title">{p.title}</div>
                         {!narrow && (p.desc || p.ep) && (
                           <div className="tl-prog-desc">{p.desc ?? p.ep}</div>
+                        )}
+                        {p.tvdbSeason != null && p.tvdbEpisode != null && (
+                          <div className="prog-se-foot">
+                            S{p.tvdbSeason}E{p.tvdbEpisode}
+                          </div>
                         )}
                       </div>
                     );

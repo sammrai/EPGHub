@@ -10,6 +10,7 @@ import { Icon } from './Icon';
 import { durLabel, getChannel, progId, MOCK_NOW_MIN, toMin } from '../lib/epg';
 import { jpAirDate, toProgram } from '../lib/adapters';
 import { hasPoster, posterStyle } from '../lib/tvdbVisual';
+import { seriesRuleCovers, seriesRuleOnOtherChannel, seriesRuleChannels as seriesRuleChannelsFor } from '../lib/seriesRule';
 import { DebugDetailsModal } from './Modal';
 import { api } from '../api/epghub';
 import type { ApiTvdbCastMember } from '../api/epghub';
@@ -25,12 +26,23 @@ export interface GuidePanelProps {
   channels: Channel[];
   programs: Program[];
   existingSeriesIds?: Set<number>;
+  /** tvdb ids whose series rule already exists but is currently
+   *  disabled. The modal swaps the "シリーズを追加" button for a
+   *  gray "シリーズ予約を再開" so the user re-enables the existing
+   *  rule instead of POSTing a duplicate (which would 409). */
+  disabledSeriesIds?: Set<number>;
+  /** Channel-aware series rule lookup. Used to distinguish "this airing
+   *  is covered" from "the same series is registered, but on another
+   *  channel" so the modal can show two action buttons + a small hint
+   *  instead of pretending the airing is auto-reserved. */
+  seriesRuleChannels?: Map<number, string[]>;
   recordingIdForProgram?: (programId: string) => string | null;
   onClose: () => void;
   onReserve: (p: Program) => void;
   onCreateRule: (keyword: string, p: Program, channels?: string[]) => void;
   onCreateSeriesLink: (tvdb: TvdbSeries, p: Program, channels?: string[]) => void;
   onUnsubscribeSeries?: (tvdbId: number) => void;
+  onResumeSeries?: (tvdbId: number) => void;
   onStopRecording?: (recordingId: string) => void;
   onSelectProgram: (p: Program) => void;
 }
@@ -54,12 +66,15 @@ function GuidePanelInner({
   channels,
   programs,
   existingSeriesIds,
+  disabledSeriesIds,
+  seriesRuleChannels,
   recordingIdForProgram,
   onClose,
   onReserve,
   onCreateRule,
   onCreateSeriesLink,
   onUnsubscribeSeries,
+  onResumeSeries,
   onStopRecording,
   onSelectProgram,
 }: InnerProps) {
@@ -101,8 +116,19 @@ function GuidePanelInner({
   // after the user reserved.
   const reserved = !!program.rec;
   const seriesId = tvdb?.id ?? null;
+  // "Covered" means: a series rule exists AND its channel list includes
+  // this airing's channel (or the list is empty = wildcard). The flat
+  // existingSeriesIds Set is too loose — it would mark the BS11 broadcast
+  // of an MBS-bound rule as auto-reserved.
   const coveredBySeriesRule =
-    seriesId != null && !!existingSeriesIds && existingSeriesIds.has(seriesId);
+    seriesId != null && seriesRuleCovers(seriesRuleChannels, seriesId, program.ch);
+  // "Same series rule exists, but for a different channel" — we render a
+  // small hint and keep both action buttons live so the user can decide.
+  const seriesRuledOnOtherChannel =
+    seriesId != null && seriesRuleOnOtherChannel(seriesRuleChannels, seriesId, program.ch);
+  const otherChannelIds = seriesId != null
+    ? seriesRuleChannelsFor(seriesRuleChannels, seriesId).filter((c) => c !== program.ch)
+    : [];
   const isLive = toMin(program.start) <= MOCK_NOW_MIN && toMin(program.end) > MOCK_NOW_MIN;
   const apiRecordingId = program.id && recordingIdForProgram
     ? recordingIdForProgram(program.id)
@@ -116,6 +142,15 @@ function GuidePanelInner({
   const hasGlass = !!(tvdb && hasPoster(tvdb));
   const hasExtras =
     !!program.desc || tvdbCast.length > 0 || staff.length > 0 || related.length > 0;
+  // Map channel ids in the series-rule's list back to display names so the
+  // "他のチャンネルで登録済み" chip / hint can name them. Falls back to
+  // the raw id when a channel row has been removed since the rule was
+  // created (e.g. tuner reconfig).
+  const otherChannelLabels = otherChannelIds.map((id) => {
+    const c = getChannel(channels, id);
+    return c?.name ?? id;
+  });
+  const otherChannelLabel = otherChannelLabels.join('・');
   const stateChip = program.recording ? (
     <span className="gp-state-chip rec">
       <span className="gp-state-dot" /> 録画中
@@ -129,6 +164,9 @@ function GuidePanelInner({
       <Icon name="check" size={10} /> 予約済
     </span>
   ) : null;
+  // Note: the "他チャンネルで登録済み" meta-chip was removed in favour
+  // of a grayed-out informational button rendered inside the action
+  // bar (see ActionBar slot 2). Showing both was redundant.
 
   return (
     <div
@@ -163,9 +201,9 @@ function GuidePanelInner({
         <div className="gp-content">
         <div className="gp-info">
           <div className="gp-meta-row">
-            {tvdb && (
-              <span className="gp-kind-pill">{isMovie ? '映画' : 'シリーズ'}</span>
-            )}
+            {/* The "映画 / シリーズ" kind pill was removed (2026-05-09):
+               movies are obvious from the genre tag and series from the
+               poster bleed, so the pill was just redundant noise. */}
             <span
               className="gp-genre-tag"
               style={{ '--tag-dot': program.genre.dot } as CSSProperties}
@@ -208,24 +246,30 @@ function GuidePanelInner({
             tvdb={tvdb}
             isMovie={isMovie}
             isSeriesTvdb={isSeriesTvdb}
-            isMovieTvdb={isMovieTvdb}
             isLive={isLive}
             reserved={reserved}
             coveredBySeriesRule={coveredBySeriesRule}
+            seriesRuleDisabled={
+              tvdb?.type === 'series' && !!disabledSeriesIds && disabledSeriesIds.has(tvdb.id)
+            }
+            seriesRuledOnOtherChannel={seriesRuledOnOtherChannel}
+            otherChannelLabel={otherChannelLabel}
             apiRecordingId={apiRecordingId}
             onReserve={onReserve}
             onCreateRule={onCreateRule}
             onCreateSeriesLink={onCreateSeriesLink}
             onUnsubscribeSeries={onUnsubscribeSeries}
+            onResumeSeries={onResumeSeries}
             onStopRecording={onStopRecording}
           />
           {!reserved && !coveredBySeriesRule && (
             <ReserveOutcome
               tvdb={tvdb}
-              isMovieTvdb={isMovieTvdb}
-              isMovieGenreOnly={isMovieGenre && !isMovieTvdb}
               seriesAlreadyRuled={
                 isSeriesTvdb && tvdb && !!existingSeriesIds && existingSeriesIds.has(tvdb.id)
+              }
+              seriesOnOtherChannelLabel={
+                seriesRuledOnOtherChannel ? otherChannelLabel || '他チャンネル' : null
               }
             />
           )}
@@ -318,7 +362,11 @@ function GuidePanelInner({
       </div>
 
       {showDebug && (
-        <DebugDetailsModal program={program} onClose={() => setShowDebug(false)} />
+        <DebugDetailsModal
+          program={program}
+          recordingId={apiRecordingId}
+          onClose={() => setShowDebug(false)}
+        />
       )}
     </div>
   );
@@ -353,15 +401,27 @@ interface ActionBarProps {
   tvdb: TvdbEntry | null;
   isMovie: boolean;
   isSeriesTvdb: boolean;
-  isMovieTvdb: boolean;
   isLive: boolean;
   reserved: boolean;
   coveredBySeriesRule: boolean;
+  // True when a series rule for this tvdb exists but is currently
+  // disabled. Drives a gray "シリーズ予約を再開" affordance instead of
+  // "シリーズを追加" (which would 409 against the unique tvdb_id).
+  seriesRuleDisabled: boolean;
+  // True when a series rule exists for this tvdb but its channel list
+  // does not include this airing's channel. Slot 2 collapses to a
+  // disabled "{channel}で登録済み" indicator so the user can see at a
+  // glance the series is already booked elsewhere — no double-add.
+  seriesRuledOnOtherChannel: boolean;
+  // Display label of the channel(s) the rule is registered on. When
+  // seriesRuledOnOtherChannel is true this fills the disabled button.
+  otherChannelLabel: string;
   apiRecordingId: string | null;
   onReserve: (p: Program) => void;
   onCreateRule: (keyword: string, p: Program, channels?: string[]) => void;
   onCreateSeriesLink: (tvdb: TvdbSeries, p: Program, channels?: string[]) => void;
   onUnsubscribeSeries?: (tvdbId: number) => void;
+  onResumeSeries?: (tvdbId: number) => void;
   onStopRecording?: (recordingId: string) => void;
 }
 
@@ -376,15 +436,18 @@ function ActionBar(props: ActionBarProps) {
     tvdb,
     isMovie,
     isSeriesTvdb,
-    isMovieTvdb,
     isLive,
     reserved,
     coveredBySeriesRule,
+    seriesRuleDisabled,
+    seriesRuledOnOtherChannel,
+    otherChannelLabel,
     apiRecordingId,
     onReserve,
     onCreateRule,
     onCreateSeriesLink,
     onUnsubscribeSeries,
+    onResumeSeries,
     onStopRecording,
   } = props;
 
@@ -418,9 +481,16 @@ function ActionBar(props: ActionBarProps) {
       };
     }
     return {
-      title: 'この回のみ録画',
+      // Movies have no "回" concept — say plain "録画". Series/shows
+      // keep "この回のみ録画" so the user can distinguish the single-
+      // airing recording from a series-rule auto-reservation.
+      title: isMovie ? '録画' : 'この回のみ録画',
       desc: `${program.start}–${program.end}`,
-      kind: 'ghost',
+      // For movies "録画" IS the primary action (no "シリーズを追加"
+      // alternative to compete with), so render it filled blue. For
+      // series/shows it stays ghost — the primary slot is the series-
+      // add button next to it.
+      kind: isMovie ? 'primary' : 'ghost',
       onClick: () => onReserve(program),
     };
   })();
@@ -444,6 +514,31 @@ function ActionBar(props: ActionBarProps) {
           onClick: onUnsubscribeSeries
             ? () => onUnsubscribeSeries(tvdb.id)
             : undefined,
+        };
+      }
+      // Series rule exists on a different channel — render a single
+      // disabled "{ch}で登録済み" button. ActionCard auto-applies the
+      // native `disabled` HTML attribute when onClick is undefined, so
+      // the button is non-interactive (no onClick, no double-add risk).
+      // Replaces the prior meta-row chip + "シリーズを追加" pair.
+      if (seriesRuledOnOtherChannel) {
+        return {
+          title: `${otherChannelLabel || '他チャンネル'}で登録済み`,
+          desc: 'シリーズ自動予約',
+          kind: 'ghost',
+          onClick: undefined,
+        };
+      }
+      // Disabled-rule path: an existing rule is sitting in the table
+      // but with enabled=false. Render a gray (off-state) toggle that
+      // re-enables it instead of trying to POST a new rule (which
+      // would 409 the unique tvdb_id constraint).
+      if (seriesRuleDisabled) {
+        return {
+          title: 'シリーズ予約を再開',
+          desc: '現在オフ',
+          kind: 'ghost',
+          onClick: onResumeSeries ? () => onResumeSeries(tvdb.id) : undefined,
         };
       }
       // Covered by neither single nor series — recommend series-add.
@@ -482,8 +577,6 @@ function ActionBar(props: ActionBarProps) {
   // belongs in slot2 on top of that.
   const slot2Hidden = isLive;
 
-  void isMovieTvdb;
-
   return (
     <div className="gp-actions">
       {!slot1Hidden && <ActionCard {...slot1} />}
@@ -494,19 +587,26 @@ function ActionBar(props: ActionBarProps) {
 
 interface ReserveOutcomeProps {
   tvdb: TvdbEntry | null;
-  isMovieTvdb: boolean;
-  isMovieGenreOnly: boolean;
   seriesAlreadyRuled: boolean;
+  // Non-null = a series rule for this tvdb exists, but only on other
+  // channels (this airing isn't auto-reserved). Suppressed here — the
+  // disabled "{ch}で登録済み" button in the action bar already conveys
+  // it; a second hint in the action area was redundant.
+  seriesOnOtherChannelLabel: string | null;
 }
 
 // Inline hint that surfaces under the action bar before reservation —
 // only when the rule outcome wouldn't be obvious from the action labels.
+// The movie-specific branches ("ライブラリの映画タブに追加" / "TVDB 紐付け
+// なしのため再放送自動予約はない") were dropped 2026-05-09: both are
+// inferable from the genre tag + the absence of any series-add button,
+// so the hints just added noise.
 function ReserveOutcome({
   tvdb,
-  isMovieTvdb,
-  isMovieGenreOnly,
   seriesAlreadyRuled,
+  seriesOnOtherChannelLabel,
 }: ReserveOutcomeProps) {
+  if (seriesOnOtherChannelLabel) return null;
   if (seriesAlreadyRuled && tvdb) {
     return (
       <div className="gp-outcome accent">
@@ -515,24 +615,6 @@ function ReserveOutcome({
           シリーズ「{tvdb.title}」は自動予約済み。
           この回は <strong>「この回のみ」</strong> で上書き予約できます。
         </div>
-      </div>
-    );
-  }
-  if (isMovieTvdb) {
-    return (
-      <div className="gp-outcome accent">
-        <Icon name="check" size={12} />
-        <div>
-          映画はライブラリの <strong>映画タブ</strong> に追加されます。
-        </div>
-      </div>
-    );
-  }
-  if (isMovieGenreOnly) {
-    return (
-      <div className="gp-outcome">
-        <Icon name="sparkle" size={12} />
-        <div>TVDB 紐付けがないため、再放送時の自動予約はありません。</div>
       </div>
     );
   }

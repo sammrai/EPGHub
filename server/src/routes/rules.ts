@@ -137,9 +137,23 @@ rulesRouter.openapi(create, async (c) => {
 rulesRouter.openapi(update, async (c) => {
   const { id } = c.req.valid('param');
   const body = c.req.valid('json');
+  // Snapshot the BEFORE state so we can detect an enabled false→true
+  // transition and re-expand. ruleService.update already handles the
+  // true→false cleanup (cascade-deletes scheduled reserves) on its end.
+  const before = await ruleService.findById(id);
   const next = await ruleService.update(id, body);
   if (!next) {
     return c.json({ code: 'rule.not_found', message: 'ルールが見つかりません' }, 404);
+  }
+  // On re-enable, kick the expander synchronously — same pattern as the
+  // create handler. Without this the user would see "ON" in the UI but
+  // no reserves until the 10-minute cron tick.
+  if (before && !before.enabled && next.enabled) {
+    try {
+      await expandRules();
+    } catch (e) {
+      console.warn('[rules.update] post-enable rule.expand failed:', (e as Error).message);
+    }
   }
   return c.json(next, 200);
 });

@@ -129,6 +129,11 @@ export function rulePredicate(rule: Rule, program: Program, nowMs: number): bool
   let baseMatch: boolean;
   if (rule.kind === 'series') {
     if (!rule.tvdb) return false;
+    // A series rule with channels=[] is wildcard ("any channel that airs this");
+    // a non-empty list locks the rule to specific channels. Without this, a
+    // rule created from MBS would also reserve the BS11 broadcast of the
+    // same TVDB episode and produce duplicate recordings.
+    if (rule.channels.length > 0 && !rule.channels.includes(program.ch)) return false;
     // Prefer structured match if the program carries a tvdb entry.
     if (program.tvdb && program.tvdb.id === rule.tvdb.id) {
       baseMatch = true;

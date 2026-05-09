@@ -518,14 +518,22 @@ function jstBroadcastDay(iso: string): string {
 //   1. Title has `#N` / `第N話` — pick the episode with e === N in the
 //      latest season that has one. The EPG's explicit episode number is
 //      the strongest signal when the broadcaster labels it.
-//   2. TVDB aired === 放送日 (JST - 5h). Handles late-night slots
+//   2. Cumulative-N fallback. Some broadcasters number a show across
+//      seasons (ダンダダン #18 = S1 12話 + S2 6話 で第18話扱い), but
+//      TVDB resets `e` per season. When no season carries `e === N`,
+//      walk seasons s≥1 ascending; once N lands inside the running
+//      total, that season's relative episode is the match.
+//   3. TVDB aired === 放送日 (JST - 5h). Handles late-night slots
 //      naturally without a separate fallback.
-function findEpisodeForProgram(
+//
+// Exported for unit tests — tests bypass the DB and hand-roll an
+// `episodes` array per case.
+export function findEpisodeForProgram(
   episodes: Array<{ s: number; e: number; aired?: string; name?: string }>,
   programStartIso: string,
   programTitle: string
 ): { s: number; e: number; name?: string } | null {
-  // 1. Title-parsed episode number wins.
+  // 1. Title-parsed episode number wins (direct match).
   const titleEp = parseTitleEpisodeNumber(programTitle);
   if (titleEp != null) {
     // Multi-cour / restart-numbered series: prefer the highest season
@@ -535,8 +543,27 @@ function findEpisodeForProgram(
       const best = candidates.reduce((a, b) => (a.s >= b.s ? a : b));
       return { s: best.s, e: best.e, name: best.name };
     }
+    // 2. Cumulative-N fallback. Only kicks in when direct match is empty
+    // — otherwise a long single-season show with E18 would get pulled
+    // into S2 even though S1 already has the right episode.
+    const seasons = Array.from(new Set(
+      episodes.filter((ep) => ep.s >= 1).map((ep) => ep.s)
+    )).sort((a, b) => a - b);
+    let acc = 0;
+    for (const s of seasons) {
+      const eps = episodes.filter((ep) => ep.s === s);
+      if (eps.length === 0) continue;
+      const maxE = eps.reduce((m, ep) => (ep.e > m ? ep.e : m), 0);
+      if (titleEp <= acc + maxE) {
+        const rel = titleEp - acc;
+        const hit = eps.find((ep) => ep.e === rel);
+        if (hit) return { s: hit.s, e: hit.e, name: hit.name };
+        break; // titleEp belongs to this season but no matching e — give up
+      }
+      acc += maxE;
+    }
   }
-  // 2. Broadcast-day match.
+  // 3. Broadcast-day match.
   const broadcastDay = jstBroadcastDay(programStartIso);
   const hit = episodes.find((ep) => ep.aired === broadcastDay);
   if (hit) return { s: hit.s, e: hit.e, name: hit.name };

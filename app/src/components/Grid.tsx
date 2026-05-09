@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Icon } from './Icon';
 import { broadcastDayAt, progId } from '../lib/epg';
+import { seriesRuleCovers } from '../lib/seriesRule';
 import type { BcType, Channel, Program } from '../data/types';
 
 export type GridDensity = 'compact' | 'normal' | 'roomy';
@@ -373,10 +374,13 @@ export interface GridViewProps {
   selectedId: string | null;
   density: GridDensity;
   reservedIds: Set<string>;
-  /** TVDB ids covered by an enabled series rule. A reserved program whose
-   *  tvdb id is in this set renders in the orange "series-reserved"
-   *  variant rather than the blue "single-reserved" one. */
-  seriesTvdbIds?: Set<number>;
+  /** Channel-aware view of enabled series rules: tvdb id → channel list.
+   *  A reserved program renders in the orange "series-reserved" variant
+   *  only when its `program.ch` is in the rule's channel list (or the
+   *  list is empty, meaning wildcard). When the same tvdb id is reserved
+   *  on a channel the rule does NOT cover (e.g. a duplicate from a
+   *  different rule), the cell stays in the blue "reserved" variant. */
+  seriesRuleChannels?: Map<number, string[]>;
   /** Anchor date for the grid (YYYY-MM-DD, JST broadcast day). The grid
    *  renders from `baseDate` 05:00 JST over `daysLoaded × 24` hours. */
   baseDate: string;
@@ -413,7 +417,7 @@ function findScrollParent(el: HTMLElement | null): HTMLElement | null {
   return null;
 }
 
-export function GridView({ programs, channels, onSelect, selectedId, density, reservedIds, seriesTvdbIds, baseDate, daysLoaded, onLoadMore, onVisibleDateChange, genreFilter = 'all' }: GridViewProps) {
+export function GridView({ programs, channels, onSelect, selectedId, density, reservedIds, seriesRuleChannels, baseDate, daysLoaded, onLoadMore, onVisibleDateChange, genreFilter = 'all' }: GridViewProps) {
   // 放送日連続ビュー: baseDate 05:00 JST を 0 分起点に、daysLoaded × 24時間分
   // を一枚のタイムラインで描画。スクロールが底近くに達すると onLoadMore で
   // 更に 1 日追加読み込みする (無限スクロール)。
@@ -595,7 +599,7 @@ export function GridView({ programs, channels, onSelect, selectedId, density, re
                 const height = Math.max(18, rawH);
                 const isReserved = reservedIds.has(progId(p));
                 const isSeriesReserved =
-                  isReserved && p.tvdb?.id != null && !!seriesTvdbIds?.has(p.tvdb.id);
+                  isReserved && p.tvdb?.id != null && seriesRuleCovers(seriesRuleChannels, p.tvdb.id, p.ch);
                 const isPast = p.endAt ? Date.parse(p.endAt) < Date.now() : false;
                 const isRec = p.recording;
                 const short = height < 38;
@@ -639,6 +643,11 @@ export function GridView({ programs, channels, onSelect, selectedId, density, re
                         <div className="prog-desc">{p.desc ?? p.ep}</div>
                       )}
                     </div>
+                    {p.tvdbSeason != null && p.tvdbEpisode != null && (
+                      <div className="prog-se-foot">
+                        S{p.tvdbSeason}E{p.tvdbEpisode}
+                      </div>
+                    )}
                   </div>
                 );
               })}

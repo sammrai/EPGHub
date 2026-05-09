@@ -1043,10 +1043,148 @@ function DebugDetailsTrigger({ onClick }: { onClick: () => void }) {
 
 interface DebugDetailsModalProps {
   program: Program;
+  /** Recordings DB row id for this program, when a recording exists.
+   *  Surfaced verbatim alongside program.id so support requests carry
+   *  enough context to find the row in the DB. */
+  recordingId?: string | null;
   onClose: () => void;
 }
 
-export function DebugDetailsModal({ program: p, onClose }: DebugDetailsModalProps) {
+// Copy `text` to the clipboard, falling back to a hidden textarea when
+// the page isn't served over a secure context (clipboard API gated).
+async function writeClipboard(text: string): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return;
+  } catch {
+    // fall through to legacy path
+  }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand('copy');
+  } finally {
+    document.body.removeChild(ta);
+  }
+}
+
+// Minimal copy affordance — sits inline next to a value, looks like a
+// faded glyph until hover, and flashes a check mark for ~1.2s after a
+// successful copy. Stops propagation so the parent modal backdrop can't
+// see the click and close itself.
+function CopyIconButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      title="クリップボードにコピー"
+      aria-label="クリップボードにコピー"
+      onClick={async (e) => {
+        e.stopPropagation();
+        await writeClipboard(text);
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1200);
+      }}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 18,
+        height: 18,
+        padding: 0,
+        background: 'transparent',
+        border: 'none',
+        cursor: 'pointer',
+        color: copied ? 'var(--accent)' : 'var(--fg-subtle)',
+        opacity: copied ? 1 : 0.6,
+        flexShrink: 0,
+      }}
+    >
+      <Icon name={copied ? 'check' : 'copy'} size={12} />
+    </button>
+  );
+}
+
+// Mono-font value paired with an inline copy button. `display` is what
+// the user sees; `text` is the table-qualified payload that gets copied.
+function IdValue({ text, display }: { text: string; display: string }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      <span
+        style={{
+          fontFamily: 'var(--font-mono)',
+          fontSize: 11,
+          wordBreak: 'break-all',
+          whiteSpace: 'pre-wrap',
+        }}
+      >
+        {display}
+      </span>
+      <CopyIconButton text={text} />
+    </span>
+  );
+}
+
+// "再マッチ" trigger inside the debug modal. Re-uses POST /programs/:id/tvdb
+// (matchService.linkProgram), which re-fetches the TVDB episode list and
+// runs findEpisodeForProgram for this program — picking up matcher logic
+// improvements (e.g. the cumulative-N fallback) without waiting for the
+// next EPG refresh, since `enrichUnmatched` only touches tvdbId-null rows.
+function RematchButton({ programId, tvdbId }: { programId: string; tvdbId: number }) {
+  const [state, setState] = useState<'idle' | 'loading' | 'ok' | 'err'>('idle');
+  const onClick = async (e: MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    if (state === 'loading') return;
+    setState('loading');
+    try {
+      await api.programs.linkTvdb(programId, tvdbId);
+      setState('ok');
+      window.setTimeout(() => setState('idle'), 1500);
+    } catch {
+      setState('err');
+      window.setTimeout(() => setState('idle'), 2000);
+    }
+  };
+  const label =
+    state === 'loading' ? '再マッチ中…'
+      : state === 'ok' ? '更新しました'
+      : state === 'err' ? '失敗'
+      : '再マッチ';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={state === 'loading'}
+      title="TVDB エピソード一覧を再取得し、この番組の S/E を解決し直す"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        padding: '2px 8px',
+        height: 22,
+        background: 'transparent',
+        border: '1px solid var(--border)',
+        borderRadius: 6,
+        color: state === 'ok' ? 'var(--accent)'
+          : state === 'err' ? 'var(--rec, #c0392b)'
+          : 'var(--fg-muted)',
+        cursor: state === 'loading' ? 'progress' : 'pointer',
+        fontSize: 11,
+        fontWeight: 500,
+        lineHeight: 1,
+      }}
+    >
+      <Icon name={state === 'ok' ? 'check' : 'cycle'} size={11} />
+      <span>{label}</span>
+    </button>
+  );
+}
+
+export function DebugDetailsModal({ program: p, recordingId, onClose }: DebugDetailsModalProps) {
   const mono: CSSProperties = {
     fontFamily: 'var(--font-mono)',
     fontSize: 11,
@@ -1136,7 +1274,16 @@ export function DebugDetailsModal({ program: p, onClose }: DebugDetailsModalProp
               lineHeight: 1.5,
             }}
           >
-            {row('program.id', p.id ?? null, true)}
+            {row(
+              'program.id',
+              p.id ? <IdValue text={`programs.id = ${p.id}`} display={p.id} /> : null,
+            )}
+            {row(
+              'recording.id',
+              recordingId
+                ? <IdValue text={`recordings.id = ${recordingId}`} display={recordingId} />
+                : null,
+            )}
             {row('title', p.title)}
             {p.ep != null && row('ep', p.ep)}
             {p.series != null && row('series', <span style={mono}>{p.series}</span>)}
@@ -1223,14 +1370,26 @@ export function DebugDetailsModal({ program: p, onClose }: DebugDetailsModalProp
             <>
               <div
                 style={{
-                  fontSize: 10,
-                  color: 'var(--fg-subtle)',
-                  fontWeight: 700,
-                  letterSpacing: '0.08em',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 8,
                   margin: '10px 0 6px',
                 }}
               >
-                TVDB match
+                <div
+                  style={{
+                    fontSize: 10,
+                    color: 'var(--fg-subtle)',
+                    fontWeight: 700,
+                    letterSpacing: '0.08em',
+                  }}
+                >
+                  TVDB match
+                </div>
+                {p.id && tvdb.id != null && (
+                  <RematchButton programId={p.id} tvdbId={tvdb.id} />
+                )}
               </div>
               <dl
                 style={{
@@ -1244,19 +1403,22 @@ export function DebugDetailsModal({ program: p, onClose }: DebugDetailsModalProp
               >
                 {row(
                   'tvdb.id',
-                  <a
-                    href={tvdbHomepage(tvdb)}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{
-                      ...mono,
-                      color: 'var(--accent)',
-                      textDecoration: 'underline',
-                      textUnderlineOffset: 2,
-                    }}
-                  >
-                    {tvdb.id}
-                  </a>,
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <a
+                      href={tvdbHomepage(tvdb)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        ...mono,
+                        color: 'var(--accent)',
+                        textDecoration: 'underline',
+                        textUnderlineOffset: 2,
+                      }}
+                    >
+                      {tvdb.id}
+                    </a>
+                    <CopyIconButton text={`tvdb_entries.id = ${tvdb.id}`} />
+                  </span>,
                 )}
                 {row('tvdb.slug', <span style={mono}>{tvdb.slug || '—'}</span>)}
                 {row('tvdb.title', tvdb.title)}

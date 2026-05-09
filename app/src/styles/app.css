@@ -1221,6 +1221,25 @@ select.control-sm {
   width: 11px;
   height: 11px;
 }
+/* Season/episode footer — TVDB-derived. Absolute-positioned at the
+   bottom-right of the cell so it stays visible even when prog-content
+   would overflow vertically (a 30-min program at default density is
+   only ~40 px tall and a margin-top:auto sibling would be clipped by
+   the cell's `overflow: hidden`). Discreet gray so it reads as
+   secondary metadata, not a status flag. Used by both Grid (.prog)
+   and Timeline (.tl-prog) cells. */
+.prog-se-foot {
+  position: absolute;
+  right: 10px;
+  bottom: 6px;
+  color: var(--fg-subtle);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  font-size: 10.5px;
+  line-height: 1;
+  pointer-events: none;
+}
 @keyframes prog-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.45; }
@@ -4585,6 +4604,18 @@ input[type=range] {
   color: var(--series);
 }
 .gp-state-chip.series svg {
+  width: 11px;
+  height: 11px;
+}
+/* Same series rule registered on a different channel — softer treatment
+ * (outline-style) so it reads as informational, not as "this airing
+ * is auto-reserved". */
+.gp-state-chip.series-other {
+  background: transparent;
+  color: var(--series);
+  box-shadow: inset 0 0 0 1px var(--series-soft);
+}
+.gp-state-chip.series-other svg {
   width: 11px;
   height: 11px;
 }

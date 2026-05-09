@@ -13,6 +13,7 @@ import { pushModalToUrl } from '../lib/modalUrl';
 import { Icon } from './Icon';
 import type { IconName } from './Icon';
 import { toMin, MOCK_NOW_MIN, progId, seriesCounts } from '../lib/epg';
+import { addDays, jstTodayYmd } from '../lib/broadcastDay';
 import type {
   Channel,
   Program,
@@ -1333,6 +1334,26 @@ export const ReservesPage = ({
 
   const programById = new Map(programs.map((p) => [progId(p), p]));
 
+  // Relative-date label for an upcoming reserve. Returns one of:
+  //   - 'まもなく'  (within +180 minutes of now, regardless of date)
+  //   - '本日' / '明日' / '明後日' / '7日後' (broadcast-day delta 0..6)
+  //   - 'MM/DD'    (everything further out)
+  // The broadcast-day boundary (JST 05:00) is what the rest of the app
+  // uses, so a 02:00 JST air time is still labelled with the previous
+  // calendar date — consistent with the grid header and date picker.
+  const todayYmd = jstTodayYmd();
+  const upcomingLabel = (startIso: string, startMin: number): string => {
+    if (startMin < MOCK_NOW_MIN + 180) return 'まもなく';
+    const startYmd = jstTodayYmd(new Date(startIso));
+    if (startYmd === todayYmd) return '本日';
+    if (startYmd === addDays(todayYmd, 1)) return '明日';
+    if (startYmd === addDays(todayYmd, 2)) return '明後日';
+    for (let n = 3; n <= 7; n++) {
+      if (startYmd === addDays(todayYmd, n)) return `${n}日後`;
+    }
+    return startYmd.slice(5).replace('-', '/');
+  };
+
   const meta = (p: Program): { tvdb: TvdbEntry | null; rule: Rule | undefined } => {
     const tvdbEntry = p.series ? tvdb[p.series] ?? null : null;
     const rule = rules.find(
@@ -1426,8 +1447,11 @@ export const ReservesPage = ({
         onAction = prog ? () => onCancel(prog) : undefined;
         break;
       default: // upcoming
-        sub =
-          startMin < MOCK_NOW_MIN + 180 ? 'まもなく' : '本日';
+        // Relative broadcast-day label. The previous code unconditionally
+        // wrote "本日" for any future reserve regardless of date — so a
+        // series-rule reserve a week out still read as "本日". Compare the
+        // program's broadcast day to today and pick a label per offset.
+        sub = upcomingLabel(r.startAt, startMin);
         action = '取消';
         onAction = prog ? () => onCancel(prog) : undefined;
         break;
