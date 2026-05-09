@@ -5,7 +5,7 @@ export type IconName =
   | 'search' | 'plus' | 'check' | 'x' | 'chevL' | 'chevR' | 'chevD'
   | 'settings' | 'disk' | 'tuner' | 'filter' | 'sparkle' | 'bell'
   | 'folder' | 'star' | 'info' | 'lightning' | 'clock' | 'menu' | 'arrow'
-  | 'external' | 'pencil' | 'link';
+  | 'external' | 'pencil' | 'link' | 'cycle';
 
 export interface IconProps {
   name: IconName;
@@ -45,6 +45,9 @@ const paths: Record<IconName, ReactNode> = {
   external:  (<><path d="M14 4h6v6" /><path d="M10 14L20 4" /><path d="M19 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h6" /></>),
   pencil:    (<><path d="M12 20h9" /><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4L16.5 3.5z" /></>),
   link:      (<><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></>),
+  // Two cyclic arrows — the universal "repeat / series" mark we re-use
+  // anywhere a series-rule reservation needs to read at a glance.
+  cycle:     (<><path d="M3 12a9 9 0 0 1 15.3-6.4L21 8" /><path d="M21 4v4h-4" /><path d="M21 12a9 9 0 0 1-15.3 6.4L3 16" /><path d="M3 20v-4h4" /></>),
 };
 
 export function Icon({ name, size = 14, style, className }: IconProps) {

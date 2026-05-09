@@ -31,6 +31,12 @@
   --rec:           oklch(0.6 0.2 25);
   --rec-soft:      oklch(0.95 0.03 25);
 
+  /* Series reservation — orange, distinct from blue (single) and red
+     (recording) so the grid can flag series-rule-covered programs at a
+     glance. */
+  --series:        oklch(0.68 0.16 65);
+  --series-soft:   oklch(0.96 0.06 70);
+
   --ok:            oklch(0.62 0.14 150);
   --warn:          oklch(0.72 0.14 75);
 
@@ -1093,9 +1099,12 @@ select.control-sm {
 }
 
 /* state stripes — direct port of design's `.p.reserved::before /
-   .p.recording::before` (styles.css L455). */
+   .p.recording::before` (styles.css L455). Series-rule reservations get
+   their own orange stripe + soft fill so they read distinctly from blue
+   single bookings at a glance. */
 .prog.reserved::before,
-.prog.recording::before {
+.prog.recording::before,
+.prog.series-reserved::before {
   content: '';
   position: absolute;
   left: 0;
@@ -1105,6 +1114,11 @@ select.control-sm {
 }
 .prog.reserved::before { background: var(--accent); }
 .prog.recording::before { background: var(--rec); }
+.prog.series-reserved {
+  background: var(--series-soft);
+  border-color: color-mix(in oklch, var(--series) 40%, var(--border));
+}
+.prog.series-reserved::before { background: var(--series); }
 
 .prog.past {
   opacity: 0.55;
@@ -1191,6 +1205,21 @@ select.control-sm {
   border-left: 4px solid transparent;
   border-right: 4px solid transparent;
   border-top: 6px solid var(--accent);
+}
+/* Series-reservation chip — orange + cycle icon so it reads distinctly
+   from the blue 予約 chip. Used by both Grid (.prog) and Timeline
+   (.tl-prog) cells. */
+.prog-series-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--series);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.prog-series-tag svg {
+  width: 11px;
+  height: 11px;
 }
 @keyframes prog-pulse {
   0%, 100% { opacity: 1; }
@@ -1406,9 +1435,12 @@ select.control-sm {
 }
 
 /* state stripes — direct port of the design's
-   `.p.reserved::before / .p.recording::before` (styles.css L455). */
+   `.p.reserved::before / .p.recording::before`. Series-rule reservations
+   render in orange so the user can distinguish them from blue single
+   bookings without opening the modal. */
 .tl-prog.reserved::before,
-.tl-prog.recording::before {
+.tl-prog.recording::before,
+.tl-prog.series-reserved::before {
   content: '';
   position: absolute;
   left: 0;
@@ -1418,6 +1450,10 @@ select.control-sm {
 }
 .tl-prog.reserved::before { background: var(--accent); }
 .tl-prog.recording::before { background: var(--rec); }
+.tl-prog.series-reserved {
+  background: var(--series-soft);
+}
+.tl-prog.series-reserved::before { background: var(--series); }
 
 .tl-prog.past { opacity: 0.5; }
 
@@ -4333,7 +4369,7 @@ input[type=range] {
   bottom: 16px;
   transform: translateX(-50%);
   z-index: 90;
-  width: min(820px, calc(100% - 32px));
+  width: min(615px, calc(100% - 32px));
   max-height: min(58vh, 620px);
   background: var(--bg-elev);
   border: 1px solid var(--border);
@@ -4390,20 +4426,32 @@ input[type=range] {
   transform: scale(1.05);
 }
 
-/* Main row — single horizontal band (poster | info | actions). The whole
-   row carries the glass treatment: the blurred poster bleeds across the
-   row and fades into the panel surface at the right edge so the actions
-   column reads cleanly. No top white space — content starts at the very
-   top of the panel. */
+/* Hero band — 2-column row when a TVDB poster exists (poster on the
+   left, content on the right with info top + actions bottom-right).
+   Without a poster the content column simply spans the full width. */
 .gp-main {
   position: relative;
   display: flex;
   align-items: stretch;
-  gap: 20px;
+  gap: 18px;
   padding: 18px 22px 16px 18px;
   background: var(--bg-elev);
   isolation: isolate;
   flex-shrink: 0;
+}
+.gp-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+/* Match the poster's height so the action row's `margin-top: auto`
+   pushes the buttons to the same baseline as the poster's bottom edge.
+   Without a poster the content sizes to its own content — no inflated
+   gap above the action row. */
+.gp-main.has-poster .gp-content {
+  min-height: 188px;
 }
 .gp-main.has-poster::before {
   content: '';
@@ -4450,25 +4498,16 @@ input[type=range] {
     0 10px 24px oklch(0.25 0.04 255 / 0.22),
     0 2px 6px oklch(0.25 0.04 255 / 0.10);
 }
-.gp-poster-fallback {
-  display: grid;
-  place-items: center;
-  color: white;
-  font-family: var(--font-mono);
-  font-size: 18px;
-  font-weight: 800;
-  letter-spacing: 0.14em;
-}
+/* (.gp-poster-fallback removed — non-TVDB programs no longer reserve
+   a poster column; the modal collapses to [info | actions] instead.) */
 
 .gp-info {
-  flex: 1;
-  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
   padding-top: 4px;
-  padding-right: 8px;
-  align-self: flex-start;
+  padding-right: 36px; /* leave room for the absolute × close button */
+  min-width: 0;
 }
 
 .gp-meta-row {
@@ -4505,6 +4544,28 @@ input[type=range] {
   background: var(--tag-dot, var(--fg-muted));
 }
 
+/* Genre tag — small pill with a coloured dot, always visible (TVDB-matched
+   programs show this alongside the kind pill so genre is never hidden). */
+.gp-genre-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-subtle);
+  font-size: 10.5px;
+  color: var(--fg-secondary);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.gp-genre-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tag-dot, var(--fg-muted));
+}
+
 .gp-state-chip {
   display: inline-flex;
   align-items: center;
@@ -4518,6 +4579,14 @@ input[type=range] {
 .gp-state-chip.resv {
   background: var(--accent-soft);
   color: var(--accent);
+}
+.gp-state-chip.series {
+  background: var(--series-soft);
+  color: var(--series);
+}
+.gp-state-chip.series svg {
+  width: 11px;
+  height: 11px;
 }
 .gp-state-chip.rec {
   background: var(--rec-soft);
@@ -4607,18 +4676,16 @@ input[type=range] {
   font-weight: 600;
 }
 
-/* Right column — wraps the existing ReserveBlock / ReservedBlock so its
-   own layout (action cards, settings link, status strip, CTA) snaps into
-   a fixed-width column that flows down on narrower screens. The
-   padding-top reserves space for the absolute-positioned × close button
-   so action cards don't slip under it. */
-.gp-action-col {
-  flex-shrink: 0;
-  width: 244px;
+/* Action row — pushed to the bottom of the content column via
+   `margin-top: auto`, with everything inside right-aligned. Buttons
+   sit horizontally at the bottom-right; status / outcome chips wrap
+   below them when present. */
+.gp-action-row {
   display: flex;
   flex-direction: column;
-  padding-top: 24px;
-  align-self: flex-start;
+  gap: 6px;
+  align-items: flex-end;
+  margin-top: auto;
 }
 
 /* Below-row continuation — desc / cast / staff / related, reusing the
@@ -4627,6 +4694,33 @@ input[type=range] {
   display: flex;
   flex-direction: column;
   background: var(--bg-elev);
+}
+
+/* Footer row holding the "EPG / TVDB デバッグ" link — opens a sub-modal
+   with the raw program/extended/tvdb fields (re-used from the legacy
+   Modal.tsx so the developer-debug surface survives the GuidePanel
+   transition). */
+.gp-debug-row {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 18px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.gp-debug-trigger {
+  background: transparent;
+  border: none;
+  color: var(--fg-subtle);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 10.5px;
+  padding: 0;
+  letter-spacing: 0.02em;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.gp-debug-trigger:hover {
+  color: var(--fg-muted);
 }
 
 /* ---- Reserve UI — sits in the right column of .gp-main, so no top
@@ -4716,72 +4810,121 @@ input[type=range] {
    Each row is full-width, ~58px tall, with a coloured icon circle on
    the left and a subtle caret on the right. Selected state uses the
    accent border + tinted background. */
-.gp-mode-grid {
+/* Reserve actions — same horizontal slot layout for every state.
+   The two buttons (this-airing / series rule) just morph their colour
+   and label: ghost while unreserved, danger when already booked, accent
+   for the "recommended" series-add. This keeps the modal's surrounding
+   layout still as the user toggles reservations — only the buttons
+   re-paint. */
+.gp-actions {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex-direction: row;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 .gp-mode-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  text-align: left;
-  padding: 10px 14px;
-  border: 1px solid var(--border);
-  background: var(--bg-elev);
-  border-radius: 999px;
-  cursor: pointer;
-  position: relative;
-  transition: all 120ms var(--ease);
-  min-height: 56px;
-  box-shadow: 0 1px 2px oklch(0.25 0.04 255 / 0.04);
-}
-.gp-mode-card:hover:not(.active) {
-  border-color: var(--border-strong);
-  background: var(--bg-subtle);
-}
-.gp-mode-card.active {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  box-shadow: 0 0 0 3px var(--accent-soft), 0 1px 2px oklch(0.6 0.18 250 / 0.12);
-}
-.gp-mode-body {
-  flex: 1;
-  min-width: 0;
+  min-width: 140px;
   display: flex;
   flex-direction: column;
-  gap: 0;
-  padding-left: 4px;
+  gap: 1px;
+  text-align: left;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--fg);
+  border-radius: 8px;
+  cursor: pointer;
+  position: relative;
+  transition: background 120ms var(--ease), border-color 120ms var(--ease),
+              filter 120ms var(--ease);
+  font-family: inherit;
+}
+.gp-mode-card:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.gp-mode-card.ghost:hover:not(:disabled) {
+  background: var(--bg-muted);
+  border-color: var(--border-strong);
+}
+.gp-mode-card.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+.gp-mode-card.primary:hover:not(:disabled) {
+  filter: brightness(0.96);
+}
+.gp-mode-card.danger {
+  background: var(--rec);
+  border-color: var(--rec);
+  color: white;
+}
+.gp-mode-card.danger:hover:not(:disabled) {
+  filter: brightness(0.96);
+}
+/* Series — orange, matches `--series` used by series-reserved cells +
+   meta-row chip. Used by the "シリーズ予約解除" button so the active
+   series state stays consistent across grid → modal. */
+.gp-mode-card.series {
+  background: var(--series);
+  border-color: var(--series);
+  color: white;
+}
+.gp-mode-card.series:hover:not(:disabled) {
+  filter: brightness(0.96);
 }
 .gp-mode-title {
-  font-size: 13.5px;
+  font-size: 12.5px;
   font-weight: 600;
-  color: var(--fg);
   line-height: 1.25;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  color: inherit;
 }
 .gp-mode-desc {
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--fg-muted);
   line-height: 1.35;
 }
-.gp-mode-chev {
-  color: var(--fg-subtle);
-  flex-shrink: 0;
+.gp-mode-card.primary .gp-mode-desc,
+.gp-mode-card.danger .gp-mode-desc,
+.gp-mode-card.series .gp-mode-desc {
+  color: oklch(1 0 0 / 0.78);
 }
-.gp-mode-recommend {
-  font-size: 9px;
+
+/* Status line — shown above the action bar when reserved/recording. */
+.gp-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--fg-secondary);
+  flex-wrap: wrap;
+}
+.gp-status.live { color: var(--rec); }
+.gp-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.04em;
-  padding: 1px 5px;
-  background: var(--accent);
+  padding: 2px 7px;
+  border-radius: 999px;
   color: white;
-  border-radius: 3px;
-  font-family: var(--font-mono);
-  margin-left: 6px;
+}
+.gp-status-pill.resv { background: var(--accent); }
+.gp-status-pill.rec  { background: var(--rec); }
+.gp-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: white;
+  animation: gp-status-dot 1.6s ease-in-out infinite;
+}
+@keyframes gp-status-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }
 
 .gp-outcome {

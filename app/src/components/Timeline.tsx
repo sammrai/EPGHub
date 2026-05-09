@@ -2,6 +2,7 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import type { UIEvent, MouseEvent } from 'react';
 import { broadcastDayAt, toMin, progId } from '../lib/epg';
+import { Icon } from './Icon';
 import type { Channel, Program } from '../data/types';
 
 // scrubRange は baseMs (= baseDate 05:00 JST) からの経過分。
@@ -16,6 +17,9 @@ export interface TimelineViewProps {
   onSelect: (p: Program) => void;
   selectedId: string | null;
   reservedIds: Set<string>;
+  /** TVDB ids covered by an enabled series rule — drives the orange
+   *  series-reserved variant on cells (vs blue single-reserved). */
+  seriesTvdbIds?: Set<number>;
   scrubRange: ScrubRange;
   setScrubRange: (range: ScrubRange) => void;
   baseDate: string;
@@ -36,6 +40,7 @@ export function TimelineView({
   onSelect,
   selectedId,
   reservedIds,
+  seriesTvdbIds,
   scrubRange,
   setScrubRange,
   baseDate,
@@ -248,6 +253,8 @@ export function TimelineView({
                     // next cell's white background paint over the line).
                     const w = Math.max(28, (b - a) * pxPerMin);
                     const isRes = reservedIds.has(progId(p));
+                    const isSeriesRes =
+                      isRes && p.tvdb?.id != null && !!seriesTvdbIds?.has(p.tvdb.id);
                     const isRec = p.recording;
                     const isPast = p.endAt ? Date.parse(p.endAt) < Date.now() : false;
                     const isDimmed = genreFilter !== 'all' && p.genre.key !== genreFilter;
@@ -258,7 +265,8 @@ export function TimelineView({
                         className={[
                           'tl-prog',
                           narrow && 'narrow',
-                          isRes && !isRec && 'reserved',
+                          isRes && !isRec && !isSeriesRes && 'reserved',
+                          isSeriesRes && !isRec && 'series-reserved',
                           isRec && 'recording',
                           isPast && 'past',
                           isDimmed && 'dimmed',
@@ -270,7 +278,14 @@ export function TimelineView({
                         <div className="tl-prog-meta">
                           <strong>{p.start}</strong>
                           {isRec && <span className="prog-rec-tag">REC</span>}
-                          {isRes && !isRec && <span className="prog-resv-tag">予約</span>}
+                          {isSeriesRes && !isRec && (
+                            <span className="prog-series-tag">
+                              <Icon name="cycle" size={10} /> シリーズ
+                            </span>
+                          )}
+                          {isRes && !isRec && !isSeriesRes && (
+                            <span className="prog-resv-tag">予約</span>
+                          )}
                         </div>
                         <div className="tl-prog-title">{p.title}</div>
                         {!narrow && (p.desc || p.ep) && (

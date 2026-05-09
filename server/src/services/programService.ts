@@ -8,7 +8,7 @@ import { tvdbRowToEntry } from './ruleService.ts';
 type ProgramRow = typeof programs.$inferSelect;
 type TvdbRow = typeof tvdbEntries.$inferSelect;
 
-function rowToProgram(row: ProgramRow, tvdb: TvdbRow | null): Program {
+export function rowToProgram(row: ProgramRow, tvdb: TvdbRow | null): Program {
   const p: Program = {
     id: row.id,
     ch: row.ch,

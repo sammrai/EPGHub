@@ -48,6 +48,14 @@ export interface TvdbProvider {
   /** Actor cast for a series / movie id. Empty when no data is cached or
    *  the provider can't look it up (fixture mode). */
   getCast(id: number): Promise<TvdbCastMember[]>;
+  /**
+   * Bypass every cache layer (in-process + on-disk) and fetch a fresh
+   * series/extended payload from TVDB. Returns the entry + the up-to-date
+   * episode list so callers can re-stamp dependents (programs.tvdb_episode_name)
+   * in a single round-trip. Fixture providers ignore the force semantics
+   * and just resolve from their static catalog (episodes always empty).
+   */
+  refresh(id: number): Promise<{ entry: TvdbEntry; episodes: SeriesEpisodeLite[] } | null>;
 }
 
 export class FixtureTvdbProvider implements TvdbProvider {
@@ -79,6 +87,12 @@ export class FixtureTvdbProvider implements TvdbProvider {
 
   async getCast(): Promise<TvdbCastMember[]> {
     return [];
+  }
+
+  async refresh(id: number): Promise<{ entry: TvdbEntry; episodes: SeriesEpisodeLite[] } | null> {
+    const entry = await this.getById(id);
+    if (!entry) return null;
+    return { entry, episodes: [] };
   }
 }
 
@@ -207,6 +221,31 @@ export class TvdbV4Provider implements TvdbProvider {
       return [];
     }
   }
+
+  async refresh(id: number): Promise<{ entry: TvdbEntry; episodes: SeriesEpisodeLite[] } | null> {
+    // Force-refresh path: bust the in-process detail cache here AND ask
+    // the HTTP client to bypass its on-disk cache. Series first because
+    // most "stale" complaints are episode-name updates; fall through to
+    // movie for the few movie ids we might be asked to refresh.
+    this.detailCache.delete(id);
+    try {
+      const ex = await this.client.getSeriesExtended(id, { force: true });
+      const entry = seriesExtendedToEntry(ex);
+      const episodes = seriesEpisodesLite(ex);
+      this.detailCache.set(id, { at: Date.now(), data: entry });
+      return { entry, episodes };
+    } catch {
+      // fall through to movie
+    }
+    try {
+      const ex = await this.client.getMovieExtended(id);
+      const entry = movieExtendedToEntry(ex);
+      this.detailCache.set(id, { at: Date.now(), data: entry });
+      return { entry, episodes: [] };
+    } catch {
+      return null;
+    }
+  }
 }
 
 // Runtime provider cache. The concrete provider depends on whether a TVDB
@@ -271,5 +310,8 @@ export const tvdbService: TvdbProvider = {
   },
   async getCast(id) {
     return (await getProvider()).getCast(id);
+  },
+  async refresh(id) {
+    return (await getProvider()).refresh(id);
   },
 };

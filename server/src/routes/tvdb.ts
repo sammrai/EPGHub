@@ -1,11 +1,13 @@
 import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
-import { eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import { TvdbCastSchema, TvdbEntrySchema, TvdbListSchema } from '../schemas/tvdb.ts';
+import { ProgramListSchema } from '../schemas/program.ts';
 import { ErrorSchema } from '../schemas/common.ts';
 import { tvdbService } from '../services/tvdbService.ts';
 import { db } from '../db/client.ts';
-import { tvdbEntries } from '../db/schema.ts';
+import { programs as programsTable, tvdbEntries } from '../db/schema.ts';
+import { rowToProgram } from '../services/programService.ts';
 
 export const tvdbRouter = new OpenAPIHono();
 
@@ -134,4 +136,32 @@ const cast = createRoute({
 tvdbRouter.openapi(cast, async (c) => {
   const { id } = c.req.valid('param');
   return c.json(await tvdbService.getCast(id), 200);
+});
+
+const programsByTvdb = createRoute({
+  method: 'get',
+  path: '/tvdb/{id}/programs',
+  tags: ['tvdb'],
+  summary: 'TVDB id に紐付く全番組',
+  description:
+    '同じ TVDB 作品にマッチした全番組を返す。GuidePanel の「関連番組」が、現在ロード済みのスケジュール窓を超えてシリーズ全エピソードを引けるようにするための広域検索。並びは startAt 昇順。',
+  request: {
+    params: z.object({
+      id: z.coerce.number().int().openapi({ param: { in: 'path' }, example: 389042 }),
+    }),
+  },
+  responses: {
+    200: { description: '番組一覧', content: { 'application/json': { schema: ProgramListSchema } } },
+  },
+});
+
+tvdbRouter.openapi(programsByTvdb, async (c) => {
+  const { id } = c.req.valid('param');
+  const rows = await db
+    .select({ p: programsTable, t: tvdbEntries })
+    .from(programsTable)
+    .leftJoin(tvdbEntries, eq(programsTable.tvdbId, tvdbEntries.tvdbId))
+    .where(eq(programsTable.tvdbId, id))
+    .orderBy(asc(programsTable.startAt));
+  return c.json(rows.map((r) => rowToProgram(r.p, r.t)), 200);
 });

@@ -108,6 +108,20 @@ rulesRouter.openapi(create, async (c) => {
   const body = c.req.valid('json');
   try {
     const rule = await ruleService.create(body);
+    // Expand the new rule against the loaded schedule synchronously so the
+    // user sees the matching reserves appear without waiting for the
+    // 10-minute cron tick. The expander is idempotent (it dedupes against
+    // existing recordings + the recorded-history ledger), so running it
+    // here on top of the cron is safe.
+    if (rule.enabled) {
+      try {
+        await expandRules();
+      } catch (e) {
+        // The rule itself was created — surface the rule but log the
+        // expansion failure so we don't leave the caller stuck.
+        console.warn('[rules.create] post-create rule.expand failed:', (e as Error).message);
+      }
+    }
     return c.json(rule, 201);
   } catch (e) {
     if (e instanceof RuleConflictError) {

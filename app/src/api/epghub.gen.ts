@@ -1146,6 +1146,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tvdb/{id}/programs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * TVDB id に紐付く全番組
+         * @description 同じ TVDB 作品にマッチした全番組を返す。GuidePanel の「関連番組」が、現在ロード済みのスケジュール窓を超えてシリーズ全エピソードを引けるようにするための広域検索。並びは startAt 昇順。
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number | null;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 番組一覧 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProgramList"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tuners": {
         parameters: {
             query?: never;

@@ -370,7 +370,7 @@ export function App() {
         skipReruns: true,
         kind: 'keyword',
       });
-      await rulesR.refresh();
+      await Promise.all([rulesR.refresh(), recordingsR.refresh()]);
       pushToast(`ルール「${keyword}」を作成しました`);
     } catch (e) {
       pushToast(`ルール作成失敗: ${(e as Error).message}`, 'err');
@@ -406,7 +406,10 @@ export function App() {
         kind: 'series',
         tvdb,
       });
-      await rulesR.refresh();
+      // POST /rules now expands the rule synchronously on the server, so a
+      // recordings refresh here surfaces all matching episodes the user
+      // just registered (no 10-minute cron wait).
+      await Promise.all([rulesR.refresh(), recordingsR.refresh()]);
       pushToast(`シリーズ「${tvdb.title}」を TVDB に紐付けました`);
     } catch (e) {
       pushToast(`シリーズ紐付け失敗: ${(e as Error).message}`, 'err');
@@ -669,6 +672,7 @@ export function App() {
                           onSelect={openModal}
                           selectedId={selectedProg}
                           reservedIds={reservedIds}
+                          seriesTvdbIds={existingSeriesIdSet}
                           density={density}
                           baseDate={selectedDate}
                           daysLoaded={Math.max(1, schedule.loadedDays)}
@@ -684,6 +688,7 @@ export function App() {
                           onSelect={openModal}
                           selectedId={selectedProg}
                           reservedIds={reservedIds}
+                          seriesTvdbIds={existingSeriesIdSet}
                           scrubRange={scrubRange}
                           setScrubRange={setScrubRange}
                           baseDate={selectedDate}
@@ -806,7 +811,6 @@ export function App() {
           program={modalProg}
           channels={channels}
           programs={programs}
-          reservedIds={reservedIds}
           existingSeriesIds={existingSeriesIdSet}
           recordingIdForProgram={recordingIdForProgram}
           onClose={closeModal}

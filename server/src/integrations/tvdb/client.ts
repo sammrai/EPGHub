@@ -154,10 +154,17 @@ export class TvdbV4HttpClient {
     return data;
   }
 
-  async getSeriesExtended(id: number): Promise<SeriesExtended> {
+  async getSeriesExtended(
+    id: number,
+    options: { force?: boolean } = {},
+  ): Promise<SeriesExtended> {
     const cacheKey = `series:${id}`;
-    const hit = await this.detailCache.get<SeriesExtended>(cacheKey);
-    if (hit) return hit;
+    if (options.force) {
+      await this.detailCache.delete(cacheKey);
+    } else {
+      const hit = await this.detailCache.get<SeriesExtended>(cacheKey);
+      if (hit) return hit;
+    }
     // `meta=episodes` asks TVDB to inline the full episode list into the
     // extended payload so we can compute totalSeasons / currentSeason /
     // currentEp without an extra roundtrip.

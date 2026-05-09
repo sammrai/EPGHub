@@ -4,12 +4,13 @@
 // The user can pick another program in the grid and the panel re-keys to
 // it without an intervening close. Glass-tinted hero (poster bleed +
 // soft fade-to-elev) is preserved from the prior centered modal.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Icon } from './Icon';
-import { durLabel, getChannel, progId, findSeries, MOCK_NOW_MIN, toMin } from '../lib/epg';
-import { jpAirDate } from '../lib/adapters';
+import { durLabel, getChannel, progId, MOCK_NOW_MIN, toMin } from '../lib/epg';
+import { jpAirDate, toProgram } from '../lib/adapters';
 import { hasPoster, posterStyle } from '../lib/tvdbVisual';
+import { DebugDetailsModal } from './Modal';
 import { api } from '../api/epghub';
 import type { ApiTvdbCastMember } from '../api/epghub';
 import type {
@@ -23,7 +24,6 @@ export interface GuidePanelProps {
   program: Program | null;
   channels: Channel[];
   programs: Program[];
-  reservedIds: Set<string>;
   existingSeriesIds?: Set<number>;
   recordingIdForProgram?: (programId: string) => string | null;
   onClose: () => void;
@@ -34,9 +34,6 @@ export interface GuidePanelProps {
   onStopRecording?: (recordingId: string) => void;
   onSelectProgram: (p: Program) => void;
 }
-
-type Priority = 'high' | 'medium' | 'low';
-type Quality = '1080i' | '720p';
 
 const STAFF_KEYS = ['監督', '脚本', '原作', '製作', '演出', '音楽', '声優', 'スタッフ'];
 
@@ -56,7 +53,6 @@ function GuidePanelInner({
   program,
   channels,
   programs,
-  reservedIds,
   existingSeriesIds,
   recordingIdForProgram,
   onClose,
@@ -73,10 +69,16 @@ function GuidePanelInner({
   const isSeriesTvdb = tvdb?.type === 'series';
   const isMovieGenre = program.genre.key === 'movie';
   const isMovie = isMovieTvdb || isMovieGenre;
-  const seriesEps = isSeriesTvdb ? findSeries(programs, program.series) : [];
-  const related = isSeriesTvdb
-    ? seriesEps.filter((p) => progId(p) !== progId(program)).slice(0, 8)
-    : [];
+  // Episodes of the same TVDB series. The list comes from a server-wide
+  // lookup (not the loaded schedule window) so opening episode 6 surfaces
+  // episode 7 even when 7 sits beyond the current 1-week range. The local
+  // `programs` prop is only the seed — `useTvdbPrograms` returns the full
+  // set keyed on `tvdb.id`.
+  const seriesEps = useTvdbPrograms(tvdb?.id ?? null, programs);
+  const related = seriesEps
+    .filter((p) => progId(p) !== progId(program))
+    .sort((a, b) => (a.startAt ?? a.start).localeCompare(b.startAt ?? b.start))
+    .slice(0, 8);
 
   const ext = program.extended ?? null;
   const staff = pickExtendedKv(ext, STAFF_KEYS);
@@ -85,7 +87,19 @@ function GuidePanelInner({
   // fall back to them.
   const tvdbCast = useTvdbCast(tvdb?.id ?? null);
 
-  const reserved = reservedIds.has(progId(program));
+  // EPG / TVDB raw-fields modal — re-uses the legacy Modal.tsx
+  // `DebugDetailsModal` so the broadcaster's full extended descriptors
+  // (cast/staff/music/subtitle/...) and the resolved TVDB context stay
+  // inspectable from the new GuidePanel too.
+  const [showDebug, setShowDebug] = useState(false);
+
+  // Single source of truth — `program.rec` is set by toProgram() on every
+  // refresh against the global recordings list. Using a view-scoped
+  // `reservedIds` Set here misses deep-linked programs outside the loaded
+  // schedule window (e.g. a related episode 2 weeks ahead opened from
+  // another modal), which is what made this state diverge from reality
+  // after the user reserved.
+  const reserved = !!program.rec;
   const seriesId = tvdb?.id ?? null;
   const coveredBySeriesRule =
     seriesId != null && !!existingSeriesIds && existingSeriesIds.has(seriesId);
@@ -105,6 +119,10 @@ function GuidePanelInner({
   const stateChip = program.recording ? (
     <span className="gp-state-chip rec">
       <span className="gp-state-dot" /> 録画中
+    </span>
+  ) : coveredBySeriesRule ? (
+    <span className="gp-state-chip series">
+      <Icon name="cycle" size={10} /> シリーズ予約済
     </span>
   ) : reserved ? (
     <span className="gp-state-chip resv">
@@ -138,47 +156,28 @@ function GuidePanelInner({
             : undefined
         }
       >
-        {hasGlass ? (
+        {hasGlass && (
           <div className="gp-poster" style={posterStyle(tvdb!)} />
-        ) : (
-          <div
-            className="gp-poster gp-poster-fallback"
-            style={neutralHeroBg(program)}
-          >
-            {isMovie ? 'MOVIE' : 'TV'}
-          </div>
         )}
 
+        <div className="gp-content">
         <div className="gp-info">
           <div className="gp-meta-row">
-            {tvdb ? (
+            {tvdb && (
               <span className="gp-kind-pill">{isMovie ? '映画' : 'シリーズ'}</span>
-            ) : (
-              <span
-                className="gp-kind-pill ghost"
-                style={{ '--tag-dot': program.genre.dot } as CSSProperties}
-              >
-                <span className="gp-kind-dot" />
-                {program.genre.label}
-              </span>
             )}
+            <span
+              className="gp-genre-tag"
+              style={{ '--tag-dot': program.genre.dot } as CSSProperties}
+            >
+              <span className="gp-genre-dot" />
+              {program.genre.label}
+            </span>
             {stateChip}
             <span className="gp-meta-sep">·</span>
             <span className="gp-time">{program.start}–{program.end}</span>
             <span className="gp-meta-sep">·</span>
             <span>{durLabel(program)}</span>
-            {program.hd && (
-              <>
-                <span className="gp-meta-sep">·</span>
-                <span className="gp-hd">HD</span>
-              </>
-            )}
-            {tvdb?.year && tvdb.year > 0 && (
-              <>
-                <span className="gp-meta-sep">·</span>
-                <span>{tvdb.year}</span>
-              </>
-            )}
           </div>
 
           <h2 className="gp-title">{tvdb?.title ?? program.title}</h2>
@@ -200,45 +199,37 @@ function GuidePanelInner({
                 <span>{tvdb.network}</span>
               </>
             )}
-            {tvdb && (
-              <>
-                <span className="gp-meta-sep">·</span>
-                <span className="gp-tvdb-tag">
-                  <Icon name="sparkle" size={10} /> TVDB #{tvdb.id}
-                </span>
-              </>
-            )}
           </div>
         </div>
 
-        <div className="gp-action-col">
-          {reserved || coveredBySeriesRule ? (
-            <ReservedBlock
-              program={program}
+        <div className="gp-action-row">
+          <ActionBar
+            program={program}
+            tvdb={tvdb}
+            isMovie={isMovie}
+            isSeriesTvdb={isSeriesTvdb}
+            isMovieTvdb={isMovieTvdb}
+            isLive={isLive}
+            reserved={reserved}
+            coveredBySeriesRule={coveredBySeriesRule}
+            apiRecordingId={apiRecordingId}
+            onReserve={onReserve}
+            onCreateRule={onCreateRule}
+            onCreateSeriesLink={onCreateSeriesLink}
+            onUnsubscribeSeries={onUnsubscribeSeries}
+            onStopRecording={onStopRecording}
+          />
+          {!reserved && !coveredBySeriesRule && (
+            <ReserveOutcome
               tvdb={tvdb}
-              isLive={isLive}
-              coveredBySeriesRule={coveredBySeriesRule}
-              apiRecordingId={apiRecordingId}
-              onCancel={() => onReserve(program)}
-              onStopRecording={onStopRecording}
-              onUnsubscribeSeries={onUnsubscribeSeries}
-            />
-          ) : (
-            <ReserveBlock
-              program={program}
-              channel={ch ?? null}
-              tvdb={tvdb}
-              isMovie={isMovie}
-              isSeriesTvdb={isSeriesTvdb}
-              isMovieGenre={isMovieGenre}
               isMovieTvdb={isMovieTvdb}
-              seriesEps={seriesEps}
-              existingSeriesIds={existingSeriesIds}
-              onReserve={onReserve}
-              onCreateRule={onCreateRule}
-              onCreateSeriesLink={onCreateSeriesLink}
+              isMovieGenreOnly={isMovieGenre && !isMovieTvdb}
+              seriesAlreadyRuled={
+                isSeriesTvdb && tvdb && !!existingSeriesIds && existingSeriesIds.has(tvdb.id)
+              }
             />
           )}
+        </div>
         </div>
       </div>
 
@@ -315,302 +306,260 @@ function GuidePanelInner({
           )}
         </div>
       )}
+
+      <div className="gp-debug-row">
+        <button
+          type="button"
+          className="gp-debug-trigger"
+          onClick={() => setShowDebug(true)}
+        >
+          EPG / TVDB デバッグ
+        </button>
+      </div>
+
+      {showDebug && (
+        <DebugDetailsModal program={program} onClose={() => setShowDebug(false)} />
+      )}
     </div>
   );
 }
 
-interface ReserveBlockProps {
+// Description for the "シリーズを追加" button. Counting only the loaded
+// schedule (this week's EPG window) misleads the user — a 12-episode
+// anime reads "全1回" if only the next airing is in range. Lean on
+// TVDB's series-wide aggregates so the message conveys both the
+// committed count for completed series and current progress for
+// ongoing ones.
+function seriesAddDesc(tvdb: TvdbEntry | null): string {
+  if (!tvdb || tvdb.type !== 'series') return '';
+  const total = tvdb.totalEps ?? 0;
+  const seasons = tvdb.totalSeasons ?? 0;
+  const curSeason = tvdb.currentSeason ?? 0;
+  const curEp = tvdb.currentEp ?? 0;
+  const ongoing = tvdb.status === 'continuing';
+  if (ongoing) {
+    if (seasons > 1 && curSeason > 0 && curEp > 0) {
+      return `S${curSeason} 第${curEp}話まで · 毎週自動`;
+    }
+    if (curEp > 0) return `第${curEp}話まで · 毎週自動`;
+    return total > 0 ? `現在${total}話 · 毎週自動` : '毎週自動で予約';
+  }
+  if (seasons > 1 && total > 0) return `${seasons}シーズン ${total}話`;
+  return total > 0 ? `全${total}話を自動で予約` : '今後の放送を自動で予約';
+}
+
+interface ActionBarProps {
   program: Program;
-  channel: Channel | null;
   tvdb: TvdbEntry | null;
   isMovie: boolean;
   isSeriesTvdb: boolean;
-  isMovieGenre: boolean;
   isMovieTvdb: boolean;
-  seriesEps: Program[];
-  existingSeriesIds?: Set<number>;
+  isLive: boolean;
+  reserved: boolean;
+  coveredBySeriesRule: boolean;
+  apiRecordingId: string | null;
   onReserve: (p: Program) => void;
   onCreateRule: (keyword: string, p: Program, channels?: string[]) => void;
   onCreateSeriesLink: (tvdb: TvdbSeries, p: Program, channels?: string[]) => void;
-}
-
-function ReserveBlock({
-  program,
-  channel,
-  tvdb,
-  isMovie,
-  isSeriesTvdb,
-  isMovieGenre,
-  isMovieTvdb,
-  seriesEps,
-  existingSeriesIds,
-  onReserve,
-  onCreateRule,
-  onCreateSeriesLink,
-}: ReserveBlockProps) {
-  const [priority, setPriority] = useState<Priority>('medium');
-  const [quality, setQuality] = useState<Quality>('1080i');
-  const [keepRaw, setKeepRaw] = useState(false);
-  const [restrictToChannel, setRestrictToChannel] = useState(true);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-
-  const seriesAlreadyRuled =
-    isSeriesTvdb && tvdb && !!existingSeriesIds && existingSeriesIds.has(tvdb.id);
-  const settingsDirty =
-    priority !== 'medium' || quality !== '1080i' || keepRaw || !restrictToChannel;
-  const sizeHintGb = Math.round(
-    program.sizeRaw || (toMin(program.end) - toMin(program.start)) * 0.13,
-  );
-  // Drop unused ref to priority/quality/keepRaw so the server fills them in
-  // from admin defaults — settings popover still collects them for future
-  // wiring, but the direct-action buttons omit them today.
-  void priority; void quality; void keepRaw;
-
-  return (
-    <div className="gp-reserve">
-      <div className="gp-mode-grid">
-        <ActionCard
-          onClick={() => onReserve(program)}
-          title="この回のみ録画"
-          desc="1回だけ録画"
-        />
-        {!isMovie && isSeriesTvdb && !seriesAlreadyRuled && tvdb && tvdb.type === 'series' && (
-          <ActionCard
-            onClick={() => onCreateSeriesLink(tvdb, program, [program.ch])}
-            title="シリーズを追加"
-            desc={`全${seriesEps.length}回を自動で予約`}
-            recommended
-          />
-        )}
-        {!isMovie && !tvdb && (
-          <ActionCard
-            onClick={() =>
-              onCreateRule(
-                program.title.slice(0, 14),
-                program,
-                restrictToChannel ? [program.ch] : [],
-              )
-            }
-            title="自動予約ルール"
-            desc="同じ番組を今後も自動録画"
-          />
-        )}
-      </div>
-
-      {isSeriesTvdb && seriesAlreadyRuled && (
-        <div className="gp-outcome accent">
-          <Icon name="check" size={12} />
-          <div>
-            シリーズ「{tvdb!.title}」は自動予約済み。
-            この回は <strong>「この回のみ」</strong> で上書き予約できます。
-          </div>
-        </div>
-      )}
-      {isMovieTvdb && (
-        <div className="gp-outcome accent">
-          <Icon name="check" size={12} />
-          <div>
-            映画はライブラリの <strong>映画タブ</strong> に追加されます。再放送時の重複予約はスキップ。
-          </div>
-        </div>
-      )}
-      {isMovieGenre && !isMovieTvdb && (
-        <div className="gp-outcome">
-          <Icon name="sparkle" size={12} />
-          <div>TVDB 紐付けがないため、再放送時の自動予約はありません。</div>
-        </div>
-      )}
-
-      <div className="gp-settings-anchor">
-        <button
-          type="button"
-          className={`gp-settings-link${settingsDirty ? ' has-dot' : ''}${settingsOpen ? ' active' : ''}`}
-          onClick={() => setSettingsOpen((o) => !o)}
-          aria-expanded={settingsOpen}
-        >
-          <span>録画設定</span>
-          <Icon name="chevD" size={10} className={`gp-settings-chev${settingsOpen ? ' open' : ''}`} />
-        </button>
-        {settingsOpen && (
-          <div className="gp-settings-accordion" role="region" aria-label="録画設定">
-            <SettingsRow label="優先度">
-              <div className="seg-sm">
-                {(['high', 'medium', 'low'] as const).map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    className={priority === p ? 'active' : ''}
-                    onClick={() => setPriority(p)}
-                  >
-                    {p === 'high' ? '高' : p === 'medium' ? '中' : '低'}
-                  </button>
-                ))}
-              </div>
-            </SettingsRow>
-            <SettingsRow label="品質">
-              <div className="seg-sm">
-                {(['1080i', '720p'] as const).map((q) => (
-                  <button
-                    key={q}
-                    type="button"
-                    className={quality === q ? 'active' : ''}
-                    onClick={() => setQuality(q)}
-                  >
-                    {q}
-                  </button>
-                ))}
-              </div>
-            </SettingsRow>
-            <SettingsRow label="TSを残す">
-              <div className="seg-sm">
-                <button
-                  type="button"
-                  className={!keepRaw ? 'active' : ''}
-                  onClick={() => setKeepRaw(false)}
-                >
-                  削除
-                </button>
-                <button
-                  type="button"
-                  className={keepRaw ? 'active' : ''}
-                  onClick={() => setKeepRaw(true)}
-                >
-                  保存
-                </button>
-              </div>
-              <span className={`gp-settings-hint ${keepRaw ? '' : 'dim'}`}>
-                +{sizeHintGb} GB
-              </span>
-            </SettingsRow>
-            {!tvdb && (
-              <SettingsRow label="対象局">
-                <div className="seg-sm">
-                  <button
-                    type="button"
-                    className={restrictToChannel ? 'active' : ''}
-                    onClick={() => setRestrictToChannel(true)}
-                  >
-                    {channel?.name ?? program.ch}のみ
-                  </button>
-                  <button
-                    type="button"
-                    className={!restrictToChannel ? 'active' : ''}
-                    onClick={() => setRestrictToChannel(false)}
-                  >
-                    全局
-                  </button>
-                </div>
-              </SettingsRow>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-interface ReservedBlockProps {
-  program: Program;
-  tvdb: TvdbEntry | null;
-  isLive: boolean;
-  coveredBySeriesRule: boolean;
-  apiRecordingId: string | null;
-  onCancel: () => void;
-  onStopRecording?: (recordingId: string) => void;
   onUnsubscribeSeries?: (tvdbId: number) => void;
+  onStopRecording?: (recordingId: string) => void;
 }
 
-function ReservedBlock({
-  program,
-  tvdb,
-  isLive,
-  coveredBySeriesRule,
-  apiRecordingId,
-  onCancel,
-  onStopRecording,
-  onUnsubscribeSeries,
-}: ReservedBlockProps) {
-  const sourceText = coveredBySeriesRule && tvdb
-    ? `シリーズ自動予約「${tvdb.title}」`
-    : tvdb
-      ? (tvdb.type === 'movie' ? `映画「${tvdb.title}」` : `シリーズ「${tvdb.title}」`)
-      : (program.ruleMatched ? `ルール「${program.ruleMatched}」` : '単発予約');
+// Single horizontal action bar that morphs by state — the user sees the
+// same two slots whether the program is unreserved, reserved, or live;
+// only the buttons' colour + text change. Eliminates the old ReserveBlock /
+// ReservedBlock fork (different layouts) so reservation toggles never
+// rearrange the surrounding UI.
+function ActionBar(props: ActionBarProps) {
+  const {
+    program,
+    tvdb,
+    isMovie,
+    isSeriesTvdb,
+    isMovieTvdb,
+    isLive,
+    reserved,
+    coveredBySeriesRule,
+    apiRecordingId,
+    onReserve,
+    onCreateRule,
+    onCreateSeriesLink,
+    onUnsubscribeSeries,
+    onStopRecording,
+  } = props;
+
+  // --- Slot 1: this-airing (single recording / live stop) -----------------
+  const stopAvailable = isLive && apiRecordingId != null && !!onStopRecording;
+  const slot1: ActionCardSpec = (() => {
+    if (isLive && stopAvailable) {
+      return {
+        title: '録画停止',
+        desc: '今すぐ停止',
+        kind: 'danger',
+        onClick: () => onStopRecording!(apiRecordingId!),
+      };
+    }
+    if (reserved && !coveredBySeriesRule) {
+      return {
+        title: 'この回の予約取消',
+        desc: '単発予約を解除',
+        kind: 'danger',
+        onClick: () => onReserve(program),
+      };
+    }
+    if (reserved && coveredBySeriesRule) {
+      // The series rule covers it AND a once-recording exists too — let
+      // the user drop the once-recording without breaking the series rule.
+      return {
+        title: 'この回の予約取消',
+        desc: 'シリーズ予約は維持',
+        kind: 'danger',
+        onClick: () => onReserve(program),
+      };
+    }
+    return {
+      title: 'この回のみ録画',
+      desc: `${program.start}–${program.end}`,
+      kind: 'ghost',
+      onClick: () => onReserve(program),
+    };
+  })();
+
+  // --- Slot 2: series rule (only when applicable) -------------------------
+  // Once the program is already reserved or being recorded, the actionable
+  // path collapses to a single CTA — either "この回を取消" (slot1, single
+  // booking) OR "シリーズ予約解除" (slot2, broader rule). Showing both
+  // buttons crowds the modal without adding new actions, so we hide the
+  // non-driving slot.
+  const slot2: ActionCardSpec | null = (() => {
+    if (isMovie) return null; // movies have no series concept
+    if (isSeriesTvdb && tvdb && tvdb.type === 'series') {
+      if (coveredBySeriesRule) {
+        return {
+          title: 'シリーズ予約解除',
+          desc: '今後の自動予約を停止',
+          // Orange — matches the series-registered active state shown
+          // on the cells and the meta-row chip.
+          kind: 'series',
+          onClick: onUnsubscribeSeries
+            ? () => onUnsubscribeSeries(tvdb.id)
+            : undefined,
+        };
+      }
+      // Covered by neither single nor series — recommend series-add.
+      // While the user is in a single-only reservation we hide this so
+      // only the cancel CTA remains.
+      if (reserved) return null;
+      return {
+        title: 'シリーズを追加',
+        desc: seriesAddDesc(tvdb),
+        kind: 'primary',
+        onClick: () => onCreateSeriesLink(tvdb, program, [program.ch]),
+      };
+    }
+    if (!tvdb) {
+      // For non-TVDB programs, a single reservation already implies a
+      // separate keyword rule decision — collapse to one button when the
+      // user has reserved.
+      if (reserved) return null;
+      return {
+        title: '自動予約ルール',
+        desc: '同じ番組を今後も自動録画',
+        kind: 'ghost',
+        onClick: () => onCreateRule(program.title.slice(0, 14), program, [program.ch]),
+      };
+    }
+    return null;
+  })();
+
+  // Slot 1 is suppressed when the series-rule path is the only meaningful
+  // action: a single-booking cancel is meaningless once a series rule
+  // covers the airing (the rule will just re-expand a fresh recording),
+  // so the user is really managing the series. Live recordings keep
+  // slot1 because that's where the stop button lives.
+  const slot1Hidden = coveredBySeriesRule && !isLive;
+  // While recording is live, the only sensible slot1 is "停止"; nothing
+  // belongs in slot2 on top of that.
+  const slot2Hidden = isLive;
+
+  void isMovieTvdb;
+
   return (
-    <div className="gp-reserved">
-      <div className={`gp-reserved-strip ${isLive ? 'live' : ''}`}>
-        {isLive ? (
-          <>
-            <span className="gp-rec-badge"><span className="gp-rec-badge-dot" /> REC</span>
-            <span>録画中 · 残り{toMin(program.end) - MOCK_NOW_MIN}分</span>
-          </>
-        ) : (
-          <>
-            <span className="gp-status-badge">
-              <Icon name="check" size={10} /> 予約済
-            </span>
-            <span>放送開始まで待機</span>
-          </>
-        )}
-      </div>
-      <dl className="gp-reserved-meta">
-        <div className="gp-reserved-row">
-          <dt>予約元</dt>
-          <dd>{sourceText}</dd>
-        </div>
-        <div className="gp-reserved-row">
-          <dt>品質</dt>
-          <dd className="mono">1080i</dd>
-        </div>
-      </dl>
-      <div className="gp-cta-row">
-        <div className="gp-cta-spacer" />
-        {coveredBySeriesRule && tvdb ? (
-          <button
-            type="button"
-            className="btn danger"
-            disabled={!onUnsubscribeSeries}
-            onClick={() => {
-              if (onUnsubscribeSeries) onUnsubscribeSeries(tvdb.id);
-            }}
-          >
-            シリーズ予約を解除
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="btn danger"
-            onClick={
-              isLive && apiRecordingId && onStopRecording
-                ? () => onStopRecording(apiRecordingId)
-                : onCancel
-            }
-          >
-            {isLive ? '録画を停止' : '予約を取り消す'}
-          </button>
-        )}
-      </div>
+    <div className="gp-actions">
+      {!slot1Hidden && <ActionCard {...slot1} />}
+      {slot2 && !slot2Hidden && <ActionCard {...slot2} />}
     </div>
   );
 }
 
-interface ActionCardProps {
-  onClick: () => void;
+interface ReserveOutcomeProps {
+  tvdb: TvdbEntry | null;
+  isMovieTvdb: boolean;
+  isMovieGenreOnly: boolean;
+  seriesAlreadyRuled: boolean;
+}
+
+// Inline hint that surfaces under the action bar before reservation —
+// only when the rule outcome wouldn't be obvious from the action labels.
+function ReserveOutcome({
+  tvdb,
+  isMovieTvdb,
+  isMovieGenreOnly,
+  seriesAlreadyRuled,
+}: ReserveOutcomeProps) {
+  if (seriesAlreadyRuled && tvdb) {
+    return (
+      <div className="gp-outcome accent">
+        <Icon name="check" size={12} />
+        <div>
+          シリーズ「{tvdb.title}」は自動予約済み。
+          この回は <strong>「この回のみ」</strong> で上書き予約できます。
+        </div>
+      </div>
+    );
+  }
+  if (isMovieTvdb) {
+    return (
+      <div className="gp-outcome accent">
+        <Icon name="check" size={12} />
+        <div>
+          映画はライブラリの <strong>映画タブ</strong> に追加されます。
+        </div>
+      </div>
+    );
+  }
+  if (isMovieGenreOnly) {
+    return (
+      <div className="gp-outcome">
+        <Icon name="sparkle" size={12} />
+        <div>TVDB 紐付けがないため、再放送時の自動予約はありません。</div>
+      </div>
+    );
+  }
+  return null;
+}
+
+type ActionKind = 'ghost' | 'primary' | 'danger' | 'series';
+
+interface ActionCardSpec {
   title: string;
   desc: string;
-  recommended?: boolean;
+  kind: ActionKind;
+  onClick?: () => void;
 }
 
-function ActionCard({ onClick, title, desc, recommended }: ActionCardProps) {
+interface ActionCardProps extends ActionCardSpec {}
+
+function ActionCard({ onClick, title, desc, kind }: ActionCardProps) {
   return (
-    <button type="button" onClick={onClick} className="gp-mode-card">
-      <span className="gp-mode-body">
-        <span className="gp-mode-title">
-          {title}
-          {recommended && <span className="gp-mode-recommend">推奨</span>}
-        </span>
-        <span className="gp-mode-desc">{desc}</span>
-      </span>
-      <Icon name="chevR" size={12} className="gp-mode-chev" />
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!onClick}
+      className={`gp-mode-card ${kind}`}
+    >
+      <span className="gp-mode-title">{title}</span>
+      <span className="gp-mode-desc">{desc}</span>
     </button>
   );
 }
@@ -629,19 +578,6 @@ function Section({ title, children }: SectionProps) {
   );
 }
 
-interface SettingsRowProps {
-  label: string;
-  children: React.ReactNode;
-}
-
-function SettingsRow({ label, children }: SettingsRowProps) {
-  return (
-    <div className="gp-settings-row">
-      <span className="gp-settings-row-label">{label}</span>
-      {children}
-    </div>
-  );
-}
 
 // ARIB 拡張ディスクリプタから既知キーを順に拾って key/value タプル化。
 // 出演者は使わない（TVDB cast に統一）。スタッフ系のみ。
@@ -651,6 +587,55 @@ function pickExtendedKv(
 ): Array<[string, string]> {
   if (!ext) return [];
   return keys.flatMap((k) => (ext[k] ? [[k, ext[k]] as [string, string]] : []));
+}
+
+// Lookup *every* program matched to a TVDB id — not just what's in the
+// current schedule window. Seeds with the parent's already-loaded
+// `programs` (filtered by tvdb id) so the list renders immediately, then
+// replaces it with the server-wide result the moment GET /tvdb/:id/programs
+// returns and *locks* to that result for as long as the tvdbId stays the
+// same. The lock matters: when the user reserves a program, the parent
+// re-renders `programs` (recordings changed → reservedIds re-derives →
+// new program objects), and a naive seed-on-every-render would reset eps
+// back to the schedule window and visually drop the wider series view.
+function useTvdbPrograms(tvdbId: number | null, seed: Program[]): Program[] {
+  const [eps, setEps] = useState<Program[]>(() =>
+    tvdbId == null ? [] : seed.filter((p) => p.tvdb?.id === tvdbId),
+  );
+  // Tracks the tvdbId we've already issued an API call for, so seed-only
+  // re-renders (parent programs prop churn) don't trigger a re-seed.
+  const lockedFor = useRef<number | null>(null);
+  useEffect(() => {
+    if (tvdbId == null) {
+      setEps([]);
+      lockedFor.current = null;
+      return;
+    }
+    if (lockedFor.current === tvdbId) return;
+    // Switching to a new tvdbId — show the seed immediately while the API
+    // call below fills in episodes outside the loaded window.
+    setEps(seed.filter((p) => p.tvdb?.id === tvdbId));
+    let cancelled = false;
+    api.tvdb
+      .listPrograms(tvdbId)
+      .then((rows) => {
+        if (cancelled) return;
+        lockedFor.current = tvdbId;
+        // Re-use the shared adapter so the toProgram → Program mapping
+        // matches the rest of the app. reservedIds is empty here — the
+        // related list only renders title/time so flags don't matter.
+        setEps(rows.map((r) => toProgram(r, new Set<string>(), new Date())));
+      })
+      .catch(() => {
+        // keep the seed as fallback
+      });
+    return () => {
+      cancelled = true;
+    };
+    // `seed` intentionally excluded — see lockedFor / comment above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tvdbId]);
+  return eps;
 }
 
 // Lazy cast lookup — returns `[]` until the server responds. Errors
@@ -679,12 +664,3 @@ function useTvdbCast(tvdbId: number | null): ApiTvdbCastMember[] {
   return cast;
 }
 
-function neutralHeroBg(p: Program): CSSProperties {
-  // Stable procedural gradient when there's no TVDB poster — keeps the
-  // panel from looking empty. Keyed on channel + title so re-renders feel
-  // consistent.
-  const hash = (p.ch + p.title).split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-  return {
-    background: `linear-gradient(145deg, oklch(0.55 0.10 ${hash % 360}), oklch(0.30 0.08 ${(hash * 3) % 360}))`,
-  };
-}

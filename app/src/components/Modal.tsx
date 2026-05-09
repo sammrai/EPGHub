@@ -2,6 +2,7 @@
 //   (1) "Not yet reserved" — choose one / series / rule, set options
 //   (2) "Already reserved" — show reservation summary + manage (edit, cancel)
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { CSSProperties, MouseEvent, ReactNode } from 'react';
 import { Icon } from './Icon';
 import type { IconName } from './Icon';
@@ -1045,7 +1046,7 @@ interface DebugDetailsModalProps {
   onClose: () => void;
 }
 
-function DebugDetailsModal({ program: p, onClose }: DebugDetailsModalProps) {
+export function DebugDetailsModal({ program: p, onClose }: DebugDetailsModalProps) {
   const mono: CSSProperties = {
     fontFamily: 'var(--font-mono)',
     fontSize: 11,
@@ -1079,7 +1080,10 @@ function DebugDetailsModal({ program: p, onClose }: DebugDetailsModalProps) {
   const tvdb = p.tvdb ?? null;
   const extEntries = p.extended ? Object.entries(p.extended) : [];
 
-  return (
+  // Portal to <body> so the parent (ReserveModal / GuidePanel) — both of
+  // which set `transform: translate(...)` and create a containing block for
+  // fixed descendants — can't clip or reposition this overlay.
+  return createPortal(
     <div
       className="modal-backdrop"
       style={{ zIndex: 110 }}
@@ -1238,7 +1242,22 @@ function DebugDetailsModal({ program: p, onClose }: DebugDetailsModalProps) {
                   lineHeight: 1.5,
                 }}
               >
-                {row('tvdb.id', <span style={mono}>{tvdb.id}</span>)}
+                {row(
+                  'tvdb.id',
+                  <a
+                    href={tvdbHomepage(tvdb)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      ...mono,
+                      color: 'var(--accent)',
+                      textDecoration: 'underline',
+                      textUnderlineOffset: 2,
+                    }}
+                  >
+                    {tvdb.id}
+                  </a>,
+                )}
                 {row('tvdb.slug', <span style={mono}>{tvdb.slug || '—'}</span>)}
                 {row('tvdb.title', tvdb.title)}
                 {row('tvdb.titleEn', tvdb.titleEn)}
@@ -1287,7 +1306,8 @@ function DebugDetailsModal({ program: p, onClose }: DebugDetailsModalProps) {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

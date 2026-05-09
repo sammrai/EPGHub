@@ -2402,6 +2402,29 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TvdbCast"
+  /tvdb/{id}/programs:
+    get:
+      tags:
+        - tvdb
+      summary: TVDB id に紐付く全番組
+      description: 同じ TVDB 作品にマッチした全番組を返す。GuidePanel
+        の「関連番組」が、現在ロード済みのスケジュール窓を超えてシリーズ全エピソードを引けるようにするための広域検索。並びは startAt 昇順。
+      parameters:
+        - schema:
+            type:
+              - integer
+              - "null"
+            example: 389042
+          required: false
+          in: path
+          name: id
+      responses:
+        "200":
+          description: 番組一覧
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProgramList"
   /tuners:
     get:
       tags:

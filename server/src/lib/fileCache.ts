@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, unlink, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
@@ -55,5 +55,16 @@ export class FileCache {
     await writeFile(tmp, JSON.stringify(env));
     const { rename } = await import('node:fs/promises');
     await rename(tmp, dst);
+  }
+
+  /** Drop a single entry. Used by callers that need to force-refresh on
+   *  user action (e.g. "TVDB のエピソード名が更新されたので再取得").
+   *  Missing keys are a no-op. */
+  async delete(key: string): Promise<void> {
+    try {
+      await unlink(this.pathFor(key));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
   }
 }

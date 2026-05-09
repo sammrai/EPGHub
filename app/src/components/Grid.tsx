@@ -373,6 +373,10 @@ export interface GridViewProps {
   selectedId: string | null;
   density: GridDensity;
   reservedIds: Set<string>;
+  /** TVDB ids covered by an enabled series rule. A reserved program whose
+   *  tvdb id is in this set renders in the orange "series-reserved"
+   *  variant rather than the blue "single-reserved" one. */
+  seriesTvdbIds?: Set<number>;
   /** Anchor date for the grid (YYYY-MM-DD, JST broadcast day). The grid
    *  renders from `baseDate` 05:00 JST over `daysLoaded × 24` hours. */
   baseDate: string;
@@ -409,7 +413,7 @@ function findScrollParent(el: HTMLElement | null): HTMLElement | null {
   return null;
 }
 
-export function GridView({ programs, channels, onSelect, selectedId, density, reservedIds, baseDate, daysLoaded, onLoadMore, onVisibleDateChange, genreFilter = 'all' }: GridViewProps) {
+export function GridView({ programs, channels, onSelect, selectedId, density, reservedIds, seriesTvdbIds, baseDate, daysLoaded, onLoadMore, onVisibleDateChange, genreFilter = 'all' }: GridViewProps) {
   // 放送日連続ビュー: baseDate 05:00 JST を 0 分起点に、daysLoaded × 24時間分
   // を一枚のタイムラインで描画。スクロールが底近くに達すると onLoadMore で
   // 更に 1 日追加読み込みする (無限スクロール)。
@@ -590,6 +594,8 @@ export function GridView({ programs, channels, onSelect, selectedId, density, re
                 // border-bottom + border-right).
                 const height = Math.max(18, rawH);
                 const isReserved = reservedIds.has(progId(p));
+                const isSeriesReserved =
+                  isReserved && p.tvdb?.id != null && !!seriesTvdbIds?.has(p.tvdb.id);
                 const isPast = p.endAt ? Date.parse(p.endAt) < Date.now() : false;
                 const isRec = p.recording;
                 const short = height < 38;
@@ -600,7 +606,8 @@ export function GridView({ programs, channels, onSelect, selectedId, density, re
                     data-testid={`prog-${progId(p)}`}
                     className={[
                       'prog',
-                      isReserved && !isRec && 'reserved',
+                      isReserved && !isRec && !isSeriesReserved && 'reserved',
+                      isSeriesReserved && !isRec && 'series-reserved',
                       isRec && 'recording',
                       isPast && 'past',
                       isDimmed && 'dimmed',
@@ -614,7 +621,14 @@ export function GridView({ programs, channels, onSelect, selectedId, density, re
                         <span style={{ color: 'var(--fg-secondary)', fontWeight: 600 }}>{p.start}</span>
                         {p.genre && <span className="g-dot" style={{ background: p.genre.dot }} />}
                         {isRec && <span className="prog-rec-tag">● REC</span>}
-                        {isReserved && !isRec && <span className="prog-resv-tag">予約</span>}
+                        {isSeriesReserved && !isRec && (
+                          <span className="prog-series-tag">
+                            <Icon name="cycle" size={10} /> シリーズ
+                          </span>
+                        )}
+                        {isReserved && !isRec && !isSeriesReserved && (
+                          <span className="prog-resv-tag">予約</span>
+                        )}
                       </div>
                       {short ? (
                         <div className="prog-title compact">{p.title}</div>

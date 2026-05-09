@@ -151,6 +151,8 @@ export const api = {
       req<ApiTvdbEpisode[]>('GET', `/tvdb/${tvdbId}/episodes`),
     getCast: (tvdbId: number) =>
       req<ApiTvdbCastMember[]>('GET', `/tvdb/${tvdbId}/cast`),
+    listPrograms: (tvdbId: number) =>
+      req<ApiProgram[]>('GET', `/tvdb/${tvdbId}/programs`),
   },
   programs: {
     get: (id: string) => req<ApiProgram>('GET', `/programs/${encodeURIComponent(id)}`),

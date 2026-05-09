@@ -4,7 +4,7 @@ import type { TvdbEntry } from '../schemas/tvdb.ts';
 import { z } from '@hono/zod-openapi';
 import { CreateRuleSchema, UpdateRuleSchema } from '../schemas/rule.ts';
 import { db } from '../db/client.ts';
-import { rules, tvdbEntries } from '../db/schema.ts';
+import { rules, tvdbEntries, recordings } from '../db/schema.ts';
 
 /**
  * Thrown when a rule create/update would create a semantic duplicate.
@@ -196,6 +196,34 @@ export class DrizzleRuleService implements RuleService {
   }
 
   async remove(id: number): Promise<boolean> {
+    // Cancel the pending reservations this rule produced before dropping
+    // the rule itself.
+    //   - keyword rules → recordings carry sourceRuleId = rule.id
+    //   - series  rules → recordings carry sourceTvdbId = rule.tvdb.id
+    //                     (recordingService normalises series-source to the
+    //                     tvdb id, so sourceRuleId stays NULL)
+    // Only `scheduled` rows are dropped — anything already in flight
+    // (`recording`/`encoding`/...) keeps its lineage. The FK has
+    // `onDelete: 'set null'` so without this cleanup the rows would
+    // outlive the rule as orphan reserves, which surprised users who
+    // unsubscribed from a series and expected future episodes to clear.
+    const target = await this.findById(id);
+
+    await db
+      .delete(recordings)
+      .where(and(eq(recordings.sourceRuleId, id), eq(recordings.state, 'scheduled')));
+
+    if (target?.kind === 'series' && target.tvdb?.id != null) {
+      await db
+        .delete(recordings)
+        .where(
+          and(
+            eq(recordings.sourceTvdbId, target.tvdb.id),
+            eq(recordings.state, 'scheduled'),
+          ),
+        );
+    }
+
     const deleted = await db.delete(rules).where(eq(rules.id, id)).returning({ id: rules.id });
     return deleted.length > 0;
   }
