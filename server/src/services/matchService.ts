@@ -453,9 +453,34 @@ async function upsertTvdbEntry(
 }
 
 // Zenkaku-aware episode-number extraction from EPG titles. Handles `#3`,
-// `＃３`, `第3話`, `第三話`, `第3回`, and `ep 3`. Returns null when the
-// title has no obvious episode marker.
-const KANJI_DIGITS = '零一二三四五六七八九十';
+// `＃３`, `第3話`, `第三話`, `第捌話` (daiji 大字), `第3回`, `ep 3`, and
+// `（NN）` (NHK 連続テレビ小説 daily-episode format). Returns null when
+// the title has no obvious episode marker.
+//
+// KANJI_DIGIT_MAP carries both standard kanji numerals (一二三…) and the
+// formal 大字 forms (壱弐参肆伍陸漆捌玖拾) sometimes used by anime/drama
+// EPG titles for stylistic effect. Mapping by character preserves the
+// same indexing semantics as the original `KANJI_DIGITS.indexOf` table
+// while extending coverage.
+const KANJI_DIGIT_MAP: Record<string, number> = {
+  '零': 0, '〇': 0,
+  '一': 1, '壱': 1, '壹': 1,
+  '二': 2, '弐': 2, '貳': 2, '弍': 2,
+  '三': 3, '参': 3, '參': 3,
+  '四': 4, '肆': 4,
+  '五': 5, '伍': 5,
+  '六': 6, '陸': 6,
+  '七': 7, '漆': 7, '柒': 7,
+  '八': 8, '捌': 8,
+  '九': 9, '玖': 9,
+  '十': 10, '拾': 10,
+  '百': 100,
+};
+const KANJI_DIGIT_CHARS = Object.keys(KANJI_DIGIT_MAP).join('');
+const KANJI_NUMBER_RE = new RegExp(
+  `第\\s*([${KANJI_DIGIT_CHARS}]+)\\s*(?:話|回|夜|局)`
+);
+
 function parseTitleEpisodeNumber(title: string): number | null {
   // Zenkaku → hankaku for digits and `＃`.
   const norm = title
@@ -467,28 +492,35 @@ function parseTitleEpisodeNumber(title: string): number | null {
   // 第N話 / 第N回 (ASCII digits only; kanji below).
   const kaM = norm.match(/第\s*(\d+)\s*(?:話|回|夜|局)/);
   if (kaM) return Number(kaM[1]);
-  // 第N話 with kanji digits (limited to 0-99).
-  const kanjiM = norm.match(/第\s*([零一二三四五六七八九十百]+)\s*(?:話|回|夜|局)/);
+  // 第N話 with kanji or daiji digits (limited to 0-99 for episode counts).
+  const kanjiM = norm.match(KANJI_NUMBER_RE);
   if (kanjiM) return kanjiToInt(kanjiM[1]);
   // `ep 3` / `Ep.3`.
   const epM = norm.match(/\bep\.?\s*(\d+)/i);
   if (epM) return Number(epM[1]);
+  // Zenkaku parenthesised number `（NN）` — used by NHK 連続テレビ小説 to
+  // mark the cumulative daily episode number (`風、薫る（３１）第７週「届かぬ声」`).
+  // Restricted to fullwidth parens so we don't mis-read year tags like
+  // `(2025)` or runtime markers like `(60min)`.
+  const parenM = norm.match(/（\s*(\d{1,3})\s*）/);
+  if (parenM) return Number(parenM[1]);
   return null;
 }
 
 function kanjiToInt(s: string): number | null {
   if (!s) return null;
-  // 百 / 千 handling for large numbers is overkill here — episode counts
-  // rarely exceed 99. Handle 一-十 + 十一-九十九.
-  if (s === '十') return 10;
-  const digits = s.split('').map((c) => KANJI_DIGITS.indexOf(c));
-  if (digits.some((d) => d < 0)) return null;
+  const digits = s.split('').map((c) => KANJI_DIGIT_MAP[c]);
+  if (digits.some((d) => d == null)) return null;
+  // Single-character forms: returns the mapped value directly
+  // (e.g. 捌→8, 十→10, 百→100).
   if (digits.length === 1) return digits[0];
+  // Two-character forms: 十N (=10+N), N十 (=10*N).
   if (digits.length === 2) {
-    // Forms: 十N (=10+N), N十 (=10*N), N十M requires length 3.
     if (digits[0] === 10) return 10 + digits[1];
     if (digits[1] === 10) return digits[0] * 10;
   }
+  // Three-character forms: N十M (=10*N+M). 百-prefixed forms are not
+  // expected for episode counts and intentionally fall through to null.
   if (digits.length === 3 && digits[1] === 10) return digits[0] * 10 + digits[2];
   return null;
 }
@@ -513,17 +545,87 @@ function jstBroadcastDay(iso: string): string {
   return shifted.toISOString().slice(0, 10);
 }
 
+// Normalize an episode name for cross-source equality. EPG and TVDB
+// disagree on zenkaku vs hankaku (digits, ASCII letters, `！？＃`) and on
+// whitespace, but the underlying text is the same. Lowercase + strip all
+// whitespace + fold zenkaku gives a stable key for direct comparison.
+function normalizeEpisodeName(s: string): string {
+  return zenkakuToHankaku(s).replace(/[\s　]+/g, '').toLowerCase();
+}
+
+/**
+ * Derive the episode subtitle from an EPG title by subtraction:
+ * `EPG title − show name − structural noise = subtitle`.
+ *
+ * Listing every possible delimiter (`▼`, `「」`, `▽`, `★`, …) is fragile;
+ * broadcasters keep inventing new ones. Instead, we rely on the fact that
+ * we *know* the show name (from the linked TVDB entry) and that the rest
+ * of the title is a stable mix of episode-meta noise (brackets, parens,
+ * episode numbers, broadcast flags) and the actual subtitle. Stripping
+ * the noise leaves the subtitle.
+ *
+ * Returns null when nothing meaningful remains.
+ */
+function deriveEpisodeSubtitle(programTitle: string, showTitles: string[]): string | null {
+  let s = programTitle;
+
+  // Strip occurrences of the show name(s). Sort longer first so when the
+  // JA title contains the EN one (or vice versa) we don't strip a partial
+  // fragment and leave dangling chars.
+  const titles = [...new Set(showTitles)]
+    .filter((t): t is string => Boolean(t && t.trim()))
+    .sort((a, b) => b.length - a.length);
+  for (const name of titles) {
+    s = s.split(name).join(' ');
+  }
+
+  // Bracketed markers `[字]`, `【…】`, `〔…〕`, `［…］`.
+  s = s.replace(/[\[［【〔][^\]］】〕]*[\]］】〕]/g, ' ');
+  // Angle tags `＜…＞` / `<…>`.
+  s = s.replace(/[＜<][^＞>]*[＞>]/g, ' ');
+  // Parenthesised content `（…）` / `(…)` — runtime / year / weekday tags
+  // and NHK 朝ドラ `（NN）`. The numeric value is extracted separately by
+  // parseTitleEpisodeNumber when needed.
+  s = s.replace(/[（(][^）)]*[)）]/g, ' ');
+
+  // Episode markers — `#N`, `＃N`, `第N話/回/夜/局/週/期/部` (ASCII /
+  // zenkaku / kanji / 大字 digits all covered).
+  s = s.replace(/[#＃♯]\s*[\d０-９]+/g, ' ');
+  s = s.replace(
+    new RegExp(`第\\s*[\\d０-９${KANJI_DIGIT_CHARS}]+\\s*[話回夜局週期部]`, 'g'),
+    ' '
+  );
+
+  // Quote brackets — keep the inside, drop the wrappers.
+  s = s.replace(/[「」『』]/g, ' ');
+
+  // Punctuation/decorative markers used as section separators in titles.
+  // `▼▽` introduces description; `★◆■□●○◇◎※` are highlight bullets.
+  s = s.replace(/[▼▽★◆■□●○◇◎※→←]/g, ' ');
+
+  // Collapse whitespace runs and trim.
+  s = s.replace(/[\s　]+/g, ' ').trim();
+  // Drop common standalone noise tokens that survived the structural pass.
+  s = s.replace(/\b(?:再|新|字|解|HD|デ)\b/g, '').trim();
+
+  return s.length >= 2 ? s : null;
+}
+
 // Given a cached episode list and a program's start timestamp + title,
-// find the most likely matching episode. Resolution order:
-//   1. Title has `#N` / `第N話` — pick the episode with e === N in the
-//      latest season that has one. The EPG's explicit episode number is
-//      the strongest signal when the broadcaster labels it.
-//   2. Cumulative-N fallback. Some broadcasters number a show across
-//      seasons (ダンダダン #18 = S1 12話 + S2 6話 で第18話扱い), but
-//      TVDB resets `e` per season. When no season carries `e === N`,
-//      walk seasons s≥1 ascending; once N lands inside the running
-//      total, that season's relative episode is the match.
-//   3. TVDB aired === 放送日 (JST - 5h). Handles late-night slots
+// find the most likely matching episode. Resolution order, strongest
+// signal first:
+//   1. Subtitle name match. Strip the show name and structural noise
+//      from the EPG title (`deriveEpisodeSubtitle`); whatever is left is
+//      a subtitle candidate that gets compared against the cached episode
+//      `name` list. Series-unique → pins the season directly. Falls back
+//      to extracting any `「…」`/`『…』` segments when the caller didn't
+//      supply show titles (older test paths).
+//   2. Episode number from the title (`#N` / `第N話`). Same season picked
+//      as the highest one carrying e === N — kept as a fallback for
+//      titles that omit the subtitle.
+//   3. Cumulative-N fallback for restart-numbered series (e.g. ダンダダン
+//      #18 = S1 12話 + S2 6話 = S2E6).
+//   4. TVDB aired === 放送日 (JST - 5h). Handles late-night slots
 //      naturally without a separate fallback.
 //
 // Exported for unit tests — tests bypass the DB and hand-roll an
@@ -531,19 +633,71 @@ function jstBroadcastDay(iso: string): string {
 export function findEpisodeForProgram(
   episodes: Array<{ s: number; e: number; aired?: string; name?: string }>,
   programStartIso: string,
-  programTitle: string
+  programTitle: string,
+  showTitles?: string[]
 ): { s: number; e: number; name?: string } | null {
-  // 1. Title-parsed episode number wins (direct match).
+  // 1. Subtitle-derived name match.
+  const candidates: string[] = [];
+  if (showTitles && showTitles.length > 0) {
+    const derived = deriveEpisodeSubtitle(programTitle, showTitles);
+    if (derived) candidates.push(derived);
+  } else {
+    // Backward-compat path: when the caller hasn't supplied show titles,
+    // extract every quoted segment as a subtitle candidate.
+    for (const m of programTitle.matchAll(/[「『]([^「」『』]+)[」』]/g)) {
+      candidates.push(m[1]);
+    }
+  }
+  if (candidates.length > 0) {
+    const namedHits: Array<{ s: number; e: number; name?: string }> = [];
+    for (const cand of candidates) {
+      const candKey = normalizeEpisodeName(cand);
+      if (!candKey) continue;
+      for (const ep of episodes) {
+        if (ep.name && normalizeEpisodeName(ep.name) === candKey) {
+          namedHits.push(ep);
+        }
+      }
+    }
+    if (namedHits.length > 0) {
+      // Dedupe by (s,e) — the same episode may appear multiple times if
+      // multiple candidate strings happened to match its name.
+      const deduped = Array.from(
+        new Map(namedHits.map((ep) => [`${ep.s}-${ep.e}`, ep])).values()
+      );
+      const realSeasons = deduped.filter((ep) => ep.s >= 1);
+      const tier = realSeasons.length > 0 ? realSeasons : deduped;
+      // Only return when the name uniquely identifies an episode in the
+      // chosen tier. Some series reuse subtitles across seasons (ダンダダン
+      // S1E8 と S2E7 がどちらも `なんかモヤモヤするじゃんよ`); when the
+      // name match is ambiguous, abstain and let step 2 / cumulative
+      // disambiguate via the explicit episode number.
+      if (tier.length === 1) {
+        const pick = tier[0];
+        return { s: pick.s, e: pick.e, name: pick.name };
+      }
+    }
+  }
+
+  // 2. Title-parsed episode number.
   const titleEp = parseTitleEpisodeNumber(programTitle);
   if (titleEp != null) {
-    // Multi-cour / restart-numbered series: prefer the highest season
-    // whose episode list contains our number.
     const candidates = episodes.filter((ep) => ep.e === titleEp);
     if (candidates.length > 0) {
-      const best = candidates.reduce((a, b) => (a.s >= b.s ? a : b));
+      // Fresh airings normally point at the current/latest cour, so the
+      // highest season carrying e===N wins by default. When the title
+      // explicitly carries a 再放送 marker (`[再]` / `［再］`), it's a
+      // rerun of an older season — prefer the lowest season instead.
+      // Specials (s=0) deprioritised either way.
+      const realSeasons = candidates.filter((ep) => ep.s >= 1);
+      const tier = realSeasons.length > 0 ? realSeasons : candidates;
+      const isRerun = /[\[［]\s*再\s*[\]］]/.test(programTitle);
+      const best = tier.reduce((a, b) =>
+        isRerun ? (a.s < b.s ? a : b) : (a.s >= b.s ? a : b)
+      );
       return { s: best.s, e: best.e, name: best.name };
     }
-    // 2. Cumulative-N fallback. Only kicks in when direct match is empty
+    // 3. Cumulative-N fallback. Only kicks in when direct match is empty
     // — otherwise a long single-season show with E18 would get pulled
     // into S2 even though S1 already has the right episode.
     const seasons = Array.from(new Set(
@@ -563,7 +717,7 @@ export function findEpisodeForProgram(
       acc += maxE;
     }
   }
-  // 3. Broadcast-day match.
+  // 4. Broadcast-day match.
   const broadcastDay = jstBroadcastDay(programStartIso);
   const hit = episodes.find((ep) => ep.aired === broadcastDay);
   if (hit) return { s: hit.s, e: hit.e, name: hit.name };
@@ -710,7 +864,10 @@ class DbMatchService implements MatchService {
                 : [];
               await upsertTvdbEntry(best, episodes);
               await writeOverride(key, best.id, false);
-              await this.applyTvdbToPrograms(best.id, ids, episodes);
+              const showTitles = [best.title, best.titleEn].filter(
+                (t): t is string => Boolean(t)
+              );
+              await this.applyTvdbToPrograms(best.id, ids, episodes, showTitles);
               resolved += ids.length;
               this.hits++;
             } else {
@@ -732,20 +889,31 @@ class DbMatchService implements MatchService {
   private async applyTvdbToPrograms(
     tvdbId: number,
     programIds: string[],
-    episodes?: Array<{ s: number; e: number; aired?: string; name?: string }>
+    episodes?: Array<{ s: number; e: number; aired?: string; name?: string }>,
+    showTitles?: string[]
   ): Promise<void> {
     if (programIds.length === 0) return;
     const now = new Date();
-    // When the caller didn't supply an episode list (e.g. the override-hit
-    // path), pull it from tvdb_entries.episodes. Saves re-fetching from
-    // TVDB while still giving programs per-episode stamping.
-    if (!episodes) {
+    // When the caller didn't supply an episode list / show titles (e.g.
+    // the override-hit path), pull both from tvdb_entries. Saves
+    // re-fetching from TVDB while still giving programs per-episode
+    // stamping AND letting `findEpisodeForProgram` derive subtitles.
+    if (!episodes || !showTitles) {
       const [row] = await db
-        .select({ episodes: tvdbEntries.episodes })
+        .select({
+          title: tvdbEntries.title,
+          titleEn: tvdbEntries.titleEn,
+          episodes: tvdbEntries.episodes,
+        })
         .from(tvdbEntries)
         .where(eq(tvdbEntries.tvdbId, tvdbId))
         .limit(1);
-      episodes = row?.episodes ?? undefined;
+      if (!episodes) episodes = row?.episodes ?? undefined;
+      if (!showTitles && row) {
+        showTitles = [row.title, row.titleEn].filter(
+          (t): t is string => Boolean(t)
+        );
+      }
     }
     // Without episodes: one bulk update per chunk — fast path.
     if (!episodes || episodes.length === 0) {
@@ -773,7 +941,12 @@ class DbMatchService implements MatchService {
         .where(inArray(programs.id, slice));
       for (const row of rows) {
         totalForThisTvdb++;
-        const ep = findEpisodeForProgram(episodes, row.startAt.toISOString(), row.title);
+        const ep = findEpisodeForProgram(
+          episodes,
+          row.startAt.toISOString(),
+          row.title,
+          showTitles
+        );
         if (!ep) {
           unresolved.push({ id: row.id, startAt: row.startAt, title: row.title });
         }
@@ -796,13 +969,80 @@ class DbMatchService implements MatchService {
     // most of the slate. When the miss rate crosses 50% of a non-trivial
     // sample (>=3 programs) we assume a sequential rerun starting at S1E1 and
     // map unresolved[i] → episodes[i] in chronological order.
+    //
+    // Two preconditions guard against false-positive misfires:
+    //   (a) The cached `aired` dates must be old relative to when the
+    //       programs are airing. A current series with a stale TVDB cache
+    //       (latest cached aired only weeks behind today) is NOT a rerun;
+    //       firing the fallback would mass-mislabel ongoing-series episodes
+    //       as S1E1, S1E2, ...
+    //   (b) The unresolved programs must NOT carry explicit episode markers
+    //       (`第N話`, `（NN）`, `#N`, etc.). Marker-bearing misses indicate
+    //       a parse gap or cache gap, not an unnumbered rerun.
+    const RECENT_AIRED_DAYS = 60;
+    const dayMs = 86_400_000;
+    const airedTimes = episodes
+      .map((ep) => (ep.aired ? Date.parse(`${ep.aired}T00:00:00Z`) : NaN))
+      .filter((t) => Number.isFinite(t));
+    const latestAired = airedTimes.length > 0 ? Math.max(...airedTimes) : 0;
+    const earliestProgramStart = unresolved.length > 0
+      ? Math.min(...unresolved.map((p) => p.startAt.getTime()))
+      : 0;
+    const isStaleRerun =
+      latestAired > 0 &&
+      earliestProgramStart - latestAired > RECENT_AIRED_DAYS * dayMs;
+    const anyMarkerBearing = unresolved.some(
+      (p) => parseTitleEpisodeNumber(p.title) != null
+    );
     if (
       totalForThisTvdb >= 3 &&
-      unresolved.length / totalForThisTvdb >= 0.5
+      unresolved.length / totalForThisTvdb >= 0.5 &&
+      isStaleRerun &&
+      !anyMarkerBearing
     ) {
-      const sortedUnresolved = [...unresolved].sort(
-        (a, b) => a.startAt.getTime() - b.startAt.getTime()
-      );
+      // Group programs by broadcast day. Multiple channels (svc-/m3u-) carry
+      // the same airing on the same day; sequential mapping must NOT advance
+      // the episode index for cross-channel duplicates of the same broadcast.
+      // Programs at the same broadcast day are treated as one airing slot
+      // and all assigned to the same episode.
+      const slots = new Map<string, Array<{ id: string; startAt: Date; title: string }>>();
+      for (const u of unresolved) {
+        const day = jstBroadcastDay(u.startAt.toISOString());
+        const arr = slots.get(day) ?? [];
+        arr.push(u);
+        slots.set(day, arr);
+      }
+      const slotDays = [...slots.keys()].sort();
+
+      // Verify the broadcast days form a regular cadence — typical reruns
+      // of an ongoing series air weekly (~7 days) or daily (~1 day). If
+      // gaps deviate wildly from the median (>50%) the sequential mapping
+      // is unreliable; abstain rather than estimate.
+      let cadenceOk = true;
+      if (slotDays.length >= 3) {
+        const dayTimes = slotDays.map((d) => Date.parse(`${d}T00:00:00Z`));
+        const gaps = dayTimes.slice(1).map((t, i) => t - dayTimes[i]);
+        const sortedGaps = [...gaps].sort((a, b) => a - b);
+        const median = sortedGaps[Math.floor(sortedGaps.length / 2)];
+        const isWeekly = median > 5 * dayMs && median < 10 * dayMs;
+        const isDaily = median > 0.5 * dayMs && median < 2 * dayMs;
+        const isFortnightly = median > 12 * dayMs && median < 17 * dayMs;
+        if (!isWeekly && !isDaily && !isFortnightly) {
+          cadenceOk = false;
+        } else {
+          // Reject if any single gap deviates >50% from the median —
+          // skipped weeks (`#5, #11`) make the chronological mapping
+          // shift and we lose track of which N maps to which (s,e).
+          const tol = median * 0.5;
+          if (gaps.some((g) => Math.abs(g - median) > tol)) {
+            cadenceOk = false;
+          }
+        }
+      }
+      if (!cadenceOk) {
+        return;
+      }
+
       // Prefer real seasons (s >= 1) over specials (s === 0). Within that,
       // ascending by (s, e) yields S1E1, S1E2, … then S2E1, … — correct for
       // "rerun from the start" airings that may span multiple seasons.
@@ -811,26 +1051,26 @@ class DbMatchService implements MatchService {
       const sortedEpisodes = [...pool].sort((a, b) =>
         a.s !== b.s ? a.s - b.s : a.e - b.e
       );
-      const pairs = Math.min(sortedUnresolved.length, sortedEpisodes.length);
+      const pairs = Math.min(slotDays.length, sortedEpisodes.length);
       if (pairs > 0) {
         for (let i = 0; i < pairs; i++) {
-          const prog = sortedUnresolved[i];
           const ep = sortedEpisodes[i];
-          await db
-            .update(programs)
-            .set({
-              tvdbId,
-              tvdbMatchedAt: now,
-              tvdbSeason: ep.s,
-              tvdbEpisode: ep.e,
-              tvdbEpisodeName: ep.name ?? null,
-            })
-            .where(eq(programs.id, prog.id));
+          for (const prog of slots.get(slotDays[i]) ?? []) {
+            await db
+              .update(programs)
+              .set({
+                tvdbId,
+                tvdbMatchedAt: now,
+                tvdbSeason: ep.s,
+                tvdbEpisode: ep.e,
+                tvdbEpisodeName: ep.name ?? null,
+              })
+              .where(eq(programs.id, prog.id));
+          }
         }
         const first = sortedEpisodes[0];
-        const earliest = sortedUnresolved[0].startAt.toISOString();
         console.info(
-          `[match] rerun pattern: tvdbId=${tvdbId}, mapped ${pairs} programs starting ${earliest} → S${first.s}E${first.e}..`
+          `[match] rerun pattern: tvdbId=${tvdbId}, mapped ${pairs} broadcast days starting ${slotDays[0]} → S${first.s}E${first.e}..`
         );
       }
     }
@@ -861,14 +1101,17 @@ class DbMatchService implements MatchService {
 
     // 3. Update this program + every program sharing the normalized title.
     //    applyTvdbToPrograms handles the per-program episode lookup.
-    await this.applyTvdbToPrograms(tvdbId, [programId], episodes);
+    const showTitles = [fresh.title, fresh.titleEn].filter(
+      (t): t is string => Boolean(t)
+    );
+    await this.applyTvdbToPrograms(tvdbId, [programId], episodes, showTitles);
     if (key) {
       const candidates = await db
         .select({ id: programs.id, title: programs.title })
         .from(programs)
         .where(and(isNull(programs.tvdbId), ne(programs.id, programId)));
       const ids = candidates.filter((r) => normalizeTitle(r.title) === key).map((r) => r.id);
-      if (ids.length > 0) await this.applyTvdbToPrograms(tvdbId, ids, episodes);
+      if (ids.length > 0) await this.applyTvdbToPrograms(tvdbId, ids, episodes, showTitles);
     }
     return fresh;
   }
