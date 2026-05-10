@@ -661,6 +661,76 @@ describe('findEpisodeForProgram — 魔入りました！入間くん season-suf
   });
 });
 
+describe('findEpisodeForProgram — 夜桜さんちの大作戦 bare kanji-prefix counter (issue #15)', () => {
+  // svc-400141_2026-05-12T15:30:00.000Z (issue #15, dup #19). EPG title carries
+  // a bare `アニメ　` broadcaster prefix, a `第２期` season indicator, the
+  // show-themed bare counter `作戦31` (= "Operation 31", show-internal label
+  // analogous to `第N席`/`第N輪`/`N食目` but in `<kanji-prefix><digit>` shape
+  // without the `第` lead), and the real episode subtitle `スパイ昇級試験`
+  // (= S2E4). The subtitle deriver must:
+  //   - drop the show name (`夜桜さんちの大作戦`),
+  //   - drop the `第２期` season selector (handled by the existing CLOSED
+  //     counter strip),
+  //   - drop the bare `作戦31` thematic counter (NEW: the
+  //     `<2-4 kanji><digit>+` strip, gated on whitespace boundaries on
+  //     both sides so it can't eat year/length attributes like
+  //     `平成30年` or `刑事110キロ`),
+  //   - drop the orphaned `アニメ` broadcast prefix from the residue
+  //     (NEW: BLOCK_PREFIX_RE re-applied on the cleaned candidate).
+  // What's left is `スパイ昇級試験`, matching S2E4 by name.
+  const YOZAKURA_EPISODES: Episode[] = [
+    { s: 0, e: 1, name: 'Mini Mission: Yozakura Family (1)', aired: '2024-04-08' },
+    { s: 1, e: 1, name: '桜の指輪', aired: '2024-04-07' },
+    { s: 1, e: 2, name: '夜桜の命', aired: '2024-04-14' },
+    { s: 1, e: 27, name: '披露宴', aired: '2024-10-06' },
+    { s: 2, e: 1, name: 'アイさん夜桜家へ/ミニ凶一郎', aired: '2026-04-12' },
+    { s: 2, e: 2, name: '勝ち組と負け組', aired: '2026-04-19' },
+    { s: 2, e: 3, name: '辛三兄ちゃん見守り隊', aired: '2026-04-26' },
+    { s: 2, e: 4, name: 'スパイ昇級試験', aired: '2026-05-03' },
+    { s: 2, e: 5, name: '愛の結晶', aired: '2026-05-10' },
+    { s: 2, e: 6, name: 'TBA', aired: '2026-05-17' },
+  ];
+
+  test('[字]アニメ　…　第２期　作戦31　スパイ昇級試験 → S2E4 via subtitle name match', () => {
+    const hit = findEpisodeForProgram(
+      YOZAKURA_EPISODES,
+      '2026-05-12T15:30:00.000Z',
+      '[字]アニメ\u3000夜桜さんちの大作戦\u3000第２期\u3000作戦31\u3000スパイ昇級試験',
+      ['夜桜さんちの大作戦'],
+    );
+    assert.deepEqual(hit, { s: 2, e: 4, name: 'スパイ昇級試験' });
+  });
+
+  test('bare kanji-prefix-digit strip preserves attribute-like tokens', () => {
+    // Negative test: the strip must not eat `平成30年` (year) or
+    // `刑事110キロ` (numeric attribute) when they appear in a subtitle.
+    // Both are kanji-prefix-digit shape but lack the trailing whitespace
+    // required by the new strip — the digit is followed by another kanji
+    // (`年`) or kana (`キロ`), so the pattern doesn't fire.
+    const list: Episode[] = [
+      { s: 1, e: 1, name: '平成30年史を振り返る', aired: '2026-05-12' },
+      { s: 1, e: 2, name: '刑事110キロ', aired: '2026-05-19' },
+    ];
+    // First case: subtitle exactly equals the episode name. Show titles
+    // omitted so the legacy quoted-segment path is exercised — separately,
+    // the strip rule must not corrupt the candidate when it does run.
+    const hit1 = findEpisodeForProgram(
+      list,
+      '2026-05-12T10:00:00.000Z',
+      'アニメ\u3000ショウ名\u3000「平成30年史を振り返る」',
+      ['ショウ名'],
+    );
+    assert.deepEqual(hit1, { s: 1, e: 1, name: '平成30年史を振り返る' });
+    const hit2 = findEpisodeForProgram(
+      list,
+      '2026-05-19T10:00:00.000Z',
+      'ドラマ\u3000ショウ名\u3000「刑事110キロ」',
+      ['ショウ名'],
+    );
+    assert.deepEqual(hit2, { s: 1, e: 2, name: '刑事110キロ' });
+  });
+});
+
 describe('findEpisodeForProgram — cumulative fallback', () => {
   test('ダンダダン #18 with S1=12, S2=6 → S2E6', () => {
     // The motivating case. Broadcaster numbers continuously across

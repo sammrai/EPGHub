@@ -957,6 +957,34 @@ function deriveEpisodeSubtitle(programTitle: string, showTitles: string[]): stri
   // Drop common standalone noise tokens that survived the structural pass.
   s = s.replace(/\b(?:再|新|字|解|HD|デ)\b/g, '').trim();
 
+  // Show-themed bare counter `<2-4 kanji><digit>` — broadcasters use show-
+  // internal labels like `作戦31` (`夜桜さんち` "Operation N"), `事件第N号`,
+  // etc. as a per-airing counter, with a real subtitle following in the
+  // same field (`作戦31 スパイ昇級試験`). Constrained to:
+  //   - 2-4 kanji prefix (rules out single-kanji `第N` already handled
+  //     above; rules out long sentences),
+  //   - hankaku/zenkaku digits,
+  //   - REQUIRED trailing whitespace (rules out year/length attributes
+  //     glued to following kanji like `平成30年` / `刑事110キロ` and
+  //     end-of-string trailing season-suffixes like `加賀美塔子2`),
+  //   - REQUIRED preceding whitespace or start-of-string.
+  // Runs after the show-name strip so a show whose title legitimately
+  // contains this shape (`加賀美塔子2`) is never seen here.
+  s = s
+    .replace(
+      /(?<=^|[\s　])[\u4E00-\u9FFF]{2,4}[\d０-９]+[\s　]/g,
+      ' '
+    )
+    .replace(/[\s　]+/g, ' ')
+    .trim();
+
+  // Re-apply the block-prefix strip on the residue. The show name lived
+  // between `アニメ` and the rest of the title, so removing it left
+  // `アニメ` orphaned at the head of the residue (`アニメ スパイ昇級試験`).
+  // Without this, any broadcast prefix (`アニメ`, `ドラマ`, `日5`, …)
+  // contaminates the subtitle candidate and blocks the name match.
+  s = s.replace(BLOCK_PREFIX_RE, '').trim();
+
   return s.length >= 2 ? s : null;
 }
 
