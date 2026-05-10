@@ -496,6 +496,35 @@ describe('findEpisodeForProgram — メイドさんは食べるだけ thematic c
   });
 });
 
+describe('findEpisodeForProgram — あかね噺 thematic counter case', () => {
+  // svc-400151_2026-05-10T16:00:00.000Z. tvdb_id=466488. EPG titles for
+  // the rakugo anime あかね噺 use 「第N席」 ("Nth seat/session") as a
+  // thematic per-airing episode counter — 席 is rakugo terminology for
+  // a performance slot. Same shape as 第N話/回/夜/局/輪 but with a
+  // show-themed glyph. Locks in 席 in the kanji-digit branch of
+  // parseTitleEpisodeNumber so the cascade resolves S/E instead of
+  // falling through all four steps to null.
+  const AKANEBANASHI_EPISODES: Episode[] = [
+    { s: 1, e: 1, name: 'あの日', aired: '2026-04-04' },
+    { s: 1, e: 2, name: '初高座', aired: '2026-04-11' },
+    { s: 1, e: 3, name: '兄弟子', aired: '2026-04-18' },
+    { s: 1, e: 4, name: '喜びの先', aired: '2026-04-25' },
+    { s: 1, e: 5, name: '進む道', aired: '2026-05-02' },
+    { s: 1, e: 6, name: '寺子屋', aired: '2026-05-09' },
+    { s: 1, e: 7, name: 'TBA', aired: '2026-05-16' },
+  ];
+
+  test('第六席 (kanji "6th seat") → S1E6', () => {
+    const hit = findEpisodeForProgram(
+      AKANEBANASHI_EPISODES,
+      '2026-05-10T16:00:00.000Z',
+      '[字]アニメA・あかね噺\u3000第六席「寺子屋」',
+      ['あかね噺'],
+    );
+    assert.deepEqual(hit, { s: 1, e: 6, name: '寺子屋' });
+  });
+});
+
 describe('findEpisodeForProgram — cumulative fallback', () => {
   test('ダンダダン #18 with S1=12, S2=6 → S2E6', () => {
     // The motivating case. Broadcaster numbers continuously across
