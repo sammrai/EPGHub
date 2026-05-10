@@ -124,10 +124,43 @@ Where the right level lives in this codebase:
   of broadcaster shorthand; the existing single-fallback
   (`key.split(/\s+/)[0]`) in `enrichUnmatched` covers the
   documentary-style "show name + space + subtitle" case.
+- **Trailing structural sequel markers** → check
+  `TRAILING_KANA_DIGIT_RE` / `TRAILING_KANA_ROMAN_RE` first. If your
+  case is "broadcaster appends a sequel/season marker to a Japanese
+  show name and TVDB carries the no-marker canonical form", a sibling
+  regex on the same shape is the right move — no API cost. **Look
+  for these precedents BEFORE reaching for search-level fan-out;
+  every search-level candidate is one extra rate-limited TVDB call.**
 - **Per-airing episode resolution** → `findEpisodeForProgram`'s
   four-step cascade. Cheap to extend (no API cost), so prefer
   extending the cascade or having an existing step emit multiple
   internal candidates.
+
+### Calibrating a trailing-marker regex
+
+The existing siblings are `TRAILING_KANA_DIGIT_RE` (1 hankaku digit
+at end-of-string after kana/kanji) and `TRAILING_KANA_ROMAN_RE`
+(fullwidth Ⅰ-Ⅹ at end OR followed by `[\s][～〜~]` after kana/kanji).
+Both run after `stripPromoTail`, both are gated by
+`!wasQuoteExtracted` (so titles extracted from `「…」` keep the
+marker — the sub-quote is the canonical form).
+
+When you add a new sibling, verify the regenerated golden fixture
+diff for unintended strips. The known foot-guns:
+
+- **Course/subject-level designations**: `数学Ⅰ` / `情報Ⅰ` /
+  `英語コミュニケーションⅡ` (Japanese high-school subject codes,
+  not sequels). The end-of-string lookahead AND the
+  `[\s][～〜~]`-tilde lookahead together protect these — a subject
+  designation is followed by free-form text (not a tilde-wrapped
+  subtitle). Keep both lookaheads narrow.
+- **Foreign-title trailing digits**: `ロボコップ３`, `ロッキーⅡ` —
+  preserved by `wasQuoteExtracted` because they're inside `「…」`.
+- **ASCII-tail trailing markers**: `Test Ⅱ`, `iPhone 15 Pro` —
+  preserved by the `(?<=[\u3040-\u30FF\u4E00-\u9FFF])` lookbehind.
+- **Year tags / serial counts**: `ハチ公20` (2-digit, end), `桜2002`
+  (4-digit year). The digit regex is single-digit only; the Roman
+  regex doesn't match Arabic numerals. Both safe.
 
 ### Whitelist judgement
 

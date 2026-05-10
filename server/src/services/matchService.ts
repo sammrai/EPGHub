@@ -100,6 +100,30 @@ const STRIP_SUFFIX_RE: RegExp[] = [
 // "桜2002") survive untouched. Lookbehind keeps the preceding kana/kanji.
 const TRAILING_KANA_DIGIT_RE = /(?<=[\u3040-\u30FF\u4E00-\u9FFF])\d$/;
 
+// Fullwidth Roman numeral glued to a Japanese kana/kanji — broadcaster
+// sequel marker on Japanese show names (無職転生Ⅱ ～異世界行ったら本気だす～,
+// 暴れん坊将軍Ⅳ #10「…」, 進撃の巨人Ⅱ). Restricted to two narrow shapes:
+//
+//   1. `<kana>Ⅱ` at end-of-string  — `進撃の巨人Ⅱ` after step 9 cut.
+//   2. `<kana>Ⅱ` followed by `<whitespace>～...~` — the show-name-then-
+//      ～subtitle～ pattern unique to broadcaster sequel naming
+//      (`無職転生Ⅱ ～異世界行ったら本気だす～`). `［～〜~］` covers full-
+//      and half-width tildes / wave dashes used as subtitle openers.
+//
+// Restricted to fullwidth U+2160..U+2169 (Ⅰ..Ⅹ) — ASCII `II`/`III`
+// collides far too often with English titles. The same wasQuoteExtracted
+// guard applies: skip when the title sits inside `「…」` because then the
+// numeral is part of the canonical title (シネマ「ロッキーⅡ」).
+//
+// The narrow lookahead protects course/subject-level designations like
+// `NHK高校講座 数学Ⅰ ネット社会にも権利がある` — the Ⅰ is the academic
+// course level (Math I, distinct from Math II), and the trailing word is
+// not a tilde-wrapped subtitle so the regex does not fire. Same protection
+// for `actⅡ－…－` (em-dash, not whitespace+tilde) and `Test Ⅱ`
+// (lookbehind requires kana/kanji, not ASCII).
+const TRAILING_KANA_ROMAN_RE =
+  /(?<=[\u3040-\u30FF\u4E00-\u9FFF])[\u2160-\u2169]+(?=$|[\s　]+[～〜~])/g;
+
 // Trailing separator — only applied when there's no matching opener
 // somewhere earlier in the string. `牙狼 -魔戒ノ花-` has a paired pair
 // of `-` so we keep both; `Show・` has an orphan `・` to strip.
@@ -314,12 +338,16 @@ export function normalizeTitle(raw: string): string {
   // 11. Promo-tail cut: drop whitespace + Japanese blurb containing `!`/`?`.
   t = stripPromoTail(t);
 
-  // 11b. Strip the kana/kanji-glued sequel digit. Done after stripPromoTail
-  //      so cases like `エイゴビート２　How many?/...` (digit + promo tail)
-  //      lose the promo first and THEN drop the trailing 2. Skipped when the
-  //      working title was extracted out of a `「…」` quote because in that
-  //      case the digit is part of the canonical title (映画「ロボコップ３」).
-  if (!wasQuoteExtracted) t = t.replace(TRAILING_KANA_DIGIT_RE, '');
+  // 11b. Strip the kana/kanji-glued sequel digit / fullwidth Roman numeral.
+  //      Done after stripPromoTail so cases like `エイゴビート２　How many?/...`
+  //      (digit + promo tail) lose the promo first and THEN drop the trailing
+  //      marker. Skipped when the working title was extracted out of a
+  //      `「…」` quote because in that case the marker is part of the
+  //      canonical title (映画「ロボコップ３」, シネマ「ロッキーⅡ」).
+  if (!wasQuoteExtracted) {
+    t = t.replace(TRAILING_KANA_DIGIT_RE, '');
+    t = t.replace(TRAILING_KANA_ROMAN_RE, '');
+  }
 
   // 12. Collapse whitespace runs to a single ASCII space, trim.
   t = t.replace(/[\s　]+/g, ' ').trim();
@@ -395,27 +423,18 @@ function scoreOf(e: TvdbEntry, key: string): number {
 /**
  * Build the ordered list of search keys for show-name resolution in
  * `enrichUnmatched` / `rematchProgram`. Each later candidate is a
- * progressive relaxation of the primary key, so callers iterate and
- * stop at the first scoring hit.
+ * progressive relaxation of the primary key; callers iterate and stop
+ * at the first scoring hit.
  *
- * Why this is a list, not a single regex in `normalizeTitle`: the
- * relaxations are *ambiguous*. A trailing `Ⅱ` is sometimes a season
- * marker (`無職転生Ⅱ` → TVDB `無職転生 ～異世界行ったら本気だす～`)
- * and sometimes part of the canonical title (`極上！ゴルフ場の旅Ⅱ`,
- * `バキバキ☆ビート！Ⅱ`). The normalizer can't tell which, so it
- * preserves the marker; this layer fans out only when the strict
- * key fails to score, letting `pickBest`'s exact-match floor pick the
- * right TVDB entry without losing season-2-only shows that genuinely
- * share their EPG title with TVDB.
- *
- * Order, by precision (most → least specific):
- *   1. `key` itself (preserves the season marker).
- *   2. `key` with a trailing fullwidth Roman numeral (Ⅰ-Ⅹ) stripped
- *      when it sits directly after kana/kanji and at end-of-token —
- *      i.e. `<base-name>Ⅱ` or `<base-name>Ⅱ <subtitle>`.
- *   3. Head token before whitespace — covers documentary-style
- *      `<show> <subtitle>` (e.g. `ブラタモリ 国宝犬山城` → `ブラタモリ`).
- *      Guarded to ≥3 chars so we don't blow up on stop-words.
+ * Today the only relaxation is the leading-token fallback (covers
+ * documentary-style `<show> <subtitle>` like
+ * `ブラタモリ 国宝犬山城` → `ブラタモリ`). New relaxations should be
+ * added here ONLY when they cannot be folded into `normalizeTitle`'s
+ * strip rules — every fan-out candidate is one extra `tvdbService.search`
+ * call against a rate-limited API. Trailing structural markers
+ * (kana-glued digits / fullwidth Roman numerals) live in
+ * `TRAILING_KANA_DIGIT_RE` / `TRAILING_KANA_ROMAN_RE` instead, where
+ * one regex absorbs the whole class without an extra search.
  *
  * Exported for unit tests so the relaxation order can be locked
  * without spinning up the DB / HTTP layers.
@@ -427,17 +446,6 @@ export function searchKeyCandidates(key: string): string[] {
     if (t && !out.includes(t)) out.push(t);
   };
   push(key);
-  // Strip fullwidth Roman-numeral season suffix. Only fullwidth (Ⅰ-Ⅹ,
-  // U+2160..U+2169) — ASCII `II`/`III` collides too often with real
-  // English titles (`Halo II`, `Civilization III`). Lookbehind keeps
-  // the kana/kanji preceding the suffix; lookahead requires
-  // whitespace or end-of-string so we don't slice into mid-token
-  // text. Whitespace runs left behind get collapsed.
-  const withoutRomanSeason = key
-    .replace(/(?<=[\u3040-\u30FF\u4E00-\u9FFF])[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+(?=[\s　]|$)/g, '')
-    .replace(/[\s　]+/g, ' ')
-    .trim();
-  push(withoutRomanSeason);
   const head = key.split(/\s+/)[0] ?? '';
   if (head.length >= 3) push(head);
   return out;
