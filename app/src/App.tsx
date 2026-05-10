@@ -414,6 +414,21 @@ export function App() {
   // when the user hits 「シリーズ予約を再開」 — without it, "シリーズを
   // 追加" would 409 (duplicate, since the disabled rule still occupies
   // the unique tvdbId slot in the rules table).
+  const handleResumeKeyword = async (ruleId: number) => {
+    const rule = rules.find((r) => r.id === ruleId);
+    if (!rule) {
+      pushToast('対応する自動予約ルールが見つかりません', 'err');
+      return;
+    }
+    try {
+      await api.rules.update(rule.id, { enabled: true });
+      await Promise.all([rulesR.refresh(), recordingsR.refresh()]);
+      pushToast(`自動予約ルール「${rule.keyword}」を再開しました`);
+    } catch (e) {
+      pushToast(`ルール再開失敗: ${(e as Error).message}`, 'err');
+    }
+  };
+
   const handleResumeSeries = async (tvdbId: number) => {
     const rule = rules.find((r) => r.kind === 'series' && r.tvdb?.id === tvdbId);
     if (!rule) {
@@ -649,6 +664,17 @@ export function App() {
   const disabledSeriesIdSet = new Set(
     rules.flatMap((r) => (!r.enabled && r.kind === 'series' && r.tvdb ? [r.tvdb.id] : []))
   );
+  // disabled なキーワードルール一覧。disabled ルールは recording を
+  // 作らない (有効化時に削除される) ので、recording.source 経由では
+  // 紐付けが取れず、GuidePanel 側で program.title.includes(keyword) +
+  // チャンネル制限の substring スキャンが必要。シリーズ側 (tvdb-id 1:1)
+  // と違い broad keyword の偽陽性リスクはあるが、再開アクションのボタン
+  // ラベルにキーワードを明示することで何を再開するか可視化する。
+  const disabledKeywordRules = useMemo(
+    () => rules.filter((r) => !r.enabled && r.kind === 'keyword'),
+    [rules],
+  );
+
   // 「この番組の予約を作ったキーワードルール」を programId から逆引きする
   // クロージャ。 recording.source = { kind:'rule', ruleId } を見ているので、
   // 文字列の総当たりではなく実データで一意特定できる。GuidePanel はこれを
@@ -908,6 +934,7 @@ export function App() {
           disabledSeriesIds={disabledSeriesIdSet}
           seriesRuleChannels={seriesRuleChannels}
           keywordRuleForProgram={keywordRuleForProgram}
+          disabledKeywordRules={disabledKeywordRules}
           recordingIdForProgram={recordingIdForProgram}
           onRefresh={async () => {
             // Surgical single-program refetch — keeps DebugDetailsModal
@@ -938,6 +965,7 @@ export function App() {
           onCreateSeriesLink={(tv, p, ch) => void handleCreateSeriesLink(tv, p, ch)}
           onUnsubscribeSeries={(tvdbId) => void handleUnsubscribeSeries(tvdbId)}
           onUnsubscribeKeyword={(ruleId) => void handleUnsubscribeKeyword(ruleId)}
+          onResumeKeyword={(ruleId) => void handleResumeKeyword(ruleId)}
           onResumeSeries={(tvdbId) => void handleResumeSeries(tvdbId)}
           onStopRecording={(recordingId) => void handleStopRecording(recordingId)}
           onSelectProgram={openModal}

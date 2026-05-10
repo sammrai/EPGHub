@@ -45,6 +45,14 @@ export interface GuidePanelProps {
    *  affordance never fires on a random title that happens to share a
    *  substring with a broad keyword (e.g. ニュース). */
   keywordRuleForProgram?: (programId: string) => Rule | null;
+  /** Disabled keyword rules. The modal scans these for one whose
+   *  `keyword` is a substring of `program.title` (and whose channel list
+   *  covers `program.ch`); when found, the action bar swaps "自動予約
+   *  ルール" → "ルール予約を再開" so the user re-enables the existing
+   *  rule instead of creating a duplicate. Disabled rules don't write
+   *  recording rows so the enabled-path's recording.source逆引きは
+   *  使えず、こちらだけは substring スキャンで判定する。 */
+  disabledKeywordRules?: Rule[];
   recordingIdForProgram?: (programId: string) => string | null;
   /** Called by the debug modal's 再マッチ button after a successful
    *  re-match so the parent re-fetches the schedule and propagates
@@ -57,6 +65,7 @@ export interface GuidePanelProps {
   onUnsubscribeSeries?: (tvdbId: number) => void;
   onUnsubscribeKeyword?: (ruleId: number) => void;
   onResumeSeries?: (tvdbId: number) => void;
+  onResumeKeyword?: (ruleId: number) => void;
   onStopRecording?: (recordingId: string) => void;
   onSelectProgram: (p: Program) => void;
 }
@@ -83,6 +92,7 @@ function GuidePanelInner({
   disabledSeriesIds,
   seriesRuleChannels,
   keywordRuleForProgram,
+  disabledKeywordRules,
   recordingIdForProgram,
   onRefresh,
   onClose,
@@ -92,6 +102,7 @@ function GuidePanelInner({
   onUnsubscribeSeries,
   onUnsubscribeKeyword,
   onResumeSeries,
+  onResumeKeyword,
   onStopRecording,
   onSelectProgram,
 }: InnerProps) {
@@ -220,6 +231,23 @@ function GuidePanelInner({
   const coveringKeywordRule: Rule | null = program.id
     ? keywordRuleForProgram?.(program.id) ?? null
     : null;
+
+  // disabled キーワードルールの被覆判定。disabled なルールは recording を
+  // 作らないので enabled 側の recording.source 経由では引けず、ここだけは
+  // substring + チャンネル制限の総当たりで拾う。複数該当した場合は最初の
+  // 1件 (再開アクションは ruleId 単位なのでモーダル再表示で残りも個別に
+  // 操作可能)。enabled の coveringKeywordRule が存在するときはそちらが
+  // 優先 — 解除/再開の二重ボタンを出さない。
+  const coveringDisabledKeywordRule = useMemo<Rule | null>(() => {
+    if (coveringKeywordRule) return null;
+    if (!disabledKeywordRules || disabledKeywordRules.length === 0) return null;
+    for (const r of disabledKeywordRules) {
+      if (!r.keyword || !program.title.includes(r.keyword)) continue;
+      if (r.channels.length === 0) return r;
+      if (r.channels.some((c) => channelKey(c) === programChKey)) return r;
+    }
+    return null;
+  }, [coveringKeywordRule, disabledKeywordRules, program.title, programChKey]);
 
   // 「ルール解除」ボタン横▼のプレビュー用、当該キーワードルールが向こう
   // 14日に拾う番組リスト。フロントの schedule 窓 (~10日) では足りない
@@ -384,10 +412,12 @@ function GuidePanelInner({
             ruleKeyword={ruleKeyword}
             ruleMatches={ruleMatches}
             coveringKeywordRule={coveringKeywordRule}
+            coveringDisabledKeywordRule={coveringDisabledKeywordRule}
             coveringRuleMatches={coveringRuleMatches}
             onReserve={onReserve}
             onCreateRule={onCreateRule}
             onUnsubscribeKeyword={onUnsubscribeKeyword}
+            onResumeKeyword={onResumeKeyword}
             onCreateSeriesLink={onCreateSeriesLink}
             onUnsubscribeSeries={onUnsubscribeSeries}
             onResumeSeries={onResumeSeries}
@@ -589,6 +619,10 @@ interface ActionBarProps {
   // この予約を作ったキーワードルール (recording.source.ruleId 由来)。
   // null = この番組はルール由来ではない (= 単発予約 or 未予約)。
   coveringKeywordRule: Rule | null;
+  // disabled キーワードルールが substring + ch でこの番組を被覆して
+  // いれば渡る。enabled 側 (coveringKeywordRule) と同時に立つことはなく、
+  // どちらかだけが non-null。slot2 を「ルール予約を再開」に変身させる。
+  coveringDisabledKeywordRule: Rule | null;
   // 上記ルールが向こう14日に拾う番組リスト (サーバ /rules/:id/matches)。
   // 「ルール解除」ボタン横▼のプレビューに使う。空配列 = 取得中 or 該当
   // ルール無しで、その場合プレビューはローカル schedule から仮表示する。
@@ -599,6 +633,7 @@ interface ActionBarProps {
   onUnsubscribeSeries?: (tvdbId: number) => void;
   onUnsubscribeKeyword?: (ruleId: number) => void;
   onResumeSeries?: (tvdbId: number) => void;
+  onResumeKeyword?: (ruleId: number) => void;
   onStopRecording?: (recordingId: string) => void;
 }
 
@@ -627,6 +662,7 @@ function ActionBar(props: ActionBarProps) {
     ruleKeyword,
     ruleMatches,
     coveringKeywordRule,
+    coveringDisabledKeywordRule,
     coveringRuleMatches,
     onReserve,
     onCreateRule,
@@ -634,6 +670,7 @@ function ActionBar(props: ActionBarProps) {
     onUnsubscribeSeries,
     onUnsubscribeKeyword,
     onResumeSeries,
+    onResumeKeyword,
     onStopRecording,
   } = props;
 
@@ -782,6 +819,20 @@ function ActionBar(props: ActionBarProps) {
             : undefined,
         };
       }
+      // disabled なルールがこの番組をカバーしているケース → シリーズ側
+      // の「シリーズ予約を再開 / 現在オフ」と対称な再開トグル。新規
+      // POST すると同じ keyword でルール被りになるリスクがあるので、
+      // 必ず既存ルールの enabled を true に切り替える経路を通す。
+      if (coveringDisabledKeywordRule) {
+        return {
+          title: `「${coveringDisabledKeywordRule.keyword}」のルールを再開`,
+          desc: '現在オフ',
+          kind: 'ghost',
+          onClick: onResumeKeyword
+            ? () => onResumeKeyword(coveringDisabledKeywordRule.id)
+            : undefined,
+        };
+      }
       // 単発予約済みなら追加の自動予約 CTA は隠す (取消が主役)。
       if (reserved) return null;
       return {
@@ -817,7 +868,7 @@ function ActionBar(props: ActionBarProps) {
   // no recurrence so they also opt out.
   const slot2Action:
     | 'series-add' | 'series-resume' | 'series-covered'
-    | 'keyword' | 'keyword-covered'
+    | 'keyword' | 'keyword-covered' | 'keyword-resume'
     | null =
     !slot2 || slot2Hidden || isMovie
       ? null
@@ -829,9 +880,11 @@ function ActionBar(props: ActionBarProps) {
             ? 'series-add'
             : !tvdb && coveringKeywordRule
               ? 'keyword-covered'
-              : !tvdb && !reserved
-                ? 'keyword'
-                : null;
+              : !tvdb && coveringDisabledKeywordRule
+                ? 'keyword-resume'
+                : !tvdb && !reserved
+                  ? 'keyword'
+                  : null;
 
   // Episodes feeding the preview popover. Series paths reuse the
   // tvdb-keyed program list (already deduped, full schedule horizon).
@@ -858,13 +911,28 @@ function ActionBar(props: ActionBarProps) {
       if (!kw) return [];
       return programs.filter((p) => p.title.includes(kw));
     }
+    if (slot2Action === 'keyword-resume' && coveringDisabledKeywordRule) {
+      // disabled ルールの「再開後に予約される番組」プレビュー。サーバ
+      // /rules/:id/matches は rulePredicate を通すが、predicate は
+      // enabled=false を弾くので呼ぶ意味がない。ここはローカル schedule の
+      // substring + チャンネル制限で簡易プレビューする (シリーズの
+      // series-resume が seriesEps を流すのと同じ温度感)。
+      const kw = coveringDisabledKeywordRule.keyword;
+      if (!kw) return [];
+      const allowed = coveringDisabledKeywordRule.channels;
+      return programs.filter((p) => {
+        if (!p.title.includes(kw)) return false;
+        if (allowed.length === 0) return true;
+        return allowed.some((c) => channelKey(c) === channelKey(p.ch));
+      });
+    }
     return [];
   })();
 
   const previewLabel =
     slot2Action === 'series-covered' || slot2Action === 'keyword-covered'
       ? '今後録画される番組'
-      : slot2Action === 'series-resume'
+      : slot2Action === 'series-resume' || slot2Action === 'keyword-resume'
         ? '再開後に予約される番組'
         : '予約される番組';
 
