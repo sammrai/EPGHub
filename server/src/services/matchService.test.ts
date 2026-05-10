@@ -522,6 +522,11 @@ const borderline: Case[] = [
     expected: 'ドラマ・よかれと思ってやったのに～男たちの 裁判～',
     note: 'Bare `ドラマ・` is NOT stripped — the lookbehind path only fires for prefix entries that embed `・` themselves (e.g. `アニメ[A-Z]・`). Generic `ドラマ` literal still requires `[\\s　]+` separator, preserving the historical normalization.',
   },
+  {
+    raw: 'アニメ　魔入りました！入間くん４（６）「音楽祭、本番！！」[字]',
+    expected: '魔入りました!入間くん',
+    note: 'Two coupled markers on one EPG title: the bare `アニメ　` block prefix (full-width-space separator, generic `アニメ` literal in BLOCK_PREFIXES + `[\\s　]+` separator in BLOCK_PREFIX_RE) and the trailing season digit `４` glued to kana `くん` (TRAILING_KANA_DIGIT_RE after the `（６）` daily-ep paren and `「音楽祭、本番！！」` subtitle quote get stripped). Together they reduce to the canonical TVDB title. Source: programs.id svc-3272102056_2026-05-15T10:00:00.000Z (issue #13).',
+  },
 ];
 
 const allCases: Case[] = [

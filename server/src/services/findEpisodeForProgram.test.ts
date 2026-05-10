@@ -525,6 +525,42 @@ describe('findEpisodeForProgram — あかね噺 thematic counter case', () => {
   });
 });
 
+describe('findEpisodeForProgram — 魔入りました！入間くん season-suffix case', () => {
+  // svc-3272102056_2026-05-15T10:00:00.000Z (issue #13). EPG title carries
+  // a bare `アニメ　` broadcaster prefix, a trailing season digit `４`
+  // glued to kana `くん`, the daily-ep paren `（６）`, and a quoted
+  // episode subtitle `「音楽祭、本番！！」`. The normalizer reduces the
+  // title to `魔入りました!入間くん` (matches TVDB id=369144 with score
+  // 1000); inside `findEpisodeForProgram` step 1's derived-subtitle
+  // candidate (`アニメ ４ 音楽祭、本番！！`) doesn't hit any episode name
+  // because it's contaminated by the leading `アニメ ４` residue, so step 2
+  // takes over: `parseTitleEpisodeNumber`'s zenkaku-paren branch picks
+  // up `（６）` → 6, and the highest-season tiebreaker among `e===6`
+  // candidates lands on S4E6. Locks in that this title resolves cleanly
+  // even when the show name is followed by a kana-glued season digit
+  // before the paren.
+  const IRUMA_EPISODES: Episode[] = [
+    { s: 1, e: 6, name: '魔界の一日体験', aired: '2019-11-09' },
+    { s: 4, e: 1, name: 'その先へ', aired: '2026-04-10' },
+    { s: 4, e: 2, name: '音楽祭、はじまる', aired: '2026-04-17' },
+    { s: 4, e: 3, name: '舞台裏', aired: '2026-04-24' },
+    { s: 4, e: 4, name: 'リハーサル', aired: '2026-05-01' },
+    { s: 4, e: 5, name: '前夜', aired: '2026-05-08' },
+    { s: 4, e: 6, name: '音楽祭、本番！！', aired: '2026-05-15' },
+    { s: 4, e: 7, name: 'TBA', aired: '2026-05-22' },
+  ];
+
+  test('アニメ　… ４（６）「音楽祭、本番！！」 → S4E6 via paren-N + latest-season tiebreaker', () => {
+    const hit = findEpisodeForProgram(
+      IRUMA_EPISODES,
+      '2026-05-15T10:00:00.000Z',
+      'アニメ\u3000魔入りました！入間くん４（６）「音楽祭、本番！！」[字]',
+      ['魔入りました！入間くん'],
+    );
+    assert.deepEqual(hit, { s: 4, e: 6, name: '音楽祭、本番！！' });
+  });
+});
+
 describe('findEpisodeForProgram — cumulative fallback', () => {
   test('ダンダダン #18 with S1=12, S2=6 → S2E6', () => {
     // The motivating case. Broadcaster numbers continuously across
