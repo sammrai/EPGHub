@@ -2376,6 +2376,45 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /rules/{id}/matches:
+    get:
+      tags:
+        - rules
+      summary: ルールが拾う番組
+      description: このルールが向こう14日間にマッチする予定の番組を返す。実際の予約を 作る前後どちらでも同じ結果になるよう ruleExpander
+        の rulePredicate を 直接使うので、recordings 表に出ているかどうかとは独立。
+      parameters:
+        - schema:
+            type:
+              - integer
+              - "null"
+            example: 1
+          required: false
+          in: path
+          name: id
+      responses:
+        "200":
+          description: マッチ番組一覧
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  matches:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Program"
+                    description: 当該ルールが向こう14日間に拾う番組 (最大 50 件)。rulePredicate で
+                      ngKeywords/skipReruns/チャンネル制限まで反映する。GuidePanel
+                      の「ルール解除」ボタン横▼で プレビューに使う。
+                required:
+                  - matches
+        "404":
+          description: 見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /tvdb/search:
     get:
       tags:

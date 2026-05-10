@@ -18,6 +18,7 @@ import type { ApiTvdbCastMember } from '../api/epghub';
 import type {
   Channel,
   Program,
+  Rule,
   TvdbEntry,
   TvdbSeries,
 } from '../data/types';
@@ -37,6 +38,13 @@ export interface GuidePanelProps {
    *  channel" so the modal can show two action buttons + a small hint
    *  instead of pretending the airing is auto-reserved. */
   seriesRuleChannels?: Map<number, string[]>;
+  /** Resolve the keyword rule that originally created the reservation
+   *  for `programId`, or null. Backed by `recording.source` (kind='rule',
+   *  ruleId) on the recordings list — only programs that are actually
+   *  reserved-by-rule resolve to a Rule, so the action bar's "ルール解除"
+   *  affordance never fires on a random title that happens to share a
+   *  substring with a broad keyword (e.g. ニュース). */
+  keywordRuleForProgram?: (programId: string) => Rule | null;
   recordingIdForProgram?: (programId: string) => string | null;
   /** Called by the debug modal's 再マッチ button after a successful
    *  re-match so the parent re-fetches the schedule and propagates
@@ -47,6 +55,7 @@ export interface GuidePanelProps {
   onCreateRule: (keyword: string, p: Program, channels?: string[]) => void;
   onCreateSeriesLink: (tvdb: TvdbSeries, p: Program, channels?: string[]) => void;
   onUnsubscribeSeries?: (tvdbId: number) => void;
+  onUnsubscribeKeyword?: (ruleId: number) => void;
   onResumeSeries?: (tvdbId: number) => void;
   onStopRecording?: (recordingId: string) => void;
   onSelectProgram: (p: Program) => void;
@@ -73,6 +82,7 @@ function GuidePanelInner({
   existingSeriesIds,
   disabledSeriesIds,
   seriesRuleChannels,
+  keywordRuleForProgram,
   recordingIdForProgram,
   onRefresh,
   onClose,
@@ -80,6 +90,7 @@ function GuidePanelInner({
   onCreateRule,
   onCreateSeriesLink,
   onUnsubscribeSeries,
+  onUnsubscribeKeyword,
   onResumeSeries,
   onStopRecording,
   onSelectProgram,
@@ -200,6 +211,45 @@ function GuidePanelInner({
   const apiRecordingId = program.id && recordingIdForProgram
     ? recordingIdForProgram(program.id)
     : null;
+
+  // 当該番組の予約レコーディング行が `source = { kind:'rule', ruleId }` を
+  // 持つなら、それを作ったキーワードルールを引く。ruleExpander が予約時
+  // にちゃんと紐付けて DB に書いているので、文字列の総当たりではなく
+  // 「この予約を作ったルールそのもの」を一意に特定できる。シリーズ予約の
+  // `coveredBySeriesRule` と意味的に対称な、実データ駆動の被覆判定。
+  const coveringKeywordRule: Rule | null = program.id
+    ? keywordRuleForProgram?.(program.id) ?? null
+    : null;
+
+  // 「ルール解除」ボタン横▼のプレビュー用、当該キーワードルールが向こう
+  // 14日に拾う番組リスト。フロントの schedule 窓 (~10日) では足りない
+  // ケースがあるのでサーバ /rules/:id/matches を叩く。ruleExpander の
+  // rulePredicate を使うので ngKeywords / skipReruns / channel 制限まで
+  // 反映される。
+  const coveringRuleId = coveringKeywordRule?.id ?? null;
+  const [coveringRuleMatches, setCoveringRuleMatches] = useState<Program[]>([]);
+  useEffect(() => {
+    if (coveringRuleId == null) {
+      setCoveringRuleMatches([]);
+      return;
+    }
+    let cancelled = false;
+    setCoveringRuleMatches([]);
+    api.rules
+      .matches(coveringRuleId)
+      .then((r) => {
+        if (cancelled) return;
+        setCoveringRuleMatches(
+          r.matches.map((p) => toProgram(p, new Set<string>(), new Date())),
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setCoveringRuleMatches([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [coveringRuleId]);
 
   const subtitle =
     isSeriesTvdb && program.tvdbSeason != null && program.tvdbEpisode != null
@@ -333,8 +383,11 @@ function GuidePanelInner({
             channels={channels}
             ruleKeyword={ruleKeyword}
             ruleMatches={ruleMatches}
+            coveringKeywordRule={coveringKeywordRule}
+            coveringRuleMatches={coveringRuleMatches}
             onReserve={onReserve}
             onCreateRule={onCreateRule}
+            onUnsubscribeKeyword={onUnsubscribeKeyword}
             onCreateSeriesLink={onCreateSeriesLink}
             onUnsubscribeSeries={onUnsubscribeSeries}
             onResumeSeries={onResumeSeries}
@@ -533,10 +586,18 @@ interface ActionBarProps {
   // フロントの schedule 窓を超えた範囲も含むので、プレビュー popover が
   // この回1件だけに見える問題を解消する。
   ruleMatches: Program[];
+  // この予約を作ったキーワードルール (recording.source.ruleId 由来)。
+  // null = この番組はルール由来ではない (= 単発予約 or 未予約)。
+  coveringKeywordRule: Rule | null;
+  // 上記ルールが向こう14日に拾う番組リスト (サーバ /rules/:id/matches)。
+  // 「ルール解除」ボタン横▼のプレビューに使う。空配列 = 取得中 or 該当
+  // ルール無しで、その場合プレビューはローカル schedule から仮表示する。
+  coveringRuleMatches: Program[];
   onReserve: (p: Program) => void;
   onCreateRule: (keyword: string, p: Program, channels?: string[]) => void;
   onCreateSeriesLink: (tvdb: TvdbSeries, p: Program, channels?: string[]) => void;
   onUnsubscribeSeries?: (tvdbId: number) => void;
+  onUnsubscribeKeyword?: (ruleId: number) => void;
   onResumeSeries?: (tvdbId: number) => void;
   onStopRecording?: (recordingId: string) => void;
 }
@@ -565,10 +626,13 @@ function ActionBar(props: ActionBarProps) {
     channels,
     ruleKeyword,
     ruleMatches,
+    coveringKeywordRule,
+    coveringRuleMatches,
     onReserve,
     onCreateRule,
     onCreateSeriesLink,
     onUnsubscribeSeries,
+    onUnsubscribeKeyword,
     onResumeSeries,
     onStopRecording,
   } = props;
@@ -597,7 +661,7 @@ function ActionBar(props: ActionBarProps) {
           : () => onReserve(program),
       };
     }
-    if (reserved && !coveredBySeriesRule) {
+    if (reserved && !coveredBySeriesRule && !coveringKeywordRule) {
       return {
         title: 'この回の予約取消',
         desc: '単発予約を解除',
@@ -611,6 +675,16 @@ function ActionBar(props: ActionBarProps) {
       return {
         title: 'この回の予約取消',
         desc: 'シリーズ予約は維持',
+        kind: 'danger',
+        onClick: () => onReserve(program),
+      };
+    }
+    if (reserved && coveringKeywordRule) {
+      // 自動予約ルール由来。この回だけキャンセルしても次回以降はルールが
+      // 拾い直すので、シリーズ予約と同じく「ルール予約は維持」と明示。
+      return {
+        title: 'この回の予約取消',
+        desc: 'ルール予約は維持',
         kind: 'danger',
         onClick: () => onReserve(program),
       };
@@ -694,9 +768,21 @@ function ActionBar(props: ActionBarProps) {
       };
     }
     if (!tvdb) {
-      // For non-TVDB programs, a single reservation already implies a
-      // separate keyword rule decision — collapse to one button when the
-      // user has reserved.
+      // この予約をキーワードルールが作ったケース → シリーズ予約解除と
+      // 同じ系統の「ルール解除」ボタンに変身。ボタン名にキーワードを
+      // 出すのは broad keyword (例: 「ニュース」) を消すと巻き添えが大きい
+      // ので、何を消すか一目で分かるようにしておく。
+      if (coveringKeywordRule) {
+        return {
+          title: `「${coveringKeywordRule.keyword}」のルール解除`,
+          desc: '今後の自動予約を停止',
+          kind: 'series',
+          onClick: onUnsubscribeKeyword
+            ? () => onUnsubscribeKeyword(coveringKeywordRule.id)
+            : undefined,
+        };
+      }
+      // 単発予約済みなら追加の自動予約 CTA は隠す (取消が主役)。
       if (reserved) return null;
       return {
         title: '自動予約ルール',
@@ -714,7 +800,8 @@ function ActionBar(props: ActionBarProps) {
   // so the user is really managing the series. Recording-in-progress
   // airings keep slot1 because that's where the stop button lives.
   const slot1Hidden =
-    (coveredBySeriesRule && !isRecordingNow) || (isPast && !isRecordingNow);
+    ((coveredBySeriesRule || !!coveringKeywordRule) && !isRecordingNow) ||
+    (isPast && !isRecordingNow);
   // While a recording is in progress, the only sensible slot1 is "停止";
   // nothing belongs in slot2 on top of that. Past airings: hide series-add
   // / cancel etc. — there's nothing to act on for an ended broadcast.
@@ -728,7 +815,10 @@ function ActionBar(props: ActionBarProps) {
   // (fallback substring match). The "他チャンネルで登録済み" variant
   // is excluded because its action is intentionally inert. Movies have
   // no recurrence so they also opt out.
-  const slot2Action: 'series-add' | 'series-resume' | 'series-covered' | 'keyword' | null =
+  const slot2Action:
+    | 'series-add' | 'series-resume' | 'series-covered'
+    | 'keyword' | 'keyword-covered'
+    | null =
     !slot2 || slot2Hidden || isMovie
       ? null
       : tvdb && tvdb.type === 'series' && coveredBySeriesRule
@@ -737,9 +827,11 @@ function ActionBar(props: ActionBarProps) {
           ? 'series-resume'
           : tvdb && tvdb.type === 'series' && !seriesRuledOnOtherChannel && !reserved
             ? 'series-add'
-            : !tvdb && !reserved
-              ? 'keyword'
-              : null;
+            : !tvdb && coveringKeywordRule
+              ? 'keyword-covered'
+              : !tvdb && !reserved
+                ? 'keyword'
+                : null;
 
   // Episodes feeding the preview popover. Series paths reuse the
   // tvdb-keyed program list (already deduped, full schedule horizon).
@@ -758,14 +850,23 @@ function ActionBar(props: ActionBarProps) {
       if (!effectiveKeyword) return [];
       return programs.filter((p) => p.title.includes(effectiveKeyword));
     }
+    if (slot2Action === 'keyword-covered' && coveringKeywordRule) {
+      // サーバ /rules/:id/matches の結果を優先 (14日窓 + rulePredicate ベース
+      // で正確)。届く前はローカル schedule の文字列マッチで仮表示する。
+      if (coveringRuleMatches.length > 0) return coveringRuleMatches;
+      const kw = coveringKeywordRule.keyword;
+      if (!kw) return [];
+      return programs.filter((p) => p.title.includes(kw));
+    }
     return [];
   })();
 
-  const previewLabel = slot2Action === 'series-covered'
-    ? '今後録画される番組'
-    : slot2Action === 'series-resume'
-      ? '再開後に予約される番組'
-      : '予約される番組';
+  const previewLabel =
+    slot2Action === 'series-covered' || slot2Action === 'keyword-covered'
+      ? '今後録画される番組'
+      : slot2Action === 'series-resume'
+        ? '再開後に予約される番組'
+        : '予約される番組';
 
   return (
     <div className="gp-actions">

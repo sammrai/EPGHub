@@ -143,6 +143,8 @@ export const api = {
       req<ApiRule>('POST', '/rules', body),
     update: (id: number, body: Partial<ApiRule>) => req<ApiRule>('PATCH', `/rules/${id}`, body),
     remove: (id: number) => req<void>('DELETE', `/rules/${id}`),
+    matches: (id: number) =>
+      req<{ matches: ApiProgram[] }>('GET', `/rules/${id}/matches`),
   },
   tvdb: {
     search: (q: string) => req<ApiTvdbEntry[]>('GET', `/tvdb/search?q=${encodeURIComponent(q)}`),

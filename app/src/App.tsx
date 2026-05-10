@@ -379,6 +379,21 @@ export function App() {
     }
   };
 
+  const handleUnsubscribeKeyword = async (ruleId: number) => {
+    const rule = rules.find((r) => r.id === ruleId);
+    if (!rule) {
+      pushToast('対応する自動予約ルールが見つかりません', 'err');
+      return;
+    }
+    try {
+      await api.rules.remove(rule.id);
+      await Promise.all([rulesR.refresh(), recordingsR.refresh()]);
+      pushToast(`自動予約ルール「${rule.keyword}」を解除しました`);
+    } catch (e) {
+      pushToast(`ルール解除失敗: ${(e as Error).message}`, 'err');
+    }
+  };
+
   const handleUnsubscribeSeries = async (tvdbId: number) => {
     const rule = rules.find((r) => r.kind === 'series' && r.tvdb?.id === tvdbId);
     if (!rule) {
@@ -634,6 +649,22 @@ export function App() {
   const disabledSeriesIdSet = new Set(
     rules.flatMap((r) => (!r.enabled && r.kind === 'series' && r.tvdb ? [r.tvdb.id] : []))
   );
+  // 「この番組の予約を作ったキーワードルール」を programId から逆引きする
+  // クロージャ。 recording.source = { kind:'rule', ruleId } を見ているので、
+  // 文字列の総当たりではなく実データで一意特定できる。GuidePanel はこれを
+  // 使って slot2 を「自動予約ルール解除」に変身させる (シリーズ予約の
+  // coveredBySeriesRule と意味的に対称)。
+  const keywordRuleForProgram = useCallback(
+    (programId: string) => {
+      const rec = (recordingsR.data ?? []).find((r) => r.programId === programId);
+      if (!rec) return null;
+      const src = rec.source;
+      if (src.kind !== 'rule') return null;
+      return rules.find((r) => r.id === src.ruleId) ?? null;
+    },
+    [recordingsR.data, rules],
+  );
+
   // Channel-aware view of the same data: tvdb id → channel list (empty
   // array = wildcard, covers every channel). When two rules exist for
   // the same TVDB id with different channel lists we union them; the
@@ -876,6 +907,7 @@ export function App() {
           existingSeriesIds={existingSeriesIdSet}
           disabledSeriesIds={disabledSeriesIdSet}
           seriesRuleChannels={seriesRuleChannels}
+          keywordRuleForProgram={keywordRuleForProgram}
           recordingIdForProgram={recordingIdForProgram}
           onRefresh={async () => {
             // Surgical single-program refetch — keeps DebugDetailsModal
@@ -905,6 +937,7 @@ export function App() {
           onCreateRule={(kw, p, ch) => void handleCreateRule(kw, p, ch)}
           onCreateSeriesLink={(tv, p, ch) => void handleCreateSeriesLink(tv, p, ch)}
           onUnsubscribeSeries={(tvdbId) => void handleUnsubscribeSeries(tvdbId)}
+          onUnsubscribeKeyword={(ruleId) => void handleUnsubscribeKeyword(ruleId)}
           onResumeSeries={(tvdbId) => void handleResumeSeries(tvdbId)}
           onStopRecording={(recordingId) => void handleStopRecording(recordingId)}
           onSelectProgram={openModal}

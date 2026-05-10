@@ -6,9 +6,11 @@ import {
   RuleSchema,
   UpdateRuleSchema,
 } from '../schemas/rule.ts';
+import { ProgramSchema } from '../schemas/program.ts';
 import { ErrorSchema } from '../schemas/common.ts';
 import { ruleService, RuleConflictError } from '../services/ruleService.ts';
-import { expandRules } from '../services/ruleExpander.ts';
+import { expandRules, rulePredicate } from '../services/ruleExpander.ts';
+import { programService } from '../services/programService.ts';
 
 export const rulesRouter = new OpenAPIHono();
 
@@ -97,6 +99,35 @@ const remove = createRoute({
   },
 });
 
+const RULE_MATCHES_HORIZON_DAYS = 14;
+const RULE_MATCHES_MAX = 50;
+
+const RuleMatchesResponse = z.object({
+  matches: z.array(ProgramSchema).openapi({
+    description:
+      `当該ルールが向こう${RULE_MATCHES_HORIZON_DAYS}日間に拾う番組 ` +
+      `(最大 ${RULE_MATCHES_MAX} 件)。rulePredicate で ngKeywords/skipReruns/` +
+      'チャンネル制限まで反映する。GuidePanel の「ルール解除」ボタン横▼で ' +
+      'プレビューに使う。',
+  }),
+});
+
+const matches = createRoute({
+  method: 'get',
+  path: '/rules/{id}/matches',
+  tags: ['rules'],
+  summary: 'ルールが拾う番組',
+  description:
+    'このルールが向こう14日間にマッチする予定の番組を返す。実際の予約を ' +
+    '作る前後どちらでも同じ結果になるよう ruleExpander の rulePredicate を ' +
+    '直接使うので、recordings 表に出ているかどうかとは独立。',
+  request: { params: IdParam },
+  responses: {
+    200: { description: 'マッチ番組一覧', content: { 'application/json': { schema: RuleMatchesResponse } } },
+    404: { description: '見つからない', content: { 'application/json': { schema: ErrorSchema } } },
+  },
+});
+
 rulesRouter.openapi(list, async (c) => c.json(await ruleService.list(), 200));
 
 rulesRouter.openapi(expand, async (c) => {
@@ -165,4 +196,23 @@ rulesRouter.openapi(remove, async (c) => {
     return c.json({ code: 'rule.not_found', message: 'ルールが見つかりません' }, 404);
   }
   return c.body(null, 204);
+});
+
+rulesRouter.openapi(matches, async (c) => {
+  const { id } = c.req.valid('param');
+  const rule = await ruleService.findById(id);
+  if (!rule) {
+    return c.json({ code: 'rule.not_found', message: 'ルールが見つかりません' }, 404);
+  }
+  const now = Date.now();
+  const horizonMs = now + RULE_MATCHES_HORIZON_DAYS * 24 * 60 * 60 * 1000;
+  const upcoming = await programService.listInRange(now, horizonMs);
+  const hits: typeof upcoming = [];
+  for (const p of upcoming) {
+    if (rulePredicate(rule, p, now)) {
+      hits.push(p);
+      if (hits.length >= RULE_MATCHES_MAX) break;
+    }
+  }
+  return c.json({ matches: hits }, 200);
 });

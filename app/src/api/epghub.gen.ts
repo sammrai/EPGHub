@@ -1045,6 +1045,59 @@ export interface paths {
         };
         trace?: never;
     };
+    "/rules/{id}/matches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * ルールが拾う番組
+         * @description このルールが向こう14日間にマッチする予定の番組を返す。実際の予約を 作る前後どちらでも同じ結果になるよう ruleExpander の rulePredicate を 直接使うので、recordings 表に出ているかどうかとは独立。
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: number | null;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description マッチ番組一覧 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @description 当該ルールが向こう14日間に拾う番組 (最大 50 件)。rulePredicate で ngKeywords/skipReruns/チャンネル制限まで反映する。GuidePanel の「ルール解除」ボタン横▼で プレビューに使う。 */
+                            matches: components["schemas"]["Program"][];
+                        };
+                    };
+                };
+                /** @description 見つからない */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tvdb/search": {
         parameters: {
             query?: never;
