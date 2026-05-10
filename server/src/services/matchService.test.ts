@@ -527,6 +527,26 @@ const borderline: Case[] = [
     expected: '魔入りました!入間くん',
     note: 'Two coupled markers on one EPG title: the bare `アニメ　` block prefix (full-width-space separator, generic `アニメ` literal in BLOCK_PREFIXES + `[\\s　]+` separator in BLOCK_PREFIX_RE) and the trailing season digit `４` glued to kana `くん` (TRAILING_KANA_DIGIT_RE after the `（６）` daily-ep paren and `「音楽祭、本番！！」` subtitle quote get stripped). Together they reduce to the canonical TVDB title. Source: programs.id svc-3272102056_2026-05-15T10:00:00.000Z (issue #13).',
   },
+  {
+    raw: '本好きの下剋上　領主の養女　第六章「フェシュピールコンサート」[字][デ]',
+    expected: '本好きの下剋上 領主の養女',
+    note: 'Generic `第N+kanji` cut: `章` is not in the historical closed-counter list (`期|シリーズ|部|話|回|夜|局|クール|食目|週`) but is now caught by the open-class branch, gated by a structural-boundary lookahead (here: `「`). Sibling shape of `輪`/`席`/`食目`/`羽`/`集`. Source: programs.id svc-3272502088_2026-05-16T08:30:00.000Z (issue #14).',
+  },
+  {
+    raw: 'アニメ　ニワトリ・ファイター　第六羽',
+    expected: 'ニワトリ・ファイター',
+    note: 'Open-class `第N<kanji>` cut where the boundary is end-of-string. `羽` is the bird counter — same kanji-counter shape as `章` from issue #14, generalised so future shows that pick a fresh thematic glyph just work without code changes.',
+  },
+  {
+    raw: '第一三共ヘルスケアダイレクトテレビショッピング',
+    expected: '第一三共ヘルスケアダイレクトテレビショッピング',
+    note: 'Negative test for the generic `第N+kanji` cut: `第一三共` is the company name Daiichi Sankyo, not a structural marker. Preserved by (a) the kanji-digit negative lookahead so `三` (a kanji-digit char) cannot itself be the counter and (b) the structural-boundary lookahead which rejects `共` followed by another kanji `ヘ`-prefixed katakana run.',
+  },
+  {
+    raw: '国会中継「参議院決算委員会質疑」　～参議院第１委員会室から中継～[字]',
+    expected: '国会中継 ～参議院第1委員会室から中継～',
+    note: 'Negative test for the open-class branch: `第1委員会室` is a Diet committee room name. `委` is open-class but the boundary lookahead rejects it because the next char is the kanji `員`, not whitespace/quote/end. Preserves the existing normalization.',
+  },
 ];
 
 const allCases: Case[] = [

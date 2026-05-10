@@ -525,6 +525,106 @@ describe('findEpisodeForProgram — あかね噺 thematic counter case', () => {
   });
 });
 
+describe('findEpisodeForProgram — generic 第N+kanji counter (issue #14)', () => {
+  // svc-3272502088_2026-05-16T08:30:00.000Z (issue #14). 本好きの下剋上 uses
+  // 「第N章」 ("Nth chapter") as a thematic per-airing episode counter — same
+  // shape as 第N話/回/夜/局/輪/席 but with another show-themed glyph. Rather
+  // than enumerate every glyph that broadcasters invent (`輪`, `食目`, `席`,
+  // `章`, `羽`, `集`, …), the parser now accepts ANY single-kanji counter
+  // generically when followed by a structural boundary (whitespace, quote
+  // opener, bracket, or end-of-string), with explicit blocks for known
+  // false-positive kanji (`位/戦/弾/番/号/代/国/人/本/個`) and for kanji-
+  // digits (so `第一三共` doesn't read `三` as the counter). This test locks
+  // in the open-class shape against future regressions.
+  const HONZUKI_EPISODES: Episode[] = [
+    { s: 1, e: 1, name: 'Episode 1' },
+    { s: 1, e: 2, name: 'Episode 2' },
+    { s: 1, e: 3, name: 'Episode 3' },
+    { s: 1, e: 4, name: 'Episode 4' },
+    { s: 1, e: 5, name: '演奏会の準備' },
+    { s: 1, e: 6, name: 'フェシュピールコンサート' },
+    { s: 1, e: 7, name: 'TBA' },
+  ];
+
+  test('第六章「フェシュピールコンサート」 → S1E6 via subtitle name match', () => {
+    // Subtitle wins step 1 even before we get to title-parsed N — the new
+    // strip-rules in deriveEpisodeSubtitle drop `第六章` so the candidate
+    // is just `フェシュピールコンサート`, which matches the episode name.
+    const hit = findEpisodeForProgram(
+      HONZUKI_EPISODES,
+      '2026-05-16T08:30:00.000Z',
+      '本好きの下剋上\u3000領主の養女\u3000第六章「フェシュピールコンサート」[字][デ]',
+      ['本好きの下剋上 領主の養女'],
+    );
+    assert.deepEqual(hit, { s: 1, e: 6, name: 'フェシュピールコンサート' });
+  });
+
+  test('第六章 alone (no subtitle hit) → S1E6 via parsed episode number', () => {
+    // When the subtitle doesn't match any episode name, step 2's
+    // parseTitleEpisodeNumber kicks in and now accepts `第N章` generically.
+    const hit = findEpisodeForProgram(
+      HONZUKI_EPISODES,
+      '2026-05-16T08:30:00.000Z',
+      '本好きの下剋上\u3000領主の養女\u3000第六章「未知の副題」[字][デ]',
+      ['本好きの下剋上 領主の養女'],
+    );
+    assert.equal(hit?.s, 1);
+    assert.equal(hit?.e, 6);
+  });
+
+  test('第六羽 (ニワトリ・ファイター bird-counter) → S1E6 via parsed episode number', () => {
+    // Same generic-counter path: `羽` is the bird counter and should fall
+    // through the open-class branch to e=6.
+    const list: Episode[] = [...eps(1, 7, 'S1')];
+    const hit = findEpisodeForProgram(
+      list,
+      SOME_START,
+      'アニメ\u3000ニワトリ・ファイター\u3000第六羽',
+      ['ニワトリ・ファイター'],
+    );
+    assert.deepEqual(hit, { s: 1, e: 6, name: 'S1 6' });
+  });
+
+  test('第N部 (season selector) is NOT treated as an episode index', () => {
+    // `第2部` is a season/part marker, not an episode — when the title
+    // carries both `第2部` and `第1話`, the parser must skip `部` and
+    // resolve to e=1.
+    const list: Episode[] = [
+      { s: 1, e: 1, name: 'P1E1' },
+      { s: 2, e: 1, name: '帰って来た桜吹雪' },
+    ];
+    const hit = findEpisodeForProgram(
+      list,
+      SOME_START,
+      '名奉行 遠山の金さん 第2部\u3000第１話\u3000「帰って来た桜吹雪」',
+      ['名奉行 遠山の金さん'],
+    );
+    // Subtitle pins it; the underlying point is that `parseTitleEpisodeNumber`
+    // also returns 1 (not 2) here.
+    assert.deepEqual(hit, { s: 2, e: 1, name: '帰って来た桜吹雪' });
+  });
+
+  test('第N位 / 第N戦 / 交響曲第N番 are NOT treated as episode indices', () => {
+    // Count-noun false-positives blocked by CUT_NON_COUNTER_KANJI_RE — a
+    // title with no real episode marker should fall through to aired-day
+    // matching, not get tricked by `第3位` etc.
+    const list: Episode[] = [
+      { s: 1, e: 3, aired: '2026-05-09', name: 'aired hit' },
+    ];
+    const cases = [
+      'ランキング　第3位は驚きの一品',
+      'スーパーGT第2戦3時間レース',
+      '交響曲第2番「鐘」',
+    ];
+    for (const title of cases) {
+      const hit = findEpisodeForProgram(list, SOME_START, title);
+      // None of these should resolve via parseTitleEpisodeNumber. With
+      // SOME_START on 2026-05-09, the aired-day fallback catches e=3.
+      assert.equal(hit?.e, 3, `unexpected hit for "${title}"`);
+    }
+  });
+});
+
 describe('findEpisodeForProgram — 魔入りました！入間くん season-suffix case', () => {
   // svc-3272102056_2026-05-15T10:00:00.000Z (issue #13). EPG title carries
   // a bare `アニメ　` broadcaster prefix, a trailing season digit `４`

@@ -64,8 +64,54 @@ const HASH_EP_RE = /\s*[#♯]\s*\d+\s*/g;
 // sees `第N話`, `Season2`, or `#4`, everything after is treated as
 // episode-specific metadata. No `\b` because `期/話/回/etc.` aren't word
 // characters in JS regex.
-const CUT_AT_SEASON_RE =
-  /[\s　]*(?:\d+(?:st|nd|rd|th)\s*[Ss]eason|[Ss]eason\s*\d+|シーズン\s*\d+|第\s*[0-9一二三四五六七八九十百千]+\s*(?:期|シリーズ|部|話|回|夜|局|輪|席|食目|クール|週)|[#♯]\s*\d+|\d+\s*回戦).*$/;
+//
+// The `第N<kanji>` branch accepts kanji counters in two tiers:
+//
+//   A. CLOSED_COUNTERS — historically-known structural markers
+//      (`期|シリーズ|部|話|回|夜|局|クール|食目|週`). Match without any
+//      boundary requirement so `第500回定期公演` still cuts (existing
+//      behavior, regression-free).
+//
+//   B. Open class `[\u4E00-\u9FFF]` — any single kanji, gated by:
+//      - Negative lookahead CUT_NON_COUNTER_KANJI_RE (false-positive nouns:
+//        `第3戦` tournament, `第五人格` game, `交響曲第2番` music piece,
+//        `第1号/代/国/人/本/個`).
+//      - Negative lookahead against KANJI_DIGIT_CHARS so `第一三共` (Daiichi
+//        Sankyo) doesn't read `三` as the counter when it's actually the
+//        tail of a kanji compound.
+//      - Positive lookahead `BOUNDARY_AFTER_COUNTER_RE` requiring whitespace,
+//        quote opener, bracket, or end-of-string after the counter, so
+//        `第N委員会室` (`委` followed by `員`) and `第Nロケ` are not
+//        consumed.
+//
+//   Together these subsume the previous closed list (`輪|席|章|羽|集|…`)
+//   without enumerating every show-themed glyph one-by-one. New shows that
+//   invent fresh thematic counters (`第N<glyph>`) Just Work as long as the
+//   broadcaster follows the standard "counter-then-quoted-subtitle" shape.
+const CUT_NON_COUNTER_KANJI_RE = /(?:位|戦|弾|番|号|代|国|人|本|個)/;
+const CUT_CLOSED_COUNTERS_RE = /(?:期|シリーズ|部|話|回|夜|局|クール|食目|週)/;
+// Boundary that follows an open-class kanji counter. `[` / `［` cover ASCII
+// / fullwidth bracket runs (`第六章[字]`); `「『」』` are quote openers and
+// closers (we accept either side, since some broadcasters write the
+// counter inside the quoted segment); `〔【` are NHK / OBS bracket
+// variants. Whitespace + end-of-string round it out.
+const BOUNDARY_AFTER_COUNTER_RE = /(?=[\s　「『」』\[［【〔]|$)/;
+const CUT_AT_SEASON_RE = new RegExp(
+  '[\\s　]*(?:' +
+    '\\d+(?:st|nd|rd|th)\\s*[Ss]eason' +
+    '|[Ss]eason\\s*\\d+' +
+    '|シーズン\\s*\\d+' +
+    '|第\\s*[0-9一二三四五六七八九十百千]+\\s*' +
+      '(?:' +
+        CUT_CLOSED_COUNTERS_RE.source +
+        '|(?!' + CUT_NON_COUNTER_KANJI_RE.source +
+          '|[0-9一二三四五六七八九十百千])' +
+        '[\\u4E00-\\u9FFF]' + BOUNDARY_AFTER_COUNTER_RE.source +
+      ')' +
+    '|[#♯]\\s*\\d+' +
+    '|\\d+\\s*回戦' +
+  ').*$'
+);
 
 // Also cut a naked "N話" / "N回" / "N食目" when preceded by whitespace —
 // used for `４話　本厚木のバーニャカウダ` (broadcaster drops the 第 prefix)
@@ -735,8 +781,28 @@ const KANJI_DIGIT_MAP: Record<string, number> = {
   '百': 100,
 };
 const KANJI_DIGIT_CHARS = Object.keys(KANJI_DIGIT_MAP).join('');
+
+// Episode-number parsing uses the same dual-tier approach as
+// CUT_AT_SEASON_RE — see that comment for the full rationale. The
+// difference is that the parser's closed set is narrower: it excludes
+// season selectors (`期|部|シリーズ|クール|週`) because those identify a
+// season, not an episode index. `輪|席|章|羽|集` and any other show-themed
+// glyph fall through to the open class with the boundary lookahead.
+const PARSE_CLOSED_COUNTERS_RE = /(?:話|回|夜|局|食目)/;
+const PARSE_OPEN_COUNTER_BODY =
+  '(?!' + CUT_NON_COUNTER_KANJI_RE.source +
+    '|期|部|週|シリーズ|クール|' +
+    `[${KANJI_DIGIT_CHARS}])` +
+  '[\\u4E00-\\u9FFF]' + BOUNDARY_AFTER_COUNTER_RE.source;
+const TITLE_EP_DIGIT_RE = new RegExp(
+  '第\\s*(\\d+)\\s*(?:' +
+    PARSE_CLOSED_COUNTERS_RE.source + '|' + PARSE_OPEN_COUNTER_BODY +
+  ')'
+);
 const KANJI_NUMBER_RE = new RegExp(
-  `第\\s*([${KANJI_DIGIT_CHARS}]+)\\s*(?:話|回|夜|局|輪|席|食目)`
+  `第\\s*([${KANJI_DIGIT_CHARS}]+)\\s*(?:` +
+    PARSE_CLOSED_COUNTERS_RE.source + '|' + PARSE_OPEN_COUNTER_BODY +
+  ')'
 );
 
 function parseTitleEpisodeNumber(title: string): number | null {
@@ -747,10 +813,11 @@ function parseTitleEpisodeNumber(title: string): number | null {
   // #N / ＃N variants.
   const hashM = norm.match(/[#＃]\s*(\d+)/);
   if (hashM) return Number(hashM[1]);
-  // 第N話 / 第N回 (ASCII digits only; kanji below).
-  const kaM = norm.match(/第\s*(\d+)\s*(?:話|回|夜|局|輪|席|食目)/);
+  // 第N<kanji-counter> with ASCII digits — generic match, see comment on
+  // TITLE_EP_DIGIT_RE for the blocklist.
+  const kaM = norm.match(TITLE_EP_DIGIT_RE);
   if (kaM) return Number(kaM[1]);
-  // 第N話 with kanji or daiji digits (limited to 0-99 for episode counts).
+  // 第N<kanji-counter> with kanji / 大字 digits (limited to 0-99).
   const kanjiM = norm.match(KANJI_NUMBER_RE);
   if (kanjiM) return kanjiToInt(kanjiM[1]);
   // `ep 3` / `Ep.3`.
@@ -854,14 +921,21 @@ function deriveEpisodeSubtitle(programTitle: string, showTitles: string[]): stri
   // parseTitleEpisodeNumber when needed.
   s = s.replace(/[（(][^）)]*[)）]/g, ' ');
 
-  // Episode markers — `#N`, `＃N`, `第N話/回/夜/局/輪/席/週/期/部/食目`
-  // (ASCII / zenkaku / kanji / 大字 digits all covered). 食目 is a
-  // multi-char suffix so it goes through alternation rather than the
-  // single-char class.
+  // Episode markers — `#N`, `＃N`, `第N<counter>`. Mirrors the CUT_AT_SEASON
+  // tiered structure: closed counters (incl. season selectors `期/部/週/
+  // シリーズ/クール`) strip without boundary; open-class kanji strips with
+  // a boundary after to avoid eating compound nouns. The strip is broader
+  // than the parse blocklist because even structural `第N期/部/週` is
+  // show-name metadata that doesn't belong in a subtitle candidate.
   s = s.replace(/[#＃♯]\s*[\d０-９]+/g, ' ');
   s = s.replace(
     new RegExp(
-      `第\\s*[\\d０-９${KANJI_DIGIT_CHARS}]+\\s*(?:[話回夜局輪席週期部]|食目)`,
+      '第\\s*[\\d０-９' + KANJI_DIGIT_CHARS + ']+\\s*(?:' +
+        CUT_CLOSED_COUNTERS_RE.source +
+        '|(?!' + CUT_NON_COUNTER_KANJI_RE.source +
+          '|[\\d０-９' + KANJI_DIGIT_CHARS + '])' +
+        '[\\u4E00-\\u9FFF]' + BOUNDARY_AFTER_COUNTER_RE.source +
+      ')',
       'g',
     ),
     ' '
