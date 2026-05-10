@@ -130,6 +130,44 @@ function GuidePanelInner({
   // inspectable from the new GuidePanel too.
   const [showDebug, setShowDebug] = useState(false);
 
+  // 「自動予約ルール」ボタン用の推定キーワードと、そのキーワードでヒット
+  // する未来番組リスト。両方サーバ側 (matchService の CUT_AT_* 正規表現 +
+  // 件数判定) で計算する。`matches` はフロントの schedule 窓を超えた範囲
+  // (典型: 来週の同番組) も含むので、プレビュー popover の「予約される
+  // 番組」がこの回1件だけに見える問題を解消する。届くまでは title.slice
+  // フォールバックで仮表示。
+  const [ruleKeyword, setRuleKeyword] = useState<string | null>(null);
+  const [ruleMatches, setRuleMatches] = useState<Program[]>([]);
+  useEffect(() => {
+    if (!program.id) {
+      setRuleKeyword(null);
+      setRuleMatches([]);
+      return;
+    }
+    let cancelled = false;
+    setRuleKeyword(null);
+    setRuleMatches([]);
+    api.programs
+      .ruleKeyword(program.id)
+      .then((r) => {
+        if (cancelled) return;
+        setRuleKeyword(r.keyword);
+        // server-wide matches を Program 形に揃える。reservedIds は要らない
+        // (プレビューは titel/time/ch しか描画しない) ので空 Set で OK。
+        setRuleMatches(
+          r.matches.map((p) => toProgram(p, new Set<string>(), new Date())),
+        );
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setRuleKeyword(null);
+        setRuleMatches([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [program.id]);
+
   // Single source of truth — `program.rec` is set by toProgram() on every
   // refresh against the global recordings list. Using a view-scoped
   // `reservedIds` Set here misses deep-linked programs outside the loaded
@@ -158,6 +196,7 @@ function GuidePanelInner({
       )
     : [];
   const isLive = toMin(program.start) <= MOCK_NOW_MIN && toMin(program.end) > MOCK_NOW_MIN;
+  const isPast = !!program.endAt && Date.parse(program.endAt) < Date.now();
   const apiRecordingId = program.id && recordingIdForProgram
     ? recordingIdForProgram(program.id)
     : null;
@@ -280,6 +319,7 @@ function GuidePanelInner({
             isMovie={isMovie}
             isSeriesTvdb={isSeriesTvdb}
             isLive={isLive}
+            isPast={isPast}
             reserved={reserved}
             coveredBySeriesRule={coveredBySeriesRule}
             seriesRuleDisabled={
@@ -291,6 +331,8 @@ function GuidePanelInner({
             seriesEps={seriesEps}
             programs={programs}
             channels={channels}
+            ruleKeyword={ruleKeyword}
+            ruleMatches={ruleMatches}
             onReserve={onReserve}
             onCreateRule={onCreateRule}
             onCreateSeriesLink={onCreateSeriesLink}
@@ -298,7 +340,7 @@ function GuidePanelInner({
             onResumeSeries={onResumeSeries}
             onStopRecording={onStopRecording}
           />
-          {!reserved && !coveredBySeriesRule && (
+          {!reserved && !coveredBySeriesRule && !isPast && (
             <ReserveOutcome
               tvdb={tvdb}
               seriesAlreadyRuled={
@@ -456,6 +498,7 @@ interface ActionBarProps {
   isMovie: boolean;
   isSeriesTvdb: boolean;
   isLive: boolean;
+  isPast: boolean;
   reserved: boolean;
   coveredBySeriesRule: boolean;
   // True when a series rule for this tvdb exists but is currently
@@ -482,6 +525,14 @@ interface ActionBarProps {
   // it would catch.
   programs: Program[];
   channels: Channel[];
+  // Server-derived auto-rule keyword (件数判定込み)。null の間は title.slice
+  // フォールバック、解決後は「Ｎスタ」など正しい候補。詳細は GuidePanel
+  // 側の useEffect (api.programs.ruleKeyword) を参照。
+  ruleKeyword: string | null;
+  // 同 API の `matches` フィールド: 推定キーワードでヒットする未来番組。
+  // フロントの schedule 窓を超えた範囲も含むので、プレビュー popover が
+  // この回1件だけに見える問題を解消する。
+  ruleMatches: Program[];
   onReserve: (p: Program) => void;
   onCreateRule: (keyword: string, p: Program, channels?: string[]) => void;
   onCreateSeriesLink: (tvdb: TvdbSeries, p: Program, channels?: string[]) => void;
@@ -502,6 +553,7 @@ function ActionBar(props: ActionBarProps) {
     isMovie,
     isSeriesTvdb,
     isLive,
+    isPast,
     reserved,
     coveredBySeriesRule,
     seriesRuleDisabled,
@@ -511,6 +563,8 @@ function ActionBar(props: ActionBarProps) {
     seriesEps,
     programs,
     channels,
+    ruleKeyword,
+    ruleMatches,
     onReserve,
     onCreateRule,
     onCreateSeriesLink,
@@ -518,6 +572,11 @@ function ActionBar(props: ActionBarProps) {
     onResumeSeries,
     onStopRecording,
   } = props;
+
+  // サーバの推定キーワードが未到着なら最アグレッシブな先頭スライスで仮表示。
+  // 実害は preview popover が早めに小さい候補で動く程度で、ボタン押下時には
+  // 大抵 ruleKeyword が解決済み。
+  const effectiveKeyword = ruleKeyword ?? program.title.slice(0, 14).trim();
 
   // --- Slot 1: this-airing (single recording / live stop) -----------------
   const isRecordingNow = !!program.recording || isLive;
@@ -643,7 +702,7 @@ function ActionBar(props: ActionBarProps) {
         title: '自動予約ルール',
         desc: '同じ番組を今後も自動録画',
         kind: 'ghost',
-        onClick: () => onCreateRule(program.title.slice(0, 14), program, [program.ch]),
+        onClick: () => onCreateRule(effectiveKeyword, program, [program.ch]),
       };
     }
     return null;
@@ -654,10 +713,12 @@ function ActionBar(props: ActionBarProps) {
   // covers the airing (the rule will just re-expand a fresh recording),
   // so the user is really managing the series. Recording-in-progress
   // airings keep slot1 because that's where the stop button lives.
-  const slot1Hidden = coveredBySeriesRule && !isRecordingNow;
+  const slot1Hidden =
+    (coveredBySeriesRule && !isRecordingNow) || (isPast && !isRecordingNow);
   // While a recording is in progress, the only sensible slot1 is "停止";
-  // nothing belongs in slot2 on top of that.
-  const slot2Hidden = isRecordingNow;
+  // nothing belongs in slot2 on top of that. Past airings: hide series-add
+  // / cancel etc. — there's nothing to act on for an ended broadcast.
+  const slot2Hidden = isRecordingNow || isPast;
 
   // Slot 2 gets a split chevron so the user can preview which airings
   // the underlying rule would catch. The preview is offered for every
@@ -689,9 +750,13 @@ function ActionBar(props: ActionBarProps) {
       return seriesEps;
     }
     if (slot2Action === 'keyword') {
-      const keyword = program.title.slice(0, 14).trim();
-      if (!keyword) return [];
-      return programs.filter((p) => p.title.includes(keyword));
+      // サーバ側で 14 日窓を見て filter 済みの結果を優先。届く前は
+      // フロントのロード済み schedule から仮で出しておく (深夜に開いた
+      // 直後など、まだ ruleKeyword 未着の瞬間にプレビューが空にならない
+      // ようにするためのフォールバック)。
+      if (ruleMatches.length > 0) return ruleMatches;
+      if (!effectiveKeyword) return [];
+      return programs.filter((p) => p.title.includes(effectiveKeyword));
     }
     return [];
   })();

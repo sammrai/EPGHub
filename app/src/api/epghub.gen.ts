@@ -416,6 +416,61 @@ export interface paths {
         };
         trace?: never;
     };
+    "/programs/{id}/rule-keyword": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 自動予約ルール用キーワード推定
+         * @description 番組タイトルを自然な切れ目 (「『」、▽◆、`[xxx]　`、`第N話`/`#N` 等) で分割した候補のうち、向こう14日間の番組表で2件以上ヒットする最長の候補を返す。いずれも閾値に届かない場合は最も短い (=最アグレッシブな) 候補を返す。`matches` は推定キーワードでヒットした未来番組リスト (フロントのプレビューにそのまま流せる)。
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 推定キーワード */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** @example Ｎスタ */
+                            keyword: string;
+                            /** @description 推定キーワードでヒットした向こう14日間の番組 (最大 50 件)。プレビュー UI の「予約される番組」リストにそのまま使える。 */
+                            matches: components["schemas"]["Program"][];
+                        };
+                    };
+                };
+                /** @description 番組が見つからない */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/recordings": {
         parameters: {
             query?: never;

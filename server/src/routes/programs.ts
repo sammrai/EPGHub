@@ -4,7 +4,7 @@ import { ProgramSchema } from '../schemas/program.ts';
 import { TvdbEntrySchema } from '../schemas/tvdb.ts';
 import { ErrorSchema } from '../schemas/common.ts';
 import { programService } from '../services/programService.ts';
-import { matchService } from '../services/matchService.ts';
+import { matchService, suggestRuleKeyword } from '../services/matchService.ts';
 
 export const programsRouter = new OpenAPIHono();
 
@@ -178,4 +178,59 @@ programsRouter.openapi(setEpisode, async (c) => {
   const updated = await programService.findById(id);
   if (!updated) return c.json({ code: 'programs.not_found', message: '該当なし' }, 404);
   return c.json(updated, 200);
+});
+
+// --- GET /programs/:id/rule-keyword -------------------------------------
+// 自動予約ルール作成時に使うキーワードを推定する。タイトルを自然な切れ目
+// で切った候補のうち、向こう14日間の番組表で2件以上ヒットする最長候補を
+// 返す (=この回限りのサブタイ込みではなく、シリーズ名単位に揃える)。
+
+const RULE_KEYWORD_HORIZON_DAYS = 14;
+// プレビュー popover が一度に出す行数のキャップ。シリーズ毎日放映でも
+// 2週間 = 14件、週次なら 2件しか並ばないので、過剰でない上限。
+const RULE_KEYWORD_PREVIEW_MAX = 50;
+
+const RuleKeywordResponse = z.object({
+  keyword: z.string().openapi({ example: 'Ｎスタ' }),
+  matches: z.array(ProgramSchema).openapi({
+    description:
+      '推定キーワードでヒットした向こう' +
+      `${RULE_KEYWORD_HORIZON_DAYS}日間の番組 (最大 ${RULE_KEYWORD_PREVIEW_MAX} 件)。` +
+      'プレビュー UI の「予約される番組」リストにそのまま使える。',
+  }),
+});
+
+const getRuleKeyword = createRoute({
+  method: 'get',
+  path: '/programs/{id}/rule-keyword',
+  tags: ['programs'],
+  summary: '自動予約ルール用キーワード推定',
+  description:
+    '番組タイトルを自然な切れ目 (「『」、▽◆、`[xxx]　`、`第N話`/`#N` 等) で分割した候補のうち、' +
+    `向こう${RULE_KEYWORD_HORIZON_DAYS}日間の番組表で2件以上ヒットする最長の候補を返す。` +
+    'いずれも閾値に届かない場合は最も短い (=最アグレッシブな) 候補を返す。' +
+    '`matches` は推定キーワードでヒットした未来番組リスト (フロントのプレビューにそのまま流せる)。',
+  request: { params: idParam },
+  responses: {
+    200: { description: '推定キーワード', content: { 'application/json': { schema: RuleKeywordResponse } } },
+    404: { description: '番組が見つからない', content: { 'application/json': { schema: ErrorSchema } } },
+  },
+});
+
+programsRouter.openapi(getRuleKeyword, async (c) => {
+  const { id } = c.req.valid('param');
+  const program = await programService.findById(id);
+  if (!program) return c.json({ code: 'programs.not_found', message: '該当なし' }, 404);
+
+  const now = Date.now();
+  const horizonMs = now + RULE_KEYWORD_HORIZON_DAYS * 24 * 60 * 60 * 1000;
+  const upcoming = await programService.listInRange(now, horizonMs);
+  const keyword = suggestRuleKeyword(
+    program.title,
+    upcoming.map((p) => p.title),
+  );
+  const matches = upcoming
+    .filter((p) => p.title.includes(keyword))
+    .slice(0, RULE_KEYWORD_PREVIEW_MAX);
+  return c.json({ keyword, matches }, 200);
 });

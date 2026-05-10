@@ -77,6 +77,35 @@ const CUT_AT_BARE_EP_RE = /[\s　]+\d+\s*(?:[話回]|食目)(?:[\s　].*|\s*$)/;
 // the episode-of-the-week blurb.
 const CUT_AT_ARROW_RE = /[▼▽★◆].*$/;
 
+// `[xxx]　…` boundary cut. ARIB convention is for broadcasters to follow the
+// canonical show name with bracket meta tags ([字][再][多][デ][SS]…) and
+// then a fullwidth space before the per-airing subtitle:
+//   `Ｎスタ[字]　最新中東情勢▽ハンタウイルス感染船`
+// CUT_AT_ARROW_RE only handles the `▽…` tail; `最新中東情勢` between
+// `[字]　` and `▽` survives unless the `[xxx]　` itself counts as a hard
+// separator. Required for the auto-rule keyword path so that future
+// `Ｎスタ` airings still substring-match. Matches one-or-more bracket runs
+// so chained `[字][デ]　…` cuts at the run's trailing space rather than
+// between the two tags. Lookbehind keeps a leading `[新]ドラマ…`-style
+// preface intact (we never strip from position 0).
+const CUT_AT_BRACKET_BOUNDARY_RE =
+  /(?<=.)(?:[\[［【〔][^\]］】〕]*[\]］】〕])+[\s　]+.*$/;
+
+// First subtitle-quote opener — broadcasters wrap the per-airing subtitle
+// in `「…」` / `『…』` (e.g. `あさイチ「特集」`). Used by the rule-keyword
+// candidate generator to find the show-name boundary; not consumed by
+// `normalizeTitle` itself which has a richer extract-vs-strip path.
+const SUBTITLE_OPENER_RE = /[「『]/;
+
+// Trailing `[xxx]` (or chained `[xxx][yyy]…`) meta-tag run plus surrounding
+// whitespace. Used to tidy up rule-keyword candidates whose natural cut
+// happened to leave broadcaster flags like `[字]` dangling at the end
+// (`ヒルナンデス！[字]` → `ヒルナンデス！`). Trailing-only by design —
+// stripping middle `[xxx]` would break substring matching against future
+// EPG titles that still carry the tag.
+const TRAILING_BRACKETS_RE =
+  /(?:[\s　]*[\[［【〔][^\]］】〕]*[\]］】〕])+[\s　]*$/;
+
 // Trailing markers that describe the episode, not the show. Strip at end
 // of the (trimmed) title. Guarded suffixes (those that also appear inside
 // a real show title) are applied by `stripSuffixes()` below.
@@ -383,6 +412,79 @@ export function normalizeTitle(raw: string): string {
 }
 
 // -----------------------------------------------------------------
+// Auto-rule keyword suggestion.
+//
+// Pure regex heuristics can't reliably tell apart titles like
+//   `Ｎスタ[字]　最新中東情勢`  — `[字]　` is the show/subtitle boundary
+//   `プロフェッショナル　仕事の流儀` — `　` is part of the show name
+// because the same `　` plays opposite roles. Schedule hit-counts
+// disambiguate: the right cut produces a substring that matches many
+// future airings, an over-eager cut still matches many but loses
+// length, a too-specific cut matches only this airing and is rejected.
+//
+// We pick the LONGEST candidate whose substring appears in >= 2 of the
+// supplied schedule titles (= shows up in at least one OTHER airing
+// besides this one). Falls back to the most aggressive cut when nothing
+// reaches the threshold (e.g. truly one-off broadcasts) so the rule
+// still has a fighting chance to catch reruns later.
+// -----------------------------------------------------------------
+
+const RULE_KEYWORD_MIN_HITS = 2;
+
+export function suggestRuleKeyword(
+  title: string,
+  scheduleTitles: readonly string[],
+): string {
+  const candidates = ruleKeywordCandidates(title);
+  if (candidates.length === 0) return title.trim();
+
+  for (const cand of candidates) {
+    let hits = 0;
+    for (const t of scheduleTitles) {
+      if (t.includes(cand)) {
+        hits++;
+        if (hits >= RULE_KEYWORD_MIN_HITS) break;
+      }
+    }
+    if (hits >= RULE_KEYWORD_MIN_HITS) return cand;
+  }
+  return candidates[candidates.length - 1];
+}
+
+function ruleKeywordCandidates(title: string): string[] {
+  // Cut points are found in the zenkaku-folded title because some of the
+  // existing CUT_AT_* regexes assume halfwidth digits (`#04` not `＃０４`).
+  // `zenkakuToHankaku` is a 1:1 character replacement so positions in the
+  // folded string apply unchanged to the original.
+  const folded = zenkakuToHankaku(title);
+  const positions = new Set<number>([title.length]);
+  const addCutAt = (idx: number | undefined): void => {
+    if (idx !== undefined && idx > 0) positions.add(idx);
+  };
+
+  for (const re of [
+    SUBTITLE_OPENER_RE,
+    CUT_AT_ARROW_RE,
+    CUT_AT_SEASON_RE,
+    CUT_AT_BARE_EP_RE,
+    CUT_AT_BRACKET_BOUNDARY_RE,
+  ]) {
+    addCutAt(folded.match(re)?.index);
+  }
+
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of positions) {
+    const tidy = title.slice(0, p).replace(TRAILING_BRACKETS_RE, '').trim();
+    if (tidy && !seen.has(tidy)) {
+      seen.add(tidy);
+      out.push(tidy);
+    }
+  }
+  return out.sort((a, b) => b.length - a.length);
+}
+
+// -----------------------------------------------------------------
 // Generic titles — these phrase matches are banned from TVDB results
 // because they produce false positives (e.g. 'ニュース' → 'ニュースの女').
 // Rule/manual match can still link these titles explicitly.
@@ -436,6 +538,24 @@ class PromisePool {
 // in the same canonical form. This is symmetric, structural, and absorbs
 // the whole class of zenkaku-punctuation drift between EPG and TVDB
 // without growing search-level fan-out (no extra TVDB API calls).
+// Coverage floor for the asymmetric-containment branch (key ⊇ ja|en). When
+// the EPG key is much longer than the TVDB title, "TVDB title is a substring
+// of the EPG key" is too weak a signal — a 3-char generic word like `Bar`
+// shouldn't anchor a 21-char Japanese broadcaster title (`BAR レモン・ハート
+// 恋の入門ウイスキー`). Require the contained TVDB title to cover at least
+// this fraction of the EPG key so containment reflects real topical overlap
+// rather than a coincidental short-word substring.
+//
+// Calibration (sampled against the live programs ↔ tvdb_entries cache):
+//   - `ブラタモリ` (4) in `ブラタモリ 国宝犬山城` (11)  → 0.36 (keep, real)
+//   - `アオアシ`   (4) in `アオアシ 最初のファン` (11)   → 0.36 (keep, real)
+//   - `小さな旅`   (4) in `小さな旅 選` (6)             → 0.67 (keep, real)
+//   - `Bar`        (3) in `BAR レモン・ハート…` (21)     → 0.14 (reject ✗)
+// 0.25 cleanly separates the two classes. Documentary-style cases ≥ 0.36
+// stay matched via this branch (the head fallback in `searchKeyCandidates`
+// would also rescue them, but keeping branch-6 narrow is cheaper).
+const CONTAINMENT_MIN_COVERAGE = 0.25;
+
 export function scoreOf(e: TvdbEntry, key: string): number {
   const ja = zenkakuToHankaku((e.title ?? '').trim());
   const en = zenkakuToHankaku((e.titleEn ?? '').trim());
@@ -447,8 +567,12 @@ export function scoreOf(e: TvdbEntry, key: string): number {
   if (jaLenRatio <= 1.4 && ja.startsWith(key)) return 700 - ja.length;
   if (enLenRatio <= 1.4 && en.toLowerCase().startsWith(kLower)) return 680 - en.length;
   if (jaLenRatio <= 1.6 && ja.includes(key)) return 500 - ja.length;
-  if (key.length >= 4 && (key.includes(ja) || key.toLowerCase().includes(en.toLowerCase())))
-    return 300;
+  if (key.length >= 4) {
+    const minCovered = key.length * CONTAINMENT_MIN_COVERAGE;
+    const jaCovers = ja.length >= minCovered && key.includes(ja);
+    const enCovers = en.length >= minCovered && key.toLowerCase().includes(en.toLowerCase());
+    if (jaCovers || enCovers) return 300;
+  }
   return 0;
 }
 
@@ -479,7 +603,19 @@ export function searchKeyCandidates(key: string): string[] {
   };
   push(key);
   const head = key.split(/\s+/)[0] ?? '';
-  if (head.length >= 3) push(head);
+  // Length floor differs by script: a 3-char CJK kana/kanji head
+  // (`タッチ`, `朱蒙` is already 2 → blocked, `あさイチ` is 4 → kept) is
+  // typically a meaningful show name, but a 3-char ASCII head (`BAR`,
+  // `THE`, `OUR`) is almost always a generic English/genre word that
+  // collides with hundreds of unrelated TVDB titles. Without this guard
+  // a broadcaster title like `BAR レモン・ハート 恋の入門ウイスキー`
+  // would fan out to head=`BAR` and exact-match the unrelated TVDB show
+  // `Bar` (3 chars). Promotion to len ≥ 4 for ASCII-only heads
+  // structurally separates "show name token" from "noise opener" without
+  // a per-show literal guard.
+  const isAsciiOnly = /^[\x20-\x7E]+$/.test(head);
+  const minHeadLen = isAsciiOnly ? 4 : 3;
+  if (head.length >= minHeadLen) push(head);
   return out;
 }
 

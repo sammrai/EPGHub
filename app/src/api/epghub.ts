@@ -166,6 +166,10 @@ export const api = {
       req<{ matched: boolean; entry: ApiTvdbEntry | null }>(
         'POST', `/programs/${encodeURIComponent(id)}/rematch`
       ),
+    ruleKeyword: (id: string) =>
+      req<{ keyword: string; matches: ApiProgram[] }>(
+        'GET', `/programs/${encodeURIComponent(id)}/rule-keyword`
+      ),
   },
   tuners: {
     list: () => req<ApiTunerState[]>('GET', '/tuners'),

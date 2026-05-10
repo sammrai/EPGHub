@@ -2002,6 +2002,46 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /programs/{id}/rule-keyword:
+    get:
+      tags:
+        - programs
+      summary: 自動予約ルール用キーワード推定
+      description: 番組タイトルを自然な切れ目 (「『」、▽◆、`[xxx]　`、`第N話`/`#N` 等)
+        で分割した候補のうち、向こう14日間の番組表で2件以上ヒットする最長の候補を返す。いずれも閾値に届かない場合は最も短い (=最アグレッシブな)
+        候補を返す。`matches` は推定キーワードでヒットした未来番組リスト (フロントのプレビューにそのまま流せる)。
+      parameters:
+        - schema:
+            type: string
+            example: nhk-g_2026-04-19T20:00:00.000Z
+          required: true
+          in: path
+          name: id
+      responses:
+        "200":
+          description: 推定キーワード
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keyword:
+                    type: string
+                    example: Ｎスタ
+                  matches:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Program"
+                    description: 推定キーワードでヒットした向こう14日間の番組 (最大 50 件)。プレビュー UI の「予約される番組」リストにそのまま使える。
+                required:
+                  - keyword
+                  - matches
+        "404":
+          description: 番組が見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /recordings:
     get:
       tags:

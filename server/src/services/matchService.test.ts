@@ -14,7 +14,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeTitle, scoreOf, searchKeyCandidates } from './matchService.ts';
+import { normalizeTitle, scoreOf, searchKeyCandidates, suggestRuleKeyword } from './matchService.ts';
 import type { TvdbEntry } from '../schemas/tvdb.ts';
 
 interface Case {
@@ -719,5 +719,89 @@ describe('scoreOf — zenkaku/hankaku punctuation folding', () => {
     const entry = makeSeries('全然違う作品');
     const score = scoreOf(entry, '大きい女の子は好きですか?');
     assert.equal(score, 0);
+  });
+});
+
+describe('suggestRuleKeyword — schedule-hit-based candidate picking', () => {
+  test('Ｎスタ型: [字]　 直後のサブタイ込み候補は1件しか当たらないので短い「Ｎスタ」を選ぶ', () => {
+    const schedule = [
+      'Ｎスタ[字]　最新中東情勢▽ハンタウイルス感染船',
+      'Ｎスタ[字]　明日のニュース▽天気',
+      'Ｎスタ[字]　経済特集',
+      'Ｎスタ[字]',
+      '別の番組',
+    ];
+    assert.equal(
+      suggestRuleKeyword('Ｎスタ[字]　最新中東情勢▽ハンタウイルス感染船', schedule),
+      'Ｎスタ',
+    );
+  });
+
+  test('週次番組: 完全タイトルが2件以上当たればそのまま採用 (フル長 > 短縮)', () => {
+    const schedule = [
+      'プロフェッショナル　仕事の流儀「ある町工場の物語」',
+      'プロフェッショナル　仕事の流儀「料理人の挑戦」',
+      'プロフェッショナル　仕事の流儀「医師の決断」',
+    ];
+    assert.equal(
+      suggestRuleKeyword('プロフェッショナル　仕事の流儀「ある町工場の物語」', schedule),
+      'プロフェッショナル　仕事の流儀',
+    );
+  });
+
+  test('「」サブタイトルで切る (あさイチ型)', () => {
+    const schedule = [
+      'あさイチ「特集 ○○」',
+      'あさイチ「特集 △△」',
+      'あさイチ「ゲスト出演」',
+    ];
+    assert.equal(
+      suggestRuleKeyword('あさイチ「特集 ○○」', schedule),
+      'あさイチ',
+    );
+  });
+
+  test('連続メタタグ [字][デ]　… も切れる', () => {
+    const schedule = [
+      '黒猫と魔女の教室[字][デ]　＃０５「スピカとアリア」',
+      '黒猫と魔女の教室[字][デ]　＃０６',
+      '黒猫と魔女の教室[字][デ]　＃０７',
+    ];
+    assert.equal(
+      suggestRuleKeyword('黒猫と魔女の教室[字][デ]　＃０５「スピカとアリア」', schedule),
+      '黒猫と魔女の教室',
+    );
+  });
+
+  test('schedule にこの回しか無い: 最短 (=最アグレッシブな) 候補にフォールバック', () => {
+    const schedule = ['Ｎスタ[字]　最新中東情勢▽ハンタウイルス感染船'];
+    assert.equal(
+      suggestRuleKeyword('Ｎスタ[字]　最新中東情勢▽ハンタウイルス感染船', schedule),
+      'Ｎスタ',
+    );
+  });
+
+  test('区切りが無く schedule に複数ある: フルタイトル採用', () => {
+    const schedule = ['ＮＨＫニュース７', 'ＮＨＫニュース７', 'ＮＨＫニュース９'];
+    assert.equal(
+      suggestRuleKeyword('ＮＨＫニュース７', schedule),
+      'ＮＨＫニュース７',
+    );
+  });
+
+  test('末尾メタタグは見栄え除去 (ヒルナンデス！[字])', () => {
+    const schedule = ['ヒルナンデス！[字]', 'ヒルナンデス！[字]'];
+    assert.equal(
+      suggestRuleKeyword('ヒルナンデス！[字]', schedule),
+      'ヒルナンデス！',
+    );
+  });
+
+  test('zenkaku #N (＃０５) 形式の話数マーカーで切れる', () => {
+    const schedule = ['アニメA・あかね噺　＃６', 'アニメA・あかね噺　＃７'];
+    assert.equal(
+      suggestRuleKeyword('アニメA・あかね噺　＃６', schedule),
+      'アニメA・あかね噺',
+    );
   });
 });
