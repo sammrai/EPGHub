@@ -392,6 +392,57 @@ function scoreOf(e: TvdbEntry, key: string): number {
   return 0;
 }
 
+/**
+ * Build the ordered list of search keys for show-name resolution in
+ * `enrichUnmatched` / `rematchProgram`. Each later candidate is a
+ * progressive relaxation of the primary key, so callers iterate and
+ * stop at the first scoring hit.
+ *
+ * Why this is a list, not a single regex in `normalizeTitle`: the
+ * relaxations are *ambiguous*. A trailing `Ⅱ` is sometimes a season
+ * marker (`無職転生Ⅱ` → TVDB `無職転生 ～異世界行ったら本気だす～`)
+ * and sometimes part of the canonical title (`極上！ゴルフ場の旅Ⅱ`,
+ * `バキバキ☆ビート！Ⅱ`). The normalizer can't tell which, so it
+ * preserves the marker; this layer fans out only when the strict
+ * key fails to score, letting `pickBest`'s exact-match floor pick the
+ * right TVDB entry without losing season-2-only shows that genuinely
+ * share their EPG title with TVDB.
+ *
+ * Order, by precision (most → least specific):
+ *   1. `key` itself (preserves the season marker).
+ *   2. `key` with a trailing fullwidth Roman numeral (Ⅰ-Ⅹ) stripped
+ *      when it sits directly after kana/kanji and at end-of-token —
+ *      i.e. `<base-name>Ⅱ` or `<base-name>Ⅱ <subtitle>`.
+ *   3. Head token before whitespace — covers documentary-style
+ *      `<show> <subtitle>` (e.g. `ブラタモリ 国宝犬山城` → `ブラタモリ`).
+ *      Guarded to ≥3 chars so we don't blow up on stop-words.
+ *
+ * Exported for unit tests so the relaxation order can be locked
+ * without spinning up the DB / HTTP layers.
+ */
+export function searchKeyCandidates(key: string): string[] {
+  const out: string[] = [];
+  const push = (s: string): void => {
+    const t = s.trim();
+    if (t && !out.includes(t)) out.push(t);
+  };
+  push(key);
+  // Strip fullwidth Roman-numeral season suffix. Only fullwidth (Ⅰ-Ⅹ,
+  // U+2160..U+2169) — ASCII `II`/`III` collides too often with real
+  // English titles (`Halo II`, `Civilization III`). Lookbehind keeps
+  // the kana/kanji preceding the suffix; lookahead requires
+  // whitespace or end-of-string so we don't slice into mid-token
+  // text. Whitespace runs left behind get collapsed.
+  const withoutRomanSeason = key
+    .replace(/(?<=[\u3040-\u30FF\u4E00-\u9FFF])[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ]+(?=[\s　]|$)/g, '')
+    .replace(/[\s　]+/g, ' ')
+    .trim();
+  push(withoutRomanSeason);
+  const head = key.split(/\s+/)[0] ?? '';
+  if (head.length >= 3) push(head);
+  return out;
+}
+
 function pickBest(
   results: TvdbEntry[],
   key: string,
@@ -889,22 +940,15 @@ class DbMatchService implements MatchService {
           const ids = group?.ids ?? [];
           const allowMovie = group?.hasMovieGenre ?? false;
           try {
-            let hits = await tvdbService.search(key);
-            let scoreKey = key;
-            let best = pickBest(hits, scoreKey, { allowMovie });
-            // Documentary-style shows often come out of normalization as
-            // "<show name> <episode subtitle>" separated by a single
-            // space (e.g. "ブラタモリ 国宝犬山城"). When the full string
-            // misses, retry the search against just the leading token —
-            // that's the show name. Guarded to tokens of 3+ chars so we
-            // don't blow up matches on stop-words.
-            if (!best) {
-              const head = key.split(/\s+/)[0] ?? '';
-              if (head.length >= 3 && head !== key) {
-                hits = await tvdbService.search(head);
-                scoreKey = head;
-                best = pickBest(hits, scoreKey, { allowMovie });
-              }
+            // Iterate the candidate list (primary → progressive
+            // relaxations) and stop at the first scoring hit. See
+            // `searchKeyCandidates` for the order rationale.
+            const candidates = searchKeyCandidates(key);
+            let best: TvdbEntry | null = null;
+            for (const scoreKey of candidates) {
+              const hits = await tvdbService.search(scoreKey);
+              best = pickBest(hits, scoreKey, { allowMovie });
+              if (best) break;
             }
             if (best) {
               const episodes = best.type === 'series'
@@ -1093,16 +1137,14 @@ class DbMatchService implements MatchService {
     if (!key || GENERIC_TITLES.has(key)) return null;
 
     const allowMovie = prog.genreKey === 'movie';
-    let hits = await tvdbService.search(key);
-    let scoreKey = key;
-    let best = pickBest(hits, scoreKey, { allowMovie });
-    if (!best) {
-      const head = key.split(/\s+/)[0] ?? '';
-      if (head.length >= 3 && head !== key) {
-        hits = await tvdbService.search(head);
-        scoreKey = head;
-        best = pickBest(hits, scoreKey, { allowMovie });
-      }
+    // Same fan-out as `enrichUnmatched`: try the primary key, then
+    // progressively relaxed candidates (see `searchKeyCandidates`).
+    const searchKeys = searchKeyCandidates(key);
+    let best: TvdbEntry | null = null;
+    for (const scoreKey of searchKeys) {
+      const hits = await tvdbService.search(scoreKey);
+      best = pickBest(hits, scoreKey, { allowMovie });
+      if (best) break;
     }
 
     if (!best) {

@@ -14,7 +14,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeTitle } from './matchService.ts';
+import { normalizeTitle, searchKeyCandidates } from './matchService.ts';
 
 interface Case {
   raw: string;
@@ -585,5 +585,100 @@ describe('matchService whitelist complexity guards', () => {
     );
     // Sanity: enumerate counts so test failures show a useful diff.
     assert.equal(general + literal, prefixes.length);
+  });
+});
+
+// -------------------------------------------------------------------
+// Search-key fan-out. The auto-matcher tries the primary normalized
+// key first, then falls back through progressively relaxed
+// candidates (`searchKeyCandidates`). Locked here because the order
+// (and which relaxations are valid) is load-bearing — picking the
+// wrong sibling on a season-2 airing is a worse failure than missing
+// it outright.
+// -------------------------------------------------------------------
+
+describe('searchKeyCandidates — show-name resolution fan-out', () => {
+  test('primary key alone when no relaxation applies', () => {
+    // No trailing Roman numeral, no whitespace → exactly one candidate.
+    const got = searchKeyCandidates('鬼滅の刃');
+    assert.deepEqual(got, ['鬼滅の刃']);
+  });
+
+  test('documentary-style "<show> <subtitle>" → primary + head', () => {
+    // Existing behaviour: `ブラタモリ 国宝犬山城` falls back to the
+    // leading token when the full string misses TVDB.
+    const got = searchKeyCandidates('ブラタモリ 国宝犬山城');
+    assert.deepEqual(got, ['ブラタモリ 国宝犬山城', 'ブラタモリ']);
+  });
+
+  test('trailing fullwidth Roman numeral after kana/kanji is stripped (regression: issue #4 — 無職転生Ⅱ)', () => {
+    // EPG title `無職転生Ⅱ ～異世界行ったら本気だす～` against TVDB's
+    // `無職転生 ～異世界行ったら本気だす～`. The Roman numeral is a
+    // season suffix on the EPG side that TVDB doesn't carry. Without
+    // this relaxation, scoreOf rejected the only hit (Ⅱ vs space at
+    // position 4 broke startsWith / includes / containment all at once)
+    // and the program stayed at tvdb_id=null.
+    //
+    // Source: programs.id = svc-400211_2026-05-10T14:30:00.000Z,
+    // raw title = `無職転生Ⅱ ～異世界行ったら本気だす～　第十話「この気持ち」`,
+    // normalized → `無職転生Ⅱ ～異世界行ったら本気だす～`.
+    const got = searchKeyCandidates('無職転生Ⅱ ～異世界行ったら本気だす～');
+    // Expected order: primary first, then Roman-numeral-stripped.
+    // Head ('無職転生Ⅱ') is also generated as a third candidate.
+    assert.equal(got[0], '無職転生Ⅱ ～異世界行ったら本気だす～');
+    assert.equal(got[1], '無職転生 ～異世界行ったら本気だす～');
+    assert.ok(
+      got.includes('無職転生Ⅱ'),
+      `expected head token candidate; got ${JSON.stringify(got)}`,
+    );
+  });
+
+  test('trailing Roman numeral with no following whitespace is also stripped', () => {
+    // `進撃の巨人Ⅱ` → also try `進撃の巨人`.
+    const got = searchKeyCandidates('進撃の巨人Ⅱ');
+    assert.equal(got[0], '進撃の巨人Ⅱ');
+    assert.ok(
+      got.includes('進撃の巨人'),
+      `expected stripped variant; got ${JSON.stringify(got)}`,
+    );
+  });
+
+  test('Roman numeral mid-token (not at end) is preserved', () => {
+    // `ダイヤのA actⅡ－Second Season－` is one of TVDB's actual canonical
+    // titles — the Ⅱ sits inside `actⅡ－…－` and is NOT a season suffix.
+    // The lookahead requires whitespace or end-of-string after the
+    // Roman numeral, so this case yields no relaxation.
+    const got = searchKeyCandidates('ダイヤのA actⅡ－Second Season－');
+    // No stripped variant should appear — the Ⅱ is followed by `－`,
+    // not whitespace/end.
+    assert.ok(
+      !got.some((c) => c === 'ダイヤのA act－Second Season－' || c === 'ダイヤのA act'),
+      `Ⅱ in mid-token must be preserved; got ${JSON.stringify(got)}`,
+    );
+  });
+
+  test('Roman numeral after non-CJK character is preserved', () => {
+    // The lookbehind requires kana/kanji before the Roman numeral. A
+    // title like `Test Ⅱ` (ASCII followed by Ⅱ) — purely synthetic, but
+    // locks the boundary so we don't strip Roman numerals from English
+    // show titles.
+    const got = searchKeyCandidates('Test Ⅱ');
+    assert.deepEqual(got, ['Test Ⅱ', 'Test']);
+    // Crucially, the candidate list does NOT contain 'Test ' or 'Test Ⅱ'
+    // with the Ⅱ alone removed — the lookbehind kept it.
+    assert.ok(!got.includes('Test '), `unexpected ASCII-tail strip: ${JSON.stringify(got)}`);
+  });
+
+  test('duplicate candidates are deduped', () => {
+    // When primary === stripped === head (single short token, no
+    // Roman numeral), only one entry should appear.
+    const got = searchKeyCandidates('鬼滅');
+    assert.deepEqual(got, ['鬼滅']);
+  });
+
+  test('head shorter than 3 chars is NOT added (avoids stop-word blowups)', () => {
+    // `AB CDE` — head 'AB' is 2 chars, dropped from candidates.
+    const got = searchKeyCandidates('AB CDE');
+    assert.deepEqual(got, ['AB CDE']);
   });
 });
