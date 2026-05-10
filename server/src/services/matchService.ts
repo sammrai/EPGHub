@@ -18,7 +18,7 @@ const ZENKAKU_ASCII_OFFSET = 'Ａ'.charCodeAt(0) - 'A'.charCodeAt(0);
 
 // Fullwidth → ASCII for digits and Latin letters. We preserve the
 // ideographic space `　` as-is (it's later used as a soft-cut marker) and we
-// fold fullwidth punctuation (`！`, `？`, `＃`) to ASCII so subsequent
+// fold fullwidth punctuation (`！`, `？`, `＃`, `：`) to ASCII so subsequent
 // regexes don't need dual branches.
 function zenkakuToHankaku(s: string): string {
   return s
@@ -26,7 +26,8 @@ function zenkakuToHankaku(s: string): string {
     .replace(/[Ａ-Ｚａ-ｚ]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - ZENKAKU_ASCII_OFFSET))
     .replace(/＃/g, '#')
     .replace(/！/g, '!')
-    .replace(/？/g, '?');
+    .replace(/？/g, '?')
+    .replace(/：/g, ':');
 }
 
 // Square-style bracket markers: both broadcaster codes like `[字][解][デ][再]`
@@ -644,9 +645,21 @@ class PromisePool {
 // would also rescue them, but keeping branch-6 narrow is cheaper).
 const CONTAINMENT_MIN_COVERAGE = 0.25;
 
+// Collapse whitespace around an ASCII colon so the broadcaster's bare
+// `<show>：<subtitle>` form (no surrounding space, e.g. `ゴーストコンサート：
+// missing Songs`) and TVDB's `<show> : <subtitle>` form (hankaku ` : ` with
+// flanking spaces) compare equal after the zenkaku → hankaku fold. Same
+// structural-punctuation justification as folding `？！＃` to `?!#`: both
+// sources mean the same thing, only the spacing convention differs.
+const COLON_SPACING_RE = /\s*:\s*/g;
+function compactColon(s: string): string {
+  return s.replace(COLON_SPACING_RE, ':');
+}
+
 export function scoreOf(e: TvdbEntry, key: string): number {
-  const ja = zenkakuToHankaku((e.title ?? '').trim());
-  const en = zenkakuToHankaku((e.titleEn ?? '').trim());
+  const ja = compactColon(zenkakuToHankaku((e.title ?? '').trim()));
+  const en = compactColon(zenkakuToHankaku((e.titleEn ?? '').trim()));
+  key = compactColon(key);
   const kLower = key.toLowerCase();
   if (ja === key || en === key) return 1000;
   if (en.toLowerCase() === kLower) return 950;

@@ -552,6 +552,11 @@ const borderline: Case[] = [
     expected: '国会中継 ～参議院第1委員会室から中継～',
     note: 'Negative test for the open-class branch: `第1委員会室` is a Diet committee room name. `委` is open-class but the boundary lookahead rejects it because the next char is the kanji `員`, not whitespace/quote/end. Preserves the existing normalization.',
   },
+  {
+    raw: 'ゴーストコンサート：ｍｉｓｓｉｎｇ　Ｓｏｎｇｓ　＃０６',
+    expected: 'ゴーストコンサート:missing Songs',
+    note: 'Issue #21: zenkaku `：` (U+FF1A) folds to ASCII `:` (sibling of the existing `？！＃` folds in zenkakuToHankaku) so `<show>：<subtitle>` lands in the same canonical form as `<show>:<subtitle>`. The scoreOf-side `\\s*:\\s*` collapse handles the broadcaster-vs-TVDB spacing drift around the colon. Source: programs.id svc-3272402080_2026-05-10T16:25:00.000Z.',
+  },
 ];
 
 const allCases: Case[] = [
@@ -784,6 +789,23 @@ describe('scoreOf — zenkaku/hankaku punctuation folding', () => {
     const key = normalizeTitle('BAR レモン・ハート　恋の入門ウイスキー');
     const score = scoreOf(entry, key);
     assert.equal(score, 0);
+  });
+
+  test('zenkaku ： in EPG title vs hankaku ` : ` in TVDB title still scores exact', () => {
+    // Issue #21: programs.id `svc-3272402080_2026-05-10T16:25:00.000Z`.
+    // EPG broadcasts `ゴーストコンサート：ｍｉｓｓｉｎｇ　Ｓｏｎｇｓ　＃０６`
+    // — fully zenkaku, with `：` (U+FF1A) between show name and subtitle
+    // and no surrounding space. TVDB stores the canonical title as
+    // `ゴーストコンサート : missing Songs` (hankaku ` : ` with spaces).
+    // Pre-fix: zenkakuToHankaku didn't fold `：`, and even after a
+    // hypothetical fold the two sides differ in spacing around `:`,
+    // so every comparator failed and the show scored 0. The fold + the
+    // symmetric `\s*:\s*` → `:` collapse in scoreOf neutralise the whole
+    // class of broadcaster vs TVDB colon-spacing drift.
+    const entry = makeSeries('ゴーストコンサート : missing Songs');
+    const key = normalizeTitle('ゴーストコンサート：ｍｉｓｓｉｎｇ　Ｓｏｎｇｓ　＃０６');
+    const score = scoreOf(entry, key);
+    assert.ok(score >= 1000, `expected exact-match score, got ${score}`);
   });
 });
 

@@ -869,3 +869,34 @@ describe('findEpisodeForProgram — 孤独のグルメ regression case', () => {
     });
   });
 });
+
+describe('findEpisodeForProgram — ゴーストコンサート: missing Songs regression case', () => {
+  // Source: programs.id svc-3272402080_2026-05-10T16:25:00.000Z (issue #21)
+  //   title: ゴーストコンサート：ｍｉｓｓｉｎｇ　Ｓｏｎｇｓ　＃０６
+  //   tvdb_id 469599 — TVDB title `ゴーストコンサート : missing Songs`.
+  // Pre-fix the EPG title was fully zenkaku (`：` U+FF1A, `ｍｉｓｓｉｎｇ`,
+  // `Ｓｏｎｇｓ`, ideographic spaces). After zenkakuToHankaku the EPG side
+  // became `ゴーストコンサート:missing Songs` (no spaces around `:`) while
+  // the TVDB side stayed `ゴーストコンサート : missing Songs` (` : ` with
+  // hankaku spaces). Without folding `：`→`:` and collapsing whitespace
+  // around `:` symmetrically in scoreOf, the two strings never matched at
+  // any comparator and the show scored 0 → unmatched. This test pins the
+  // direct `#N` resolution once matching is restored.
+  test('zenkaku ：/＃ + ideographic-spaced subtitle resolves to S1E6', () => {
+    const list: Episode[] = [
+      { s: 1, e: 1, name: '生離死別　[前編]', aired: '2026-04-06' },
+      { s: 1, e: 2, name: '生離死別　[後編]', aired: '2026-04-13' },
+      { s: 1, e: 3, name: '剣山刀樹', aired: '2026-04-20' },
+      { s: 1, e: 4, name: '咫尺天涯', aired: '2026-04-27' },
+      { s: 1, e: 5, name: '冬夏青青', aired: '2026-05-04' },
+      { s: 1, e: 6, name: '漆身呑炭', aired: '2026-05-11' },
+    ];
+    const hit = findEpisodeForProgram(
+      list,
+      '2026-05-10T16:25:00.000Z',
+      'ゴーストコンサート：ｍｉｓｓｉｎｇ　Ｓｏｎｇｓ　＃０６',
+      ['ゴーストコンサート : missing Songs'],
+    );
+    assert.deepEqual(hit, { s: 1, e: 6, name: '漆身呑炭' });
+  });
+});
