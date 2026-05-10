@@ -65,7 +65,7 @@ const HASH_EP_RE = /\s*[#♯]\s*\d+\s*/g;
 // episode-specific metadata. No `\b` because `期/話/回/etc.` aren't word
 // characters in JS regex.
 const CUT_AT_SEASON_RE =
-  /[\s　]*(?:\d+(?:st|nd|rd|th)\s*[Ss]eason|[Ss]eason\s*\d+|シーズン\s*\d+|第\s*[0-9一二三四五六七八九十百千]+\s*(?:期|シリーズ|部|話|回|夜|局|クール|週)|[#♯]\s*\d+|\d+\s*回戦).*$/;
+  /[\s　]*(?:\d+(?:st|nd|rd|th)\s*[Ss]eason|[Ss]eason\s*\d+|シーズン\s*\d+|第\s*[0-9一二三四五六七八九十百千]+\s*(?:期|シリーズ|部|話|回|夜|局|輪|クール|週)|[#♯]\s*\d+|\d+\s*回戦).*$/;
 
 // Also cut a naked "N話" or "N回" when preceded by whitespace — used for
 // `４話　本厚木のバーニャカウダ` where the 第 prefix is dropped.
@@ -582,7 +582,7 @@ const KANJI_DIGIT_MAP: Record<string, number> = {
 };
 const KANJI_DIGIT_CHARS = Object.keys(KANJI_DIGIT_MAP).join('');
 const KANJI_NUMBER_RE = new RegExp(
-  `第\\s*([${KANJI_DIGIT_CHARS}]+)\\s*(?:話|回|夜|局)`
+  `第\\s*([${KANJI_DIGIT_CHARS}]+)\\s*(?:話|回|夜|局|輪)`
 );
 
 function parseTitleEpisodeNumber(title: string): number | null {
@@ -594,7 +594,7 @@ function parseTitleEpisodeNumber(title: string): number | null {
   const hashM = norm.match(/[#＃]\s*(\d+)/);
   if (hashM) return Number(hashM[1]);
   // 第N話 / 第N回 (ASCII digits only; kanji below).
-  const kaM = norm.match(/第\s*(\d+)\s*(?:話|回|夜|局)/);
+  const kaM = norm.match(/第\s*(\d+)\s*(?:話|回|夜|局|輪)/);
   if (kaM) return Number(kaM[1]);
   // 第N話 with kanji or daiji digits (limited to 0-99 for episode counts).
   const kanjiM = norm.match(KANJI_NUMBER_RE);
@@ -703,7 +703,7 @@ function deriveEpisodeSubtitle(programTitle: string, showTitles: string[]): stri
   // zenkaku / kanji / 大字 digits all covered).
   s = s.replace(/[#＃♯]\s*[\d０-９]+/g, ' ');
   s = s.replace(
-    new RegExp(`第\\s*[\\d０-９${KANJI_DIGIT_CHARS}]+\\s*[話回夜局週期部]`, 'g'),
+    new RegExp(`第\\s*[\\d０-９${KANJI_DIGIT_CHARS}]+\\s*[話回夜局輪週期部]`, 'g'),
     ' '
   );
 

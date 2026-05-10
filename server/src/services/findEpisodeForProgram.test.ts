@@ -438,6 +438,33 @@ describe('findEpisodeForProgram — 春夏秋冬代行者 daiji case', () => {
   });
 });
 
+describe('findEpisodeForProgram — リィンカーネーションの花弁 thematic counter case', () => {
+  // svc-400141_2026-05-10T14:00:00.000Z. tvdb_id=452801. EPG titles use
+  // 「第N輪」 ("Nth ring/wheel") as a thematic per-airing episode counter
+  // — same shape as 第N話/回/夜/局 but with a show-themed glyph. Locks in
+  // 輪 in the kanji-digit branch of parseTitleEpisodeNumber so the cascade
+  // resolves S/E instead of falling through all four steps to null.
+  const HANABIRA_EPISODES: Episode[] = [
+    { s: 1, e: 1, name: '花弁を散らす者達', aired: '2026-04-03' },
+    { s: 1, e: 2, name: '持つ者としての在り方', aired: '2026-04-10' },
+    { s: 1, e: 3, name: '開戦', aired: '2026-04-17' },
+    { s: 1, e: 4, name: '全知と腐敗', aired: '2026-04-24' },
+    { s: 1, e: 5, name: 'さようなら、耳を傾けてくれた人', aired: '2026-05-01' },
+    { s: 1, e: 6, name: '西耶', aired: '2026-05-08' },
+    { s: 1, e: 7, name: '咲き廻るリィンカーネーション', aired: '2026-05-15' },
+  ];
+
+  test('第六輪 (kanji "6th ring") → S1E6', () => {
+    const hit = findEpisodeForProgram(
+      HANABIRA_EPISODES,
+      '2026-05-10T14:00:00.000Z',
+      'アニメ\u3000リィンカーネーションの花弁\u3000第六輪',
+      ['リィンカーネーションの花弁'],
+    );
+    assert.deepEqual(hit, { s: 1, e: 6, name: '西耶' });
+  });
+});
+
 describe('findEpisodeForProgram — cumulative fallback', () => {
   test('ダンダダン #18 with S1=12, S2=6 → S2E6', () => {
     // The motivating case. Broadcaster numbers continuously across
