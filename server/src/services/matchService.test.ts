@@ -557,6 +557,11 @@ const borderline: Case[] = [
     expected: 'ゴーストコンサート:missing Songs',
     note: 'Issue #21: zenkaku `：` (U+FF1A) folds to ASCII `:` (sibling of the existing `？！＃` folds in zenkakuToHankaku) so `<show>：<subtitle>` lands in the same canonical form as `<show>:<subtitle>`. The scoreOf-side `\\s*:\\s*` collapse handles the broadcaster-vs-TVDB spacing drift around the colon. Source: programs.id svc-3272402080_2026-05-10T16:25:00.000Z.',
   },
+  {
+    raw: 'ＷＩＬＤ　ＢＬＵＥのわぶっていきましょう！[再]',
+    expected: 'WILD BLUEのわぶっていきましょう!',
+    note: 'Issue #22: ASCII-brand wide-space carve-out in stripPromoTail. The folded form `WILD BLUE…!` would otherwise be cut at the first whitespace (between `WILD` and `BLUE`) because the tail carries kana+`!`, leaving just `WILD` — which the matcher then bound to TVDB id 3496 (`Wild`, 4 chars). With both seg1 and seg2-leader being pure-ASCII letters, the whitespace is intra-brand, not a show↔promo boundary, so promo-tail bails out and the full title survives. The matching `searchKeyCandidates` guard suppresses the head fanout for the same shape so `WILD` is never used as a search key on its own. Source: programs.id svc-3272302072_2026-05-10T16:10:00.000Z.',
+  },
 ];
 
 const allCases: Case[] = [
@@ -709,6 +714,33 @@ describe('searchKeyCandidates — show-name resolution fan-out', () => {
   test('duplicate primary/head deduped', () => {
     const got = searchKeyCandidates('鬼滅');
     assert.deepEqual(got, ['鬼滅']);
+  });
+
+  test('ASCII-brand wide-space head is NOT promoted (issue #22: `WILD` of `WILD BLUE…` must not fan out)', () => {
+    // Issue #22: programs.id `svc-3272302072_2026-05-10T16:10:00.000Z`.
+    // `ＷＩＬＤ　ＢＬＵＥのわぶっていきましょう！[再]` normalises to
+    // `WILD BLUEのわぶっていきましょう!` (the stripPromoTail carve-out
+    // for an ASCII-brand wide-space keeps the brand intact). The head
+    // `WILD` clears the 4-char ASCII floor from issue #11, but its
+    // immediate successor `BLUEのわぶっていきましょう!` ALSO leads with
+    // ASCII letters — that's the structural marker for "head is just a
+    // brand fragment". Without this guard the head fanout would search
+    // TVDB for `WILD` and bind the program to the unrelated 4-char
+    // entry `Wild` (tvdb_id 3496). Same shape as the BAR carve-out
+    // above but at a different layer (next-token check rather than
+    // length floor).
+    const got = searchKeyCandidates('WILD BLUEのわぶっていきましょう!');
+    assert.deepEqual(got, ['WILD BLUEのわぶっていきましょう!']);
+  });
+
+  test('ASCII head followed by kana is still promoted (negative case for issue #22 guard)', () => {
+    // Sibling lock: the issue-#22 guard fires only when the NEXT token
+    // also leads with ASCII. A canonical English show name followed by
+    // a Japanese subtitle (`Naruto 全話振り返り`-shape) must still fan
+    // out to the head — that's the documentary-style fallback the
+    // helper exists for.
+    const got = searchKeyCandidates('Naruto 全話振り返り');
+    assert.deepEqual(got, ['Naruto 全話振り返り', 'Naruto']);
   });
 });
 

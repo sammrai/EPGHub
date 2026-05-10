@@ -81,7 +81,7 @@
   },
   {
     "raw": "MUSIC LIST＋Plus-韓ドラOSTって何？- 美しき日々 後編",
-    "normalized": "MUSIC"
+    "normalized": "MUSIC LIST＋Plus-韓ドラOSTって何?- 美しき日々"
   },
   {
     "raw": "NEEDY GIRL OVERDOSE　＃６「Turn Around and Count 2 Ten」",
@@ -137,7 +137,7 @@
   },
   {
     "raw": "We are STARDOM!!～世界が注目！女子プロレス～　＃228",
-    "normalized": "We"
+    "normalized": "We are STARDOM!!～世界が注目!女子プロレス～"
   },
   {
     "raw": "[デ]宝くじドリームサテライト",
@@ -7428,10 +7428,6 @@
     "normalized": "地球ドラマチック ミツバチの一生 ～ウィニフレッドとビーの物語～"
   },
   {
-    "raw": "地球ドラマチック　再び月へ！　前編[二][字]",
-    "normalized": "地球ドラマチック"
-  },
-  {
     "raw": "地球ドラマチック　再び月へ！　後編[二][字]",
     "normalized": "地球ドラマチック"
   },
@@ -10981,7 +10977,7 @@
   },
   {
     "raw": "ＢＯＡＴ　ＲＡＣＥプレミア　全力ＹＥＬＬ！ボートレーススピリッツ",
-    "normalized": "BOAT"
+    "normalized": "BOAT RACEプレミア 全力YELL!ボートレーススピリッツ"
   },
   {
     "raw": "ＢＳものスタサンデー",
@@ -11309,7 +11305,7 @@
   },
   {
     "raw": "ＦＮＮ　Ｌｉｖｅ　Ｎｅｗｓ　イット！[字]　全国・関西の最新ニュースをお伝えします",
-    "normalized": "FNN"
+    "normalized": "FNN Live News イット! 全国・関西の最新ニュースをお伝えします"
   },
   {
     "raw": "ＦＮＮ　Ｌｉｖｅ　Ｎｅｗｓ　ｄａｙｓ[字]　全国・関西のニュースをわかりやすく",
@@ -11481,11 +11477,11 @@
   },
   {
     "raw": "Ｌｉｖｅ　Ｎｅｗｓ　イット！[字]",
-    "normalized": "Live"
+    "normalized": "Live News イット!"
   },
   {
     "raw": "Ｌｉｖｅ　Ｎｅｗｓ　イット！[字]　全国的に晴れ夏日も、春の紫外線に要注意！",
-    "normalized": "Live"
+    "normalized": "Live News イット! 全国的に晴れ夏日も、春の紫外線に要注意!"
   },
   {
     "raw": "Ｍショッピング",
@@ -12025,15 +12021,15 @@
   },
   {
     "raw": "Ｔｈｅ　Ｗａｋｅｙ　Ｓｈｏｗ　マリーゴールのとびら　ひらけ！絵の具[字]",
-    "normalized": "The"
+    "normalized": "The Wakey Show マリーゴールのとびら ひらけ!絵の具"
   },
   {
     "raw": "Ｔｈｅ　Ｗａｋｅｙ　Ｓｈｏｗ　モッソのとびら　ひらけ！日本の山[字]",
-    "normalized": "The"
+    "normalized": "The Wakey Show モッソのとびら ひらけ!日本の山"
   },
   {
     "raw": "Ｔｈｅ　Ｗａｋｅｙ　Ｓｈｏｗ　ヴィーテのとびら　ひらけ！カメラのしくみ[字]",
-    "normalized": "The"
+    "normalized": "The Wakey Show ヴィーテのとびら ひらけ!カメラのしくみ"
   },
   {
     "raw": "Ｔｈｅ　Ｗａｋｅｙ　Ｓｈｏｗ　公園ライブ　喜びの名曲[字]",
@@ -12089,7 +12085,7 @@
   },
   {
     "raw": "ＷＩＬＤ　ＢＬＵＥのわぶっていきましょう！[再]",
-    "normalized": "WILD"
+    "normalized": "WILD BLUEのわぶっていきましょう!"
   },
   {
     "raw": "Ｗｅ　ａｒｅ　ＳＴＡＲＤＯＭ！！",
@@ -12097,7 +12093,7 @@
   },
   {
     "raw": "Ｗｅ　ａｒｅ　ＳＴＡＲＤＯＭ！！～世界が注目！女子プロレス～",
-    "normalized": "We"
+    "normalized": "We are STARDOM!!～世界が注目!女子プロレス～"
   },
   {
     "raw": "ＷｅＬｏｖｅショッピング",

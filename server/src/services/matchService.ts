@@ -300,6 +300,18 @@ function leadsWithQuoted(s: string): boolean {
  * `ShowName<wide-space>episode promo!`. Does NOT fire when the tail is
  * purely ASCII (English show names like `BanG Dream! It's MyGO!!!!!`).
  *
+ * ASCII-brand wide-space carve-out: broadcasters often render multi-
+ * word English brand names with internal wide-space (`ＷＩＬＤ　ＢＬＵＥ`,
+ * `ＷＥＥＫＬＹ　ＰＩＮＧ　ＰＯＮＧ　ＮＥＷＳ`). When the leading whitespace-
+ * separated tokens are ALL pure-ASCII letters/digits, the wide-space is
+ * intra-brand, not a show↔promo boundary — preserve those tokens before
+ * applying the promo cut. The boundary lands at the first token that
+ * begins with a non-ASCII char (kana/kanji), which is where the
+ * Japanese promo or subtitle actually starts. Source: programs.id
+ * svc-3272302072_2026-05-10T16:10:00.000Z (issue #22) —
+ * `ＷＩＬＤ　ＢＬＵＥのわぶっていきましょう！[再]` was being clipped to
+ * just `WILD` because the first whitespace fell inside the brand name.
+ *
  * Embedded-`!` show-name carve-out: when the title splits into 3+
  * whitespace-separated segments AND the second segment has a
  * non-terminal `!`/`?` (i.e. content after the punctuation), the second
@@ -317,6 +329,22 @@ function stripPromoTail(s: string): string {
   const tail = s.slice(ws.index!);
   if (!/[\u3040-\u30FF\u4E00-\u9FFF]/.test(tail)) return s;
   if (!/[!?]/.test(tail)) return s;
+  // ASCII-brand wide-space carve-out: when the segment immediately
+  // BEFORE the cut is pure-ASCII letters/digits AND the segment AFTER
+  // it begins with ASCII letters/digits before any kana/kanji, the
+  // whitespace is intra-brand (`ＷＩＬＤ　ＢＬＵＥ` rendering of the
+  // English brand `WILD BLUE`), not a show↔promo boundary. Bail out
+  // entirely so the promo+kana glued onto the brand (e.g.
+  // `BLUEのわぶっていきましょう!`) stays attached and the resulting
+  // normalised key is long enough that a generic 4-char TVDB title
+  // (`Wild`, 3496) can't pass the `scoreOf` containment-coverage floor.
+  // Source: programs.id svc-3272302072_2026-05-10T16:10:00.000Z
+  // (issue #22).
+  const head = s.slice(0, ws.index!);
+  const afterWs = s.slice(ws.index! + ws[0].length);
+  if (/^[A-Za-z0-9]+$/.test(head) && /^[A-Za-z0-9]/.test(afterWs)) {
+    return s;
+  }
   // Split into whitespace-bounded segments to detect the embedded-`!`
   // show-name shape (`<host>　<host-with-!>　<promo>`). Only inspect when
   // there are 3+ segments — 2-segment titles always cut at the first
@@ -703,7 +731,8 @@ export function searchKeyCandidates(key: string): string[] {
     if (t && !out.includes(t)) out.push(t);
   };
   push(key);
-  const head = key.split(/\s+/)[0] ?? '';
+  const tokens = key.split(/\s+/);
+  const head = tokens[0] ?? '';
   // Length floor differs by script: a 3-char CJK kana/kanji head
   // (`タッチ`, `朱蒙` is already 2 → blocked, `あさイチ` is 4 → kept) is
   // typically a meaningful show name, but a 3-char ASCII head (`BAR`,
@@ -716,7 +745,19 @@ export function searchKeyCandidates(key: string): string[] {
   // a per-show literal guard.
   const isAsciiOnly = /^[\x20-\x7E]+$/.test(head);
   const minHeadLen = isAsciiOnly ? 4 : 3;
-  if (head.length >= minHeadLen) push(head);
+  // ASCII-brand wide-space guard: if BOTH the head and its immediate
+  // successor are pure-ASCII letter/digit tokens, the head is a brand
+  // fragment (`WILD` of `WILD BLUE…`), not a standalone show name.
+  // Suppressing the head fanout here prevents the matcher from doing a
+  // search on `WILD` and binding the program to TVDB's generic 4-char
+  // `Wild` entry — same structural class as the BAR-vs-Bar guard above,
+  // but for brand names whose internal whitespace meets the length
+  // floor on each side. Source: programs.id
+  // svc-3272302072_2026-05-10T16:10:00.000Z (issue #22).
+  const next = tokens[1] ?? '';
+  const headIsAsciiBrandFragment =
+    isAsciiOnly && next.length > 0 && /^[A-Za-z0-9]/.test(next);
+  if (head.length >= minHeadLen && !headIsAsciiBrandFragment) push(head);
   return out;
 }
 
