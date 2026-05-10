@@ -465,6 +465,37 @@ describe('findEpisodeForProgram — リィンカーネーションの花弁 them
   });
 });
 
+describe('findEpisodeForProgram — メイドさんは食べるだけ thematic counter case', () => {
+  // svc-400151_2026-05-10T14:00:00.000Z. EPG title carries the AT-X
+  // broadcaster slot prefix `アニメA・` AND the cooking-themed thematic
+  // episode counter `6食目` ("6th meal") — bare digit + 食目 with no
+  // `第` prefix. Locks in 食目 in parseTitleEpisodeNumber's bare-digit
+  // branch so the cascade resolves S/E instead of falling through.
+  const MAID_EPISODES: Episode[] = [
+    { s: 1, e: 1, name: 'パンケーキ／焼き魚／オムレツ', aired: '2026-04-05' },
+    { s: 1, e: 2, name: 'ハンバーグ／生姜焼き／天ぷら', aired: '2026-04-12' },
+    { s: 1, e: 3, name: 'カレー／サラダ／味噌汁', aired: '2026-04-19' },
+    { s: 1, e: 4, name: 'パスタ／ピザ／ティラミス', aired: '2026-04-26' },
+    { s: 1, e: 5, name: '寿司／天ざる／茶碗蒸し', aired: '2026-05-03' },
+    { s: 1, e: 6, name: 'うなぎ／冷奴／お祭り', aired: '2026-05-10' },
+    { s: 1, e: 7, name: 'TBA', aired: '2026-05-17' },
+  ];
+
+  test('bare 6食目 ("6th meal") → S1E6 via title-parsed episode number', () => {
+    // The `アニメA・` slot prefix is stripped at normalize-time so the
+    // search key resolves to the canonical show. The bare-digit `食目`
+    // counter is then parsed by parseTitleEpisodeNumber's bare branch —
+    // same shape as `4話` / `3回` for broadcasters that drop `第`.
+    const hit = findEpisodeForProgram(
+      MAID_EPISODES,
+      '2026-05-10T14:00:00.000Z',
+      'アニメA・メイドさんは食べるだけ\u30006食目「うなぎ／冷奴／お祭り」',
+      ['メイドさんは食べるだけ'],
+    );
+    assert.deepEqual(hit, { s: 1, e: 6, name: 'うなぎ／冷奴／お祭り' });
+  });
+});
+
 describe('findEpisodeForProgram — cumulative fallback', () => {
   test('ダンダダン #18 with S1=12, S2=6 → S2E6', () => {
     // The motivating case. Broadcaster numbers continuously across

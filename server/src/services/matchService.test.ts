@@ -507,6 +507,21 @@ const borderline: Case[] = [
     expected: '夜桜さんちの大作戦',
     note: 'NTV 日5 weekday+hour slot shorthand. BLOCK_PREFIXES carries one general regex `[日月火水木金土]\\d+` covering the whole class (日5/月9/火10/木10/金10/土6/...) so the inner quoted segment is extracted as the show name. `searchCandidates` is the fall-through safety net for future slot labels not matched by the regex. Source: programs.id svc-3272202064_2026-05-10T08:00:00.000Z',
   },
+  {
+    raw: 'アニメA・メイドさんは食べるだけ　6食目「うなぎ／冷奴／お祭り」',
+    expected: 'メイドさんは食べるだけ',
+    note: 'AT-X "Anime A" slot brand uses `・` as separator (general regex `アニメ[A-Z]・` in BLOCK_PREFIXES with the `(?<=・)` lookbehind path in BLOCK_PREFIX_RE absorbs it). 6食目 is a cooking-themed thematic episode counter (sibling shape of the bare `<digit>話/回` form already in CUT_AT_BARE_EP_RE). Source: programs.id svc-400151_2026-05-10T14:00:00.000Z',
+  },
+  {
+    raw: 'アニメA・あかね噺',
+    expected: 'あかね噺',
+    note: 'AT-X slot prefix strip without trailing episode marker — confirms `アニメ[A-Z]・` works in isolation.',
+  },
+  {
+    raw: 'ドラマ・よかれと思ってやったのに～男たちの「失敗学」裁判～▼ゆるさない女',
+    expected: 'ドラマ・よかれと思ってやったのに～男たちの 裁判～',
+    note: 'Bare `ドラマ・` is NOT stripped — the lookbehind path only fires for prefix entries that embed `・` themselves (e.g. `アニメ[A-Z]・`). Generic `ドラマ` literal still requires `[\\s　]+` separator, preserving the historical normalization.',
+  },
 ];
 
 const allCases: Case[] = [
