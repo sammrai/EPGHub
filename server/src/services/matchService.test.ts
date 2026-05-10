@@ -652,6 +652,25 @@ describe('searchKeyCandidates — show-name resolution fan-out', () => {
     assert.deepEqual(got, ['AB CDE']);
   });
 
+  test('3-char ASCII-only head is NOT promoted (issue #11: `BAR` head must not fan out)', () => {
+    // Issue #11: programs.id `svc-400181_2026-05-10T12:00:00.000Z`.
+    // Without this guard, the head fallback would emit `BAR` and
+    // exact-match the unrelated TVDB show `Bar` (tvdb_id 414326).
+    // The minHeadLen split (3 chars CJK ok, 4 chars ASCII required)
+    // structurally separates "show name token" from "noise opener"
+    // — `タッチ`/`鬼滅` keep working, but `BAR`/`THE`/`OUR` are dropped.
+    const got = searchKeyCandidates('BAR レモン・ハート 恋の入門ウイスキー');
+    assert.deepEqual(got, ['BAR レモン・ハート 恋の入門ウイスキー']);
+  });
+
+  test('3-char CJK kana/kanji head IS still promoted (negative case for the ASCII-only guard)', () => {
+    // Sibling lock for the test above: the minHeadLen split must be
+    // ASCII-only — 3-char CJK heads remain valid show-name tokens.
+    // `タッチ` (3 kana chars) is the canonical example.
+    const got = searchKeyCandidates('タッチ 全国大会編');
+    assert.deepEqual(got, ['タッチ 全国大会編', 'タッチ']);
+  });
+
   test('duplicate primary/head deduped', () => {
     const got = searchKeyCandidates('鬼滅');
     assert.deepEqual(got, ['鬼滅']);
@@ -718,6 +737,22 @@ describe('scoreOf — zenkaku/hankaku punctuation folding', () => {
     // Sanity check — folding does not relax matching to be too lenient.
     const entry = makeSeries('全然違う作品');
     const score = scoreOf(entry, '大きい女の子は好きですか?');
+    assert.equal(score, 0);
+  });
+
+  test('short generic 3-char TVDB title (`Bar`) does NOT match a long broadcaster title that opens with `BAR …`', () => {
+    // Issue #11: programs.id `svc-400181_2026-05-10T12:00:00.000Z`
+    // (`BAR レモン・ハート　恋の入門ウイスキー`). Pre-guard, the
+    // asymmetric-containment branch (key ⊇ ja|en) of scoreOf would let
+    // a 3-char generic English word (`Bar`, tvdb_id 414326) score against
+    // a 21-char Japanese broadcaster title because the 3-char string is
+    // technically a substring head of the long key. CONTAINMENT_MIN_COVERAGE
+    // (=0.25) gates this: 3 / 21 = 0.14 < 0.25 → reject. Locks the floor
+    // structurally so future tweaks to the branch can't accidentally
+    // re-open the door for short generic English titles.
+    const entry = makeSeries('Bar', 'Bar');
+    const key = normalizeTitle('BAR レモン・ハート　恋の入門ウイスキー');
+    const score = scoreOf(entry, key);
     assert.equal(score, 0);
   });
 });
