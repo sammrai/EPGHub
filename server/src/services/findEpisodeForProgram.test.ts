@@ -525,3 +525,54 @@ describe('findEpisodeForProgram — aired fallback', () => {
     assert.equal(hit, null);
   });
 });
+
+describe('findEpisodeForProgram — 孤独のグルメ regression case', () => {
+  // Source: programs.id svc-400171_2026-05-10T08:45:00.000Z
+  //   title: 孤独のグルメSeason11　３話　文京区のラムスパイシー炒めと豚バラきゅうり[字]
+  //   tvdb_id 260548 matched but tvdbSeason/tvdbEpisode were NULL because
+  //   parseTitleEpisodeNumber didn't recognise bare `N話` (no `第` prefix).
+  //   The kantou commercial nets routinely drop the 第 prefix on a `<digit>話`
+  //   episode marker, so this is a broadcaster-wide convention to support.
+  test('bare "N話" without 第 prefix resolves to E=N, latest season', () => {
+    const list: Episode[] = [
+      { s: 11, e: 1, name: '第1話 神奈川県藤沢市善行のさばみりんと豚汁' },
+      { s: 11, e: 2, name: '第2話 東京都港区西麻布のタンドリーチキン…' },
+      {
+        s: 11,
+        e: 3,
+        name: '第3話 東京都文京区千石のラムショルダー発酵菜スパイシー炒めと豚バラきゅうりガーリックソース',
+      },
+      { s: 11, e: 4, name: '第4話 本厚木のバーニャカウダと脾臓のパニーニ' },
+    ];
+    const hit = findEpisodeForProgram(
+      list,
+      '2026-05-10T08:45:00.000Z',
+      '孤独のグルメSeason11　３話　文京区のラムスパイシー炒めと豚バラきゅうり[字]',
+    );
+    // showTitles omitted — exercises the legacy quoted-subtitle path which
+    // doesn't fire here (no quoted segment), so resolution falls through
+    // to the new bare-N話 step in parseTitleEpisodeNumber.
+    assert.deepEqual(hit, {
+      s: 11,
+      e: 3,
+      name: '第3話 東京都文京区千石のラムショルダー発酵菜スパイシー炒めと豚バラきゅうりガーリックソース',
+    });
+  });
+
+  test('bare "４話" zenkaku digits work the same way', () => {
+    const list: Episode[] = [
+      { s: 11, e: 3, name: '第3話 …' },
+      { s: 11, e: 4, name: '第4話 本厚木のバーニャカウダと脾臓のパニーニ' },
+    ];
+    const hit = findEpisodeForProgram(
+      list,
+      '2026-04-24T08:45:00.000Z',
+      '孤独のグルメSeason11　４話　本厚木のバーニャカウダと脾臓のパニーニ[字]',
+    );
+    assert.deepEqual(hit, {
+      s: 11,
+      e: 4,
+      name: '第4話 本厚木のバーニャカウダと脾臓のパニーニ',
+    });
+  });
+});

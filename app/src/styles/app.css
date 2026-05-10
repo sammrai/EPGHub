@@ -1089,19 +1089,48 @@ select.control-sm {
 }
 
 /* Selected — accent-soft fill + inset 1.5px accent ring (design guide). */
+/* Selection focus — neutral gray so it can't be mistaken for the blue
+   "予約済み" state. Just a subtle inset ring + slightly lifted z-index;
+   no fill change so a reserved/recording/series cell keeps its state
+   colour while still showing it's the active selection. */
 .prog.selected {
-  background: var(--accent-soft);
-  box-shadow: 0 0 0 1.5px var(--accent) inset;
+  box-shadow: 0 0 0 1.5px var(--fg-muted) inset;
   z-index: 6;
 }
-.prog.selected .prog-meta {
-  color: var(--accent);
+
+/* Recording state visuals — three discrete colour tokens (single
+   reservation = blue accent, live recording = red rec, series rule =
+   orange series). Each modifier class declares the local `--state` /
+   `--state-soft` pair and the shared rules below paint:
+     - the cell background with the soft tint (fill)
+     - the cell border slightly tinted toward the state colour
+     - a 3px left-edge stripe with the saturated state colour
+   The same `--state*` token convention is reused by Timeline
+   (`.tl-prog.<state>`) so a reserved cell, a recording-now cell, and a
+   series-rule cell all get the same fill treatment regardless of which
+   view renders them. */
+.prog.reserved,
+.tl-prog.reserved {
+  --state: var(--accent);
+  --state-soft: var(--accent-soft);
+}
+.prog.recording,
+.tl-prog.recording {
+  --state: var(--rec);
+  --state-soft: var(--rec-soft);
+}
+.prog.series-reserved,
+.tl-prog.series-reserved {
+  --state: var(--series);
+  --state-soft: var(--series-soft);
 }
 
-/* state stripes — direct port of design's `.p.reserved::before /
-   .p.recording::before` (styles.css L455). Series-rule reservations get
-   their own orange stripe + soft fill so they read distinctly from blue
-   single bookings at a glance. */
+.prog.reserved,
+.prog.recording,
+.prog.series-reserved {
+  background: var(--state-soft);
+  border-color: color-mix(in oklch, var(--state) 40%, var(--border));
+}
 .prog.reserved::before,
 .prog.recording::before,
 .prog.series-reserved::before {
@@ -1111,14 +1140,8 @@ select.control-sm {
   top: 0;
   bottom: 0;
   width: 3px;
+  background: var(--state);
 }
-.prog.reserved::before { background: var(--accent); }
-.prog.recording::before { background: var(--rec); }
-.prog.series-reserved {
-  background: var(--series-soft);
-  border-color: color-mix(in oklch, var(--series) 40%, var(--border));
-}
-.prog.series-reserved::before { background: var(--series); }
 
 .prog.past {
   opacity: 0.55;
@@ -1448,15 +1471,21 @@ select.control-sm {
 }
 
 .tl-prog.selected {
-  background: var(--accent-soft);
-  box-shadow: 0 0 0 1.5px var(--accent) inset;
+  box-shadow: 0 0 0 1.5px var(--fg-muted) inset;
   z-index: 6;
 }
 
-/* state stripes — direct port of the design's
-   `.p.reserved::before / .p.recording::before`. Series-rule reservations
-   render in orange so the user can distinguish them from blue single
-   bookings without opening the modal. */
+/* Recording state visuals — see the .prog.<state> definitions above for
+   the shared `--state` / `--state-soft` token convention. Each Timeline
+   cell with a state modifier inherits the same blue / red / orange fill
+   pair so the visual language is identical between the Grid and Timeline
+   views. */
+.tl-prog.reserved,
+.tl-prog.recording,
+.tl-prog.series-reserved {
+  background: var(--state-soft);
+  border-color: color-mix(in oklch, var(--state) 40%, var(--border));
+}
 .tl-prog.reserved::before,
 .tl-prog.recording::before,
 .tl-prog.series-reserved::before {
@@ -1466,13 +1495,8 @@ select.control-sm {
   top: 0;
   bottom: 0;
   width: 3px;
+  background: var(--state);
 }
-.tl-prog.reserved::before { background: var(--accent); }
-.tl-prog.recording::before { background: var(--rec); }
-.tl-prog.series-reserved {
-  background: var(--series-soft);
-}
-.tl-prog.series-reserved::before { background: var(--series); }
 
 .tl-prog.past { opacity: 0.5; }
 
@@ -1492,12 +1516,10 @@ select.control-sm {
   color: var(--fg-secondary);
   font-weight: 600;
 }
-.tl-prog.selected .tl-prog-meta {
-  color: var(--accent);
-}
-.tl-prog.selected .tl-prog-meta strong {
-  color: var(--accent);
-}
+/* Meta colour intentionally NOT overridden on selection — the gray
+   inset ring carries the focus signal alone, leaving the cell's
+   state-derived palette (reserved blue, recording red, series orange)
+   untouched. */
 
 .tl-prog-title {
   font-size: 13px;
@@ -2878,25 +2900,6 @@ input[type=range] {
   padding: 2px 0 2px 10px;
   border-left: 2px solid var(--border);
   white-space: pre-wrap;
-}
-
-/* Collapsed EpgDetails block — shows the top portion and fades to
-   transparent at the bottom. The surrounding modal uses --bg-elev so the
-   gradient blends into the modal surface (not the page background). */
-.epg-details-fade {
-  position: relative;
-  max-height: 160px;
-  overflow: hidden;
-}
-.epg-details-fade::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 96px;
-  background: linear-gradient(to bottom, transparent, var(--bg-elev));
-  pointer-events: none;
 }
 
 /* Reservation modal option row (priority / quality / TS) */
@@ -4393,14 +4396,59 @@ input[type=range] {
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: 16px;
-  overflow: auto;
-  overflow-x: hidden;
+  overflow: hidden;            /* clip glass + scroll inside .gp-scroll */
   display: flex;
   flex-direction: column;
+  isolation: isolate;
   box-shadow:
     0 24px 60px oklch(0.15 0.04 255 / 0.28),
     0 8px 20px oklch(0.15 0.04 255 / 0.18);
   animation: gp-slide-up 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Single-sheet glass — when the program has a TVDB poster, the blurred
+   bleed covers the whole panel (not just the hero band) so the modal
+   reads as one continuous translucent surface. The sharp poster on the
+   left of the hero row still renders on top via .gp-poster. */
+.guide-panel-floating.has-poster::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: var(--gp-hero-bg);
+  background-size: cover;
+  background-position: center top;
+  opacity: 0.22;
+  filter: blur(56px) saturate(1.3);
+  transform: scale(1.3);
+  z-index: -2;
+  pointer-events: none;
+}
+.guide-panel-floating.has-poster::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(180deg,
+      transparent 0%,
+      color-mix(in oklch, var(--bg-elev) 35%, transparent) 50%,
+      color-mix(in oklch, var(--bg-elev) 75%, transparent) 100%);
+  z-index: -1;
+  pointer-events: none;
+}
+
+/* Scrollable content area inside the panel chrome. Sits above the glass
+   pseudo-elements (z-index: 0 establishes a stacking context against the
+   negative-z glass) and handles overflow so the close button + glass
+   stay anchored at the panel level rather than scrolling away. */
+.gp-scroll {
+  position: relative;
+  z-index: 0;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
 }
 @keyframes gp-slide-up {
   from { transform: translate(-50%, 28px); opacity: 0; }
@@ -4447,15 +4495,15 @@ input[type=range] {
 
 /* Hero band — 2-column row when a TVDB poster exists (poster on the
    left, content on the right with info top + actions bottom-right).
-   Without a poster the content column simply spans the full width. */
+   Without a poster the content column simply spans the full width.
+   Background stays transparent so the panel-level glass shows through. */
 .gp-main {
   position: relative;
   display: flex;
   align-items: stretch;
   gap: 18px;
   padding: 18px 22px 16px 18px;
-  background: var(--bg-elev);
-  isolation: isolate;
+  background: transparent;
   flex-shrink: 0;
 }
 .gp-content {
@@ -4469,40 +4517,8 @@ input[type=range] {
    pushes the buttons to the same baseline as the poster's bottom edge.
    Without a poster the content sizes to its own content — no inflated
    gap above the action row. */
-.gp-main.has-poster .gp-content {
+.guide-panel-floating.has-poster .gp-content {
   min-height: 188px;
-}
-.gp-main.has-poster::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image: var(--gp-hero-bg);
-  background-size: cover;
-  background-position: center;
-  opacity: 0.28;
-  filter: blur(44px) saturate(1.3);
-  transform: scale(1.25);
-  z-index: -2;
-  pointer-events: none;
-}
-/* Two-axis fade: the bleed is strongest on the left (anchored by the
-   poster) and at the top of the row, fading toward the actions column
-   on the right and the panel surface at the bottom so the right edge
-   reads cleanly under the action cards. */
-.gp-main.has-poster::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(90deg,
-      transparent 0%,
-      color-mix(in oklch, var(--bg-elev) 60%, transparent) 55%,
-      var(--bg-elev) 100%),
-    linear-gradient(180deg,
-      transparent 0%,
-      color-mix(in oklch, var(--bg-elev) 70%, transparent) 100%);
-  z-index: -1;
-  pointer-events: none;
 }
 
 .gp-poster {
@@ -4723,12 +4739,21 @@ input[type=range] {
   margin-top: auto;
 }
 
-/* Below-row continuation — desc / cast / staff / related, reusing the
-   .gp-section styling. Sits inside the panel's scrollable area. */
+/* Below-row continuation — desc / cast / staff / related. Renders as a
+   frosted card clearly distinct from the colour-bled hero band above:
+   the bg is mostly opaque (~88% bg-elev) so text contrast stays high,
+   and a strong backdrop-filter blur turns whatever poster bleed leaks
+   through into a soft tint rather than competing with the content.
+   The shadow at the top edge adds a subtle "lift", reinforcing the
+   sense of two stacked surfaces while the glass underneath continues. */
 .gp-extras {
   display: flex;
   flex-direction: column;
-  background: var(--bg-elev);
+  background: color-mix(in oklch, var(--bg-elev) 88%, transparent);
+  backdrop-filter: blur(24px) saturate(1.2);
+  -webkit-backdrop-filter: blur(24px) saturate(1.2);
+  border-top: 1px solid var(--border);
+  box-shadow: inset 0 1px 0 color-mix(in oklch, white 50%, transparent);
 }
 
 /* Footer row holding the "EPG / TVDB デバッグ" link — opens a sub-modal
@@ -4738,9 +4763,8 @@ input[type=range] {
 .gp-debug-row {
   display: flex;
   justify-content: flex-end;
-  padding: 10px 18px 14px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-elev);
+  padding: 6px 18px 12px;
+  background: transparent;
 }
 .gp-debug-trigger {
   background: transparent;
@@ -5063,6 +5087,26 @@ input[type=range] {
   font-weight: 600;
   color: var(--fg-subtle);
 }
+
+/* "この番組" pill — flags the row in the preview list that matches the
+   currently-viewed airing so the user can locate themself in the
+   schedule of upcoming auto-recordings. Same outlined-chip treatment
+   as the related-programs same-channel marker for consistency. */
+.gp-series-preview-row.is-self {
+  background: color-mix(in oklch, var(--accent) 6%, transparent);
+}
+.gp-series-preview-self {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 1px 5px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  border-radius: 3px;
+  border: 1px solid color-mix(in oklch, var(--accent) 45%, transparent);
+  color: var(--accent);
+}
 .gp-series-preview-more {
   padding: 6px 12px;
   font-size: 11px;
@@ -5236,7 +5280,13 @@ input[type=range] {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 14px 18px;
+  padding: 16px 18px;
+}
+/* Dividers between stacked sections inside .gp-extras — solid hairlines
+   so each section reads as its own band. The first child has no border
+   (the parent's border-top + inset highlight already separates it from
+   the hero). */
+.gp-extras > .gp-section + .gp-section {
   border-top: 1px solid var(--border);
 }
 .gp-section-title {
@@ -5253,6 +5303,71 @@ input[type=range] {
   line-height: 1.7;
   color: var(--fg-secondary);
   white-space: pre-wrap;
+}
+
+/* 公式リンク — broadcaster URLs pulled from the EPG `extended` descriptor,
+   rendered as compact "external link" pills inside the あらすじ section
+   (so the official site / SNS sit next to the description they belong to).
+   Each chip pairs the site favicon with a short label (X / YouTube /
+   番組HP …) so the brand reads at a glance; the lift on hover signals
+   that the row is interactive without competing with the primary action
+   buttons in the title row. */
+.gp-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+.gp-link-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px 0 6px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--fg-secondary);
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0.01em;
+  text-decoration: none;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+.gp-link-chip:hover {
+  background: var(--bg-hover);
+  border-color: var(--fg-subtle);
+  color: var(--fg);
+  transform: translateY(-1px);
+}
+.gp-link-chip:active {
+  transform: translateY(0);
+}
+.gp-link-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--bg-muted);
+}
+.gp-link-mark img {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+.gp-link-monogram {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--fg-muted);
+  line-height: 1;
+}
+.gp-link-label {
+  white-space: nowrap;
 }
 
 /* 出演者 — circular avatars; auto-fill so the row densifies as the
@@ -5341,69 +5456,107 @@ input[type=range] {
   word-break: break-word;
 }
 
+/* 関連番組 — compact 2-line stacked rows separated by hairlines,
+   matching the muted tone of the other gp-extras sections. The row is
+   transparent and lights up only on hover with a translucent wash. The
+   title is clipped to a single line (no wrap) so each row stays at a
+   predictable two-line height regardless of broadcaster verbosity. */
 .gp-related-list {
   margin: 0;
   padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+}
+.gp-related-list li + li {
+  border-top: 1px solid color-mix(in oklch, var(--border) 50%, transparent);
 }
 .gp-related-item {
-  display: flex;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  column-gap: 10px;
   width: 100%;
   align-items: center;
-  padding: 8px 10px;
-  background: var(--bg-subtle);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  padding: 8px;
+  margin: 0 -8px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
   cursor: pointer;
   text-align: left;
-  transition: all 120ms var(--ease);
+  color: var(--fg-secondary);
+  transition: background 140ms var(--ease), color 140ms var(--ease);
+  font-family: inherit;
 }
 .gp-related-item:hover {
-  background: var(--bg-elev);
-  border-color: var(--accent);
-  transform: translateX(2px);
+  background: color-mix(in oklch, var(--bg-hover) 50%, transparent);
+  color: var(--fg);
+}
+.gp-related-item:hover .gp-related-title {
+  color: var(--accent);
 }
 .gp-related-when {
-  flex: 0 0 78px;
   font-family: var(--font-mono);
   font-size: 10.5px;
-  color: var(--fg-muted);
+  color: var(--fg-subtle);
   letter-spacing: 0.02em;
   font-weight: 600;
+  white-space: nowrap;
 }
 .gp-related-main {
-  flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 .gp-related-title {
   font-size: 12.5px;
   font-weight: 600;
-  color: var(--fg);
-  word-break: break-word;
-  line-height: 1.35;
+  color: var(--fg-secondary);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 140ms var(--ease);
 }
 .gp-related-meta {
   font-size: 10.5px;
-  color: var(--fg-muted);
-  margin-top: 3px;
+  color: var(--fg-subtle);
   display: flex;
   align-items: center;
   gap: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gp-related-meta > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .gp-related-se {
-  flex: 0 0 auto;
-  margin-left: auto;
-  align-self: center;
   font-family: var(--font-mono);
   font-size: 10.5px;
   font-weight: 600;
   color: var(--fg-subtle);
   letter-spacing: 0.02em;
-  padding-left: 8px;
+  white-space: nowrap;
+}
+
+/* Same-channel marker — a discreet outlined chip in the meta row.
+   Accent-tinted enough to register at-a-glance as "this airing is on
+   the channel you're viewing" but without a filled-pill weight that
+   would compete with the action buttons in the hero band. */
+.gp-related-same-ch {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  border-radius: 3px;
+  border: 1px solid color-mix(in oklch, var(--accent) 45%, transparent);
+  color: var(--accent);
+  margin-right: 4px;
 }
 
 

@@ -87,13 +87,100 @@ If you're not sure whether the fix is general enough, sanity-check by
 asking: "would this same change help any other show that follows the
 same broadcaster convention?" If no, it's special-casing.
 
+### Don't pick — enumerate (with API-load awareness)
+
+When the input is ambiguous, don't silently commit to one
+interpretation in a way that grows per-case. The matcher already has
+scoring (`scoreOf` in `matchService.ts`) and `findEpisodeForProgram`
+has a four-step signal cascade; pre-processing should feed them, not
+pre-empt them. **But fan-out has a cost** — every extra candidate the
+auto-matcher tries is one more `tvdbService.search` call against a
+rate-limited API. The principle is "enumerate"; the implementation
+choice is whether to enumerate *at the regex level* (one regex covers
+a class, no extra API calls) or *at the search level* (multiple
+candidates per missed primary, extra API calls).
+
+Prefer the regex-level form when the class can be captured by a
+single general regex with low collision risk against real TVDB show
+names. Fall back to search-level fan-out only when no general regex
+works — or as the safety net for unknown future patterns. A growing
+*list of literal regexes* is the same anti-pattern as a growing list
+of literal strings.
+
+You're in the wrong shape when:
+- The fix grows an enumerated list **per literal** — adding `日5`,
+  then later `土6`, then `月8`. Each addition only fixes one case;
+  list grows without bound.
+- You're confident the answer is "the part before / inside / after X"
+  but all three are plausible. The fix should not commit to one.
+- The fix needs a *show-specific* literal guard (`if title.includes
+  ('満員御礼')`, hardcoded TVDB id). One show, one bandage; no
+  generalisation.
+
+Where the right level lives in this codebase:
+- **Show-name resolution** → `BLOCK_PREFIXES` / `QUOTED_HOST_PREFIX_RE`
+  in `matchService.ts`. Adding a *single general regex* to
+  `BLOCK_PREFIXES` is the cheapest way to absorb a structural class
+  of broadcaster shorthand; the existing single-fallback
+  (`key.split(/\s+/)[0]`) in `enrichUnmatched` covers the
+  documentary-style "show name + space + subtitle" case.
+- **Per-airing episode resolution** → `findEpisodeForProgram`'s
+  four-step cascade. Cheap to extend (no API cost), so prefer
+  extending the cascade or having an existing step emit multiple
+  internal candidates.
+
+### Whitelist judgement
+
+Whitelists in `BLOCK_PREFIXES` / `QUOTED_HOST_PREFIX_RE` are not
+categorically banned. The test is *what each entry covers* and
+*whether it could collide with a real TVDB show*:
+
+- **Always OK**: structural rules that strip a syntactic class
+  regardless of content (`[新]` and other `[…]` flag-bracket strips,
+  zenkaku ⟷ hankaku folding, half ⟷ full punctuation). Content-
+  agnostic, no candidate lost.
+- **Preferred for new fixes**: a *single general regex* covering a
+  structural class of broadcaster shorthand — e.g. `[日月火水木金土]\d+`
+  for weekday+hour slot codes (日5 / 月9 / 木10 / …). One regex
+  absorbs the whole class so the list doesn't grow with each new
+  network's slot label. Acceptable when the regex is unlikely to
+  collide with a real TVDB show name. If you can't rule out collision
+  (a show literally named `木7`, or a sumo programme like `満員御礼`
+  that resembles a show name), don't add it — prefer search-level
+  fan-out instead.
+- **Almost never OK for new fixes**: per-literal entries (`日曜劇場`,
+  `金曜ロードショー`, the existing list). Inherited tech-debt; new
+  entries of this shape should be argued against. Only land one if
+  there's no general regex that subsumes it AND the literal genuinely
+  cannot be a TVDB show.
+
+The `matchService whitelist complexity guards` tests in
+`matchService.test.ts` enforce this:
+- `BLOCK_PREFIXES.length <= SNAPSHOT_LIMIT` — bumping is intentional
+  and forces a review.
+- General-regex entries `>= 2` — if a literal addition pushes ratio
+  toward "all literals", the test forces a re-think.
+
+When you add to `BLOCK_PREFIXES`, expect to update the snapshot AND
+justify in the PR. That's the friction by design.
+
 ## Step 4: add a regression test
 
-Always add a `test(...)` to `findEpisodeForProgram.test.ts` that uses
-the **exact program title and start time from the DB** (so the test is
-self-documenting — anyone reading it can see which real-world EPG
-artefact it locks down). Group multiple cases for the same show under
-one `describe('findEpisodeForProgram — <show> regression case')`.
+Pick the test file based on *which layer* you fixed:
+
+- **Fix in `findEpisodeForProgram` / `parseTitleEpisodeNumber` / signal
+  cascade** → `findEpisodeForProgram.test.ts`. Group multiple cases for
+  the same show under one `describe('findEpisodeForProgram — <show>
+  regression case')`.
+- **Fix in `normalizeTitle` / `BLOCK_PREFIXES` /
+  `QUOTED_HOST_PREFIX_RE` / strip rules** → `matchService.test.ts`.
+  Add a `Case` to the `borderline` (or other relevant) array.
+- **Both layers touched** → add tests to both files; each file locks
+  the layer it owns.
+
+Use the **exact program title and start time from the DB** (test is
+self-documenting — anyone reading it sees which real-world EPG
+artefact it locks down).
 
 Test data convention:
 - Build the `episodes` array from the actual TVDB cache dump (Step 1's
@@ -115,13 +202,34 @@ From `server/`:
 
 ```sh
 node --import tsx --test src/services/findEpisodeForProgram.test.ts
+node --import tsx --test src/services/matchService.test.ts
 npm run typecheck
 npm run test:golden
 ```
 
-All three must be green before you report done. If any unrelated test
-fails, investigate — your normalisation/regex change may have broken a
-neighbouring case.
+All four must be green before you report done. `matchService.test.ts`
+carries both the normaliser cases and the **whitelist complexity
+guards** (`BLOCK_PREFIXES.length` snapshot, regex/literal ratio) — if
+your fix grew the whitelist, the snapshot test fails here first.
+
+If any unrelated test fails, investigate — your normalisation/regex
+change may have broken a neighbouring case.
+
+### When the normaliser changed
+
+If your fix touches `normalizeTitle` (incl. anything in
+`BLOCK_PREFIXES`, `QUOTED_HOST_PREFIX_RE`, `STRIP_SUFFIX_RE`,
+`TRAILING_KANA_DIGIT_RE`, …), the golden fixture in
+`server/fixtures/normalize-titles.gold.json` is now out of date and
+`npm run test:golden` will fail. Regenerate then review the diff:
+
+```sh
+npm run dump:golden-titles
+git diff fixtures/normalize-titles.gold.json | head -200
+```
+
+Skim the diff for unintended changes (titles you didn't expect to
+move). Commit the regenerated fixture alongside your code change.
 
 ## Step 5.5: end-to-end verification against the live DB row
 

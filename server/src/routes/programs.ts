@@ -81,6 +81,40 @@ programsRouter.openapi(linkTvdb, async (c) => {
   }
 });
 
+// --- POST /programs/:id/rematch -----------------------------------------
+// Single-program rematch. For matched programs: refreshes the cached TVDB
+// entry + episode list and re-applies S/E. For unmatched programs: runs
+// the same auto-search the bulk matcher uses, ignoring stale overrides
+// so the user can retry after fixing a normalization rule. Returns the
+// resolved entry on success, null when no match was found.
+
+const RematchResponse = z.object({
+  matched: z.boolean(),
+  entry: TvdbEntrySchema.nullable(),
+});
+
+const rematchProgram = createRoute({
+  method: 'post',
+  path: '/programs/{id}/rematch',
+  tags: ['programs'],
+  summary: 'TVDB 再マッチ',
+  description:
+    '番組の TVDB マッチを再実行する。既にマッチ済みなら entry を再取得して S/E を再判定（user_set フラグは変更しない）。未マッチなら自動検索を走らせ、見つかれば紐付ける。',
+  request: { params: idParam },
+  responses: {
+    200: { description: '再マッチ結果', content: { 'application/json': { schema: RematchResponse } } },
+    404: { description: '番組が見つからない', content: { 'application/json': { schema: ErrorSchema } } },
+  },
+});
+
+programsRouter.openapi(rematchProgram, async (c) => {
+  const { id } = c.req.valid('param');
+  const existing = await programService.findById(id);
+  if (!existing) return c.json({ code: 'programs.not_found', message: '該当なし' }, 404);
+  const entry = await matchService.rematchProgram(id);
+  return c.json({ matched: entry !== null, entry: entry ?? null }, 200);
+});
+
 // --- DELETE /programs/:id/tvdb ------------------------------------------
 // Manual unmatch — pins title_overrides as "no match" so auto matcher leaves
 // it alone, and clears programs.tvdb_id for the normalized-title cohort.

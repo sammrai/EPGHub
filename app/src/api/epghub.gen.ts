@@ -304,6 +304,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/programs/{id}/rematch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * TVDB 再マッチ
+         * @description 番組の TVDB マッチを再実行する。既にマッチ済みなら entry を再取得して S/E を再判定（user_set フラグは変更しない）。未マッチなら自動検索を走らせ、見つかれば紐付ける。
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description 再マッチ結果 */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            matched: boolean;
+                            entry: Omit<components["schemas"]["TvdbEntry"], "type"> & (components["schemas"]["TvdbSeries"] | components["schemas"]["TvdbMovie"] | null);
+                        };
+                    };
+                };
+                /** @description 番組が見つからない */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/programs/{id}/tvdb-episode": {
         parameters: {
             query?: never;

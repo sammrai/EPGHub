@@ -9,7 +9,10 @@
 // development DB as of 2026-04-19.
 
 import 'dotenv/config';
-import { test } from 'node:test';
+import { readFileSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeTitle } from './matchService.ts';
 
@@ -463,6 +466,26 @@ const borderline: Case[] = [
     expected: 'Fresh Faces',
     note: 'cut at #550 takes out everything after, including the guest list',
   },
+  {
+    raw: '異世界のんびり農家２',
+    expected: '異世界のんびり農家',
+    note: 'sequel/season number directly suffixed to a kana/kanji title — strip so TVDB search finds the canonical entry. Source: programs.id svc-400171_2026-05-12T15:30:00.000Z',
+  },
+  {
+    raw: '進撃の巨人3',
+    expected: '進撃の巨人',
+    note: 'hankaku single-digit sequel suffix on an anime title',
+  },
+  {
+    raw: 'ハチ公20',
+    expected: 'ハチ公20',
+    note: 'two-digit suffix is NOT stripped — could be year/total-episodes/etc.',
+  },
+  {
+    raw: '日５「夜桜さんちの大作戦」　＃３２「愛の結晶」([字][デ]',
+    expected: '夜桜さんちの大作戦',
+    note: 'NTV 日5 weekday+hour slot shorthand. BLOCK_PREFIXES carries one general regex `[日月火水木金土]\\d+` covering the whole class (日5/月9/火10/木10/金10/土6/...) so the inner quoted segment is extracted as the show name. `searchCandidates` is the fall-through safety net for future slot labels not matched by the regex. Source: programs.id svc-3272202064_2026-05-10T08:00:00.000Z',
+  },
 ];
 
 const allCases: Case[] = [
@@ -486,3 +509,81 @@ for (const c of allCases) {
     assert.equal(got, c.expected);
   });
 }
+
+// -------------------------------------------------------------------
+// Complexity guards. The skill's "Don't pick — enumerate" principle
+// (see fix-episode-match SKILL.md) wants per-literal whitelist growth
+// to be visible and reviewed. These tests fail when:
+//   1. BLOCK_PREFIXES grows past the snapshot count, or
+//   2. The ratio of literal entries to general regex entries shifts
+//      toward more literals (each new literal asks "could this have
+//      been a general regex instead?").
+// Bumping the snapshot is intentional — it's the review checkpoint.
+// -------------------------------------------------------------------
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const matchServiceSource = readFileSync(
+  resolve(__dirname, 'matchService.ts'),
+  'utf8',
+);
+
+// Pull the BLOCK_PREFIXES literal array out of source. Doing this by
+// regex rather than by re-importing keeps the test independent of any
+// runtime export — adding a `module-private` entry still gets caught.
+function extractBlockPrefixes(): string[] {
+  const m = matchServiceSource.match(
+    /const BLOCK_PREFIXES\s*=\s*\[([\s\S]*?)\];/,
+  );
+  if (!m) throw new Error('BLOCK_PREFIXES literal not found in matchService.ts');
+  // Strip line comments, then pull each single-quoted entry.
+  const body = m[1].replace(/\/\/.*$/gm, '');
+  const items: string[] = [];
+  for (const im of body.matchAll(/'((?:\\'|[^'])*)'/g)) {
+    items.push(im[1]);
+  }
+  return items;
+}
+
+// A literal entry has no regex meta-characters — it matches exactly
+// one fixed string (`日曜劇場`, `アニメ`). A general regex entry
+// (`\d+時のアニメ`, `[日月火水木金土]\d+`) covers a structural class
+// and substitutes for many literals.
+function isGeneralRegex(entry: string): boolean {
+  return /\\d|\\w|\\s|\[|\(|\?|\*|\+|\{|\|/.test(entry);
+}
+
+describe('matchService whitelist complexity guards', () => {
+  test('BLOCK_PREFIXES size is locked — bump deliberately', () => {
+    const prefixes = extractBlockPrefixes();
+    // Snapshot. When you legitimately need to extend, bump here AND
+    // justify the addition in the PR (general regex preferred over
+    // literal). The skill's per-literal anti-pattern check fires
+    // when this grows by literals more often than by regexes.
+    const SNAPSHOT_LIMIT = 18;
+    assert.ok(
+      prefixes.length <= SNAPSHOT_LIMIT,
+      `BLOCK_PREFIXES grew to ${prefixes.length} (limit ${SNAPSHOT_LIMIT}). ` +
+        `Either consolidate two literals into one general regex, or bump the ` +
+        `limit and document the addition (see fix-episode-match SKILL.md › ` +
+        `"Whitelist judgement").`,
+    );
+  });
+
+  test('majority of BLOCK_PREFIXES are literals — track regex ratio', () => {
+    const prefixes = extractBlockPrefixes();
+    const general = prefixes.filter(isGeneralRegex).length;
+    const literal = prefixes.length - general;
+    // Locks the *ratio*, not absolute counts. Adding a literal moves
+    // this toward "more literals than regexes" — at which point the
+    // assertion forces a re-think (would a general regex absorb the
+    // class instead?).
+    assert.ok(
+      general >= 2,
+      `Expected at least 2 general-regex entries in BLOCK_PREFIXES, got ${general}. ` +
+        `If you removed a regex, replace it with a literal class equivalent ` +
+        `or the diversity guard loses meaning.`,
+    );
+    // Sanity: enumerate counts so test failures show a useful diff.
+    assert.equal(general + literal, prefixes.length);
+  });
+});

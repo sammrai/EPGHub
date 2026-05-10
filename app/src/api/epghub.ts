@@ -162,6 +162,10 @@ export const api = {
       req<void>('DELETE', `/programs/${encodeURIComponent(id)}/tvdb`),
     setEpisode: (id: string, season: number | null, episode: number | null) =>
       req<ApiProgram>('PATCH', `/programs/${encodeURIComponent(id)}/tvdb-episode`, { season, episode }),
+    rematch: (id: string) =>
+      req<{ matched: boolean; entry: ApiTvdbEntry | null }>(
+        'POST', `/programs/${encodeURIComponent(id)}/rematch`
+      ),
   },
   tuners: {
     list: () => req<ApiTunerState[]>('GET', '/tuners'),

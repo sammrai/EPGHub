@@ -1916,6 +1916,46 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /programs/{id}/rematch:
+    post:
+      tags:
+        - programs
+      summary: TVDB 再マッチ
+      description: 番組の TVDB マッチを再実行する。既にマッチ済みなら entry を再取得して S/E を再判定（user_set
+        フラグは変更しない）。未マッチなら自動検索を走らせ、見つかれば紐付ける。
+      parameters:
+        - schema:
+            type: string
+            example: nhk-g_2026-04-19T20:00:00.000Z
+          required: true
+          in: path
+          name: id
+      responses:
+        "200":
+          description: 再マッチ結果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  matched:
+                    type: boolean
+                  entry:
+                    allOf:
+                      - $ref: "#/components/schemas/TvdbEntry"
+                      - oneOf:
+                          - $ref: "#/components/schemas/TvdbSeries"
+                          - $ref: "#/components/schemas/TvdbMovie"
+                          - type: "null"
+                required:
+                  - matched
+                  - entry
+        "404":
+          description: 番組が見つからない
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /programs/{id}/tvdb-episode:
     patch:
       tags:

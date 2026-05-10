@@ -96,10 +96,26 @@ function GuidePanelInner({
   // `programs` prop is only the seed — `useTvdbPrograms` returns the full
   // set keyed on `tvdb.id`.
   const seriesEps = useTvdbPrograms(tvdb?.id ?? null, programs);
-  const related = seriesEps
-    .filter((p) => progId(p) !== progId(program))
-    .sort((a, b) => (a.startAt ?? a.start).localeCompare(b.startAt ?? b.start))
-    .slice(0, 8);
+  const related = (() => {
+    // Same airing on parallel channel sources (svc-/m3u-) appears twice in
+    // useTvdbPrograms because they're distinct channel rows. Collapse by
+    // (channelKey, startAt) so only one entry shows per actual broadcast.
+    // The current program's own (channelKey, startAt) is pre-seeded so the
+    // m3u-/svc- twin of *this* airing doesn't show up as a "related" row.
+    const seen = new Set<string>();
+    seen.add(`${channelKey(program.ch)}-${program.startAt ?? program.start}`);
+    const out: Program[] = [];
+    const sorted = seriesEps
+      .filter((p) => progId(p) !== progId(program))
+      .sort((a, b) => (a.startAt ?? a.start).localeCompare(b.startAt ?? b.start));
+    for (const p of sorted) {
+      const key = `${channelKey(p.ch)}-${p.startAt ?? p.start}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(p);
+    }
+    return out.slice(0, 8);
+  })();
 
   const ext = program.extended ?? null;
   const staff = pickExtendedKv(ext, STAFF_KEYS);
@@ -152,8 +168,9 @@ function GuidePanelInner({
       : program.tvdbEpisodeName ?? program.ep ?? null;
 
   const hasGlass = !!(tvdb && hasPoster(tvdb));
+  const links = useMemo(() => extractLinks(ext), [ext]);
   const hasExtras =
-    !!program.desc || tvdbCast.length > 0 || staff.length > 0 || related.length > 0;
+    !!program.desc || links.length > 0 || tvdbCast.length > 0 || staff.length > 0 || related.length > 0;
   // Map channel ids in the series-rule's list back to display names so the
   // "他のチャンネルで登録済み" chip / hint can name them. Falls back to
   // the raw id when a channel row has been removed since the rule was
@@ -182,11 +199,16 @@ function GuidePanelInner({
 
   return (
     <div
-      className="guide-panel-floating"
+      className={`guide-panel-floating${hasGlass ? ' has-poster' : ''}`}
       role="dialog"
       aria-modal="false"
       aria-label="番組詳細"
       data-testid="guide-panel"
+      style={
+        hasGlass
+          ? ({ '--gp-hero-bg': `url("${tvdb!.poster}")` } as CSSProperties)
+          : undefined
+      }
     >
       <button
         type="button"
@@ -198,14 +220,8 @@ function GuidePanelInner({
         <Icon name="x" size={14} />
       </button>
 
-      <div
-        className={`gp-main${hasGlass ? ' has-poster' : ''}`}
-        style={
-          hasGlass
-            ? ({ '--gp-hero-bg': `url("${tvdb!.poster}")` } as CSSProperties)
-            : undefined
-        }
-      >
+      <div className="gp-scroll">
+      <div className="gp-main">
         {hasGlass && (
           <div className="gp-poster" style={posterStyle(tvdb!)} />
         )}
@@ -234,13 +250,12 @@ function GuidePanelInner({
           {tvdb?.titleEn && tvdb.titleEn !== tvdb.title && (
             <div className="gp-title-en">{tvdb.titleEn}</div>
           )}
-          {(subtitle || (program.id && tvdb?.id != null)) && (
+          {(subtitle || program.id) && (
             <div className="gp-subtitle">
               {subtitle && <span>{subtitle}</span>}
-              {program.id && tvdb?.id != null && (
+              {program.id && (
                 <RematchButton
                   programId={program.id}
-                  tvdbId={tvdb.id}
                   onRefresh={onRefresh}
                   variant="subtle"
                 />
@@ -254,12 +269,6 @@ function GuidePanelInner({
                 <span className="gp-channel-dot" style={{ background: ch.color }} />
                 {ch.name}
               </span>
-            )}
-            {tvdb?.network && (
-              <>
-                <span className="gp-meta-sep">·</span>
-                <span>{tvdb.network}</span>
-              </>
             )}
           </div>
         </div>
@@ -280,6 +289,7 @@ function GuidePanelInner({
             otherChannelLabel={otherChannelLabel}
             apiRecordingId={apiRecordingId}
             seriesEps={seriesEps}
+            programs={programs}
             channels={channels}
             onReserve={onReserve}
             onCreateRule={onCreateRule}
@@ -303,11 +313,19 @@ function GuidePanelInner({
         </div>
       </div>
 
-      {hasExtras && (
-        <div className="gp-extras">
-          {program.desc && (
+      <div className="gp-extras">
+        {hasExtras && (
+          <>
+          {(program.desc || links.length > 0) && (
             <Section title="あらすじ">
-              <p className="gp-desc">{program.desc}</p>
+              {program.desc && <p className="gp-desc">{program.desc}</p>}
+              {links.length > 0 && (
+                <div className="gp-links">
+                  {links.map((l) => (
+                    <LinkChip key={l.url} link={l} />
+                  ))}
+                </div>
+              )}
             </Section>
           )}
           {tvdbCast.length > 0 && (
@@ -353,19 +371,21 @@ function GuidePanelInner({
                     rel.tvdbSeason != null && rel.tvdbEpisode != null
                       ? `S${rel.tvdbSeason}E${rel.tvdbEpisode}`
                       : null;
+                  const sameCh = channelKey(rel.ch) === programChKey;
                   return (
                     <li key={progId(rel)}>
                       <button
                         type="button"
-                        className="gp-related-item"
+                        className={`gp-related-item${sameCh ? ' same-ch' : ''}`}
                         onClick={() => onSelectProgram(rel)}
                       >
                         <div className="gp-related-when">
-                          {rel.startAt ? jpAirDate(rel.startAt).slice(5, 16) : rel.start}
+                          {rel.startAt ? jpAirDate(rel.startAt).slice(5, 14) : rel.start}
                         </div>
                         <div className="gp-related-main">
                           <div className="gp-related-title">{rel.title}</div>
                           <div className="gp-related-meta">
+                            {sameCh && <span className="gp-related-same-ch">同じチャンネル</span>}
                             <span>{rch?.name ?? rel.ch}</span>
                             <span className="gp-meta-sep">·</span>
                             <span>{rel.start}–{rel.end}</span>
@@ -379,17 +399,19 @@ function GuidePanelInner({
               </ul>
             </Section>
           )}
-        </div>
-      )}
+          </>
+        )}
 
-      <div className="gp-debug-row">
-        <button
-          type="button"
-          className="gp-debug-trigger"
-          onClick={() => setShowDebug(true)}
-        >
-          EPG / TVDB デバッグ
-        </button>
+        <div className="gp-debug-row">
+          <button
+            type="button"
+            className="gp-debug-trigger"
+            onClick={() => setShowDebug(true)}
+          >
+            EPG / TVDB デバッグ
+          </button>
+        </div>
+      </div>
       </div>
 
       {showDebug && (
@@ -453,6 +475,12 @@ interface ActionBarProps {
   // "シリーズを追加" split-button to preview which airings the rule
   // would actually reserve before the user commits.
   seriesEps: Program[];
+  // All programs currently loaded into the guide (the same array the
+  // schedule view drives). Used by the keyword-rule preview path —
+  // when the airing has no TVDB linkage we fall back to a substring
+  // match against this list so "自動予約ルール" can still show what
+  // it would catch.
+  programs: Program[];
   channels: Channel[];
   onReserve: (p: Program) => void;
   onCreateRule: (keyword: string, p: Program, channels?: string[]) => void;
@@ -481,6 +509,7 @@ function ActionBar(props: ActionBarProps) {
     otherChannelLabel,
     apiRecordingId,
     seriesEps,
+    programs,
     channels,
     onReserve,
     onCreateRule,
@@ -491,14 +520,22 @@ function ActionBar(props: ActionBarProps) {
   } = props;
 
   // --- Slot 1: this-airing (single recording / live stop) -----------------
-  const stopAvailable = isLive && apiRecordingId != null && !!onStopRecording;
+  const isRecordingNow = !!program.recording || isLive;
+  const stopAvailable = isRecordingNow && apiRecordingId != null && !!onStopRecording;
   const slot1: ActionCardSpec = (() => {
-    if (isLive && stopAvailable) {
+    // Currently recording — always frame the destructive action as "録画
+    // 停止", never "予約取消". Whether we go through onStopRecording (the
+    // dedicated stop endpoint) or fall back to onReserve (which cancels
+    // the reservation row, which the recorder also treats as a stop)
+    // the user-visible verb is the same: stop the recording.
+    if (isRecordingNow && reserved) {
       return {
         title: '録画停止',
         desc: '今すぐ停止',
         kind: 'danger',
-        onClick: () => onStopRecording!(apiRecordingId!),
+        onClick: stopAvailable
+          ? () => onStopRecording!(apiRecordingId!)
+          : () => onReserve(program),
       };
     }
     if (reserved && !coveredBySeriesRule) {
@@ -520,16 +557,22 @@ function ActionBar(props: ActionBarProps) {
       };
     }
     return {
-      // Movies have no "回" concept — say plain "録画". Series/shows
-      // keep "この回のみ録画" so the user can distinguish the single-
-      // airing recording from a series-rule auto-reservation.
-      title: isMovie ? '録画' : 'この回のみ録画',
-      desc: `${program.start}–${program.end}`,
+      // Live airing → recording starts immediately, so call it that.
+      // Otherwise: movies have no "回" concept (plain "録画"); series/
+      // shows keep "この回のみ録画" so the user can distinguish the
+      // single-airing recording from a series-rule auto-reservation.
+      title: isLive ? '今すぐ録画' : isMovie ? '録画' : 'この回のみ録画',
+      // The live-airing button shows the remaining duration so the user
+      // knows how much footage they'll capture if they hit it now.
+      desc: isLive
+        ? `〜${program.end} まで`
+        : `${program.start}–${program.end}`,
       // For movies "録画" IS the primary action (no "シリーズを追加"
       // alternative to compete with), so render it filled blue. For
       // series/shows it stays ghost — the primary slot is the series-
-      // add button next to it.
-      kind: isMovie ? 'primary' : 'ghost',
+      // add button next to it. Live airings get the primary treatment
+      // too — "今すぐ" implies time-pressure so it should grab the eye.
+      kind: isLive || isMovie ? 'primary' : 'ghost',
       onClick: () => onReserve(program),
     };
   })();
@@ -609,39 +652,69 @@ function ActionBar(props: ActionBarProps) {
   // Slot 1 is suppressed when the series-rule path is the only meaningful
   // action: a single-booking cancel is meaningless once a series rule
   // covers the airing (the rule will just re-expand a fresh recording),
-  // so the user is really managing the series. Live recordings keep
-  // slot1 because that's where the stop button lives.
-  const slot1Hidden = coveredBySeriesRule && !isLive;
-  // While recording is live, the only sensible slot1 is "停止"; nothing
-  // belongs in slot2 on top of that.
-  const slot2Hidden = isLive;
+  // so the user is really managing the series. Recording-in-progress
+  // airings keep slot1 because that's where the stop button lives.
+  const slot1Hidden = coveredBySeriesRule && !isRecordingNow;
+  // While a recording is in progress, the only sensible slot1 is "停止";
+  // nothing belongs in slot2 on top of that.
+  const slot2Hidden = isRecordingNow;
 
-  // The "シリーズを追加" affordance gets a split chevron so the user can
-  // preview which airings the rule would auto-reserve before committing.
-  // Detected by structural state rather than slot title-matching so the
-  // wording stays free to evolve.
-  const isSeriesAddSlot =
-    !!slot2 &&
-    !isMovie &&
-    isSeriesTvdb &&
-    !!tvdb &&
-    tvdb.type === 'series' &&
-    !coveredBySeriesRule &&
-    !seriesRuledOnOtherChannel &&
-    !seriesRuleDisabled &&
-    !reserved;
+  // Slot 2 gets a split chevron so the user can preview which airings
+  // the underlying rule would catch. The preview is offered for every
+  // actionable slot 2 variant — series-add (about to commit), already-
+  // covered (verify what's still scheduled), disabled-rule (verify
+  // before re-enabling), and the keyword-rule path for non-TVDB shows
+  // (fallback substring match). The "他チャンネルで登録済み" variant
+  // is excluded because its action is intentionally inert. Movies have
+  // no recurrence so they also opt out.
+  const slot2Action: 'series-add' | 'series-resume' | 'series-covered' | 'keyword' | null =
+    !slot2 || slot2Hidden || isMovie
+      ? null
+      : tvdb && tvdb.type === 'series' && coveredBySeriesRule
+        ? 'series-covered'
+        : tvdb && tvdb.type === 'series' && seriesRuleDisabled
+          ? 'series-resume'
+          : tvdb && tvdb.type === 'series' && !seriesRuledOnOtherChannel && !reserved
+            ? 'series-add'
+            : !tvdb && !reserved
+              ? 'keyword'
+              : null;
+
+  // Episodes feeding the preview popover. Series paths reuse the
+  // tvdb-keyed program list (already deduped, full schedule horizon).
+  // Keyword path falls back to a substring search against the loaded
+  // schedule — same heuristic the bulk rule expander uses.
+  const previewEps = (() => {
+    if (slot2Action === 'series-add' || slot2Action === 'series-covered' || slot2Action === 'series-resume') {
+      return seriesEps;
+    }
+    if (slot2Action === 'keyword') {
+      const keyword = program.title.slice(0, 14).trim();
+      if (!keyword) return [];
+      return programs.filter((p) => p.title.includes(keyword));
+    }
+    return [];
+  })();
+
+  const previewLabel = slot2Action === 'series-covered'
+    ? '今後録画される番組'
+    : slot2Action === 'series-resume'
+      ? '再開後に予約される番組'
+      : '予約される番組';
 
   return (
     <div className="gp-actions">
       {!slot1Hidden && <ActionCard {...slot1} />}
       {slot2 && !slot2Hidden && (
-        isSeriesAddSlot
+        slot2Action != null
           ? (
-            <SeriesAddSplitCard
+            <PreviewSplitCard
               spec={slot2}
-              episodes={seriesEps}
+              episodes={previewEps}
               channels={channels}
               channelId={program.ch}
+              previewLabel={previewLabel}
+              currentProgram={program}
             />
           )
           : <ActionCard {...slot2} />
@@ -711,11 +784,19 @@ function ActionCard({ onClick, title, desc, kind }: ActionCardProps) {
   );
 }
 
-interface SeriesAddSplitCardProps {
+interface PreviewSplitCardProps {
   spec: ActionCardSpec;
   episodes: Program[];
   channels: Channel[];
   channelId: string;
+  /** Heading rendered above the preview list. Lets the popover label
+   *  itself contextually — "予約される番組" when about to commit,
+   *  "今後録画される番組" when the rule already exists, etc. */
+  previewLabel: string;
+  /** The currently-viewed airing. Used to flag the matching row in the
+   *  preview list with a "この番組" pill so the user can pick out which
+   *  entry corresponds to the modal they have open. */
+  currentProgram: Program;
 }
 
 // Split-button variant of ActionCard: main button commits the
@@ -724,7 +805,7 @@ interface SeriesAddSplitCardProps {
 // The popover is informational only — clicking an entry does nothing
 // (preview ≠ navigation) so the user's mental model stays simple:
 // see what's coming, then commit.
-function SeriesAddSplitCard({ spec, episodes, channels, channelId }: SeriesAddSplitCardProps) {
+function PreviewSplitCard({ spec, episodes, channels, channelId, previewLabel, currentProgram }: PreviewSplitCardProps) {
   const { title, desc, kind, onClick } = spec;
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -789,6 +870,12 @@ function SeriesAddSplitCard({ spec, episodes, channels, channelId }: SeriesAddSp
   const MAX = 12;
   const shown = upcoming.slice(0, MAX);
   const overflow = upcoming.length - shown.length;
+  // Identity key for the row matching the currently-viewed airing —
+  // matches the dedup key used in the upcoming/related lists so a
+  // svc-/m3u- twin of "this airing" still flags as self.
+  const selfKey = `${channelKey(currentProgram.ch)}-${
+    currentProgram.startAt ? Date.parse(currentProgram.startAt) : currentProgram.start
+  }`;
 
   return (
     <div className="gp-mode-split" ref={ref}>
@@ -805,16 +892,16 @@ function SeriesAddSplitCard({ spec, episodes, channels, channelId }: SeriesAddSp
         type="button"
         className={`gp-mode-split-chev ${kind}${open ? ' open' : ''}`}
         onClick={() => setOpen((v) => !v)}
-        aria-label="今すぐ予約される番組を表示"
+        aria-label={`${previewLabel}を表示`}
         aria-expanded={open}
-        title="今すぐ予約される番組を表示"
+        title={`${previewLabel}を表示`}
       >
         <Icon name="chevD" size={14} />
       </button>
       {open && (
-        <div className="gp-series-preview" role="dialog" aria-label="今すぐ予約される番組">
+        <div className="gp-series-preview" role="dialog" aria-label={previewLabel}>
           <div className="gp-series-preview-head">
-            <span>今すぐ予約される番組</span>
+            <span>{previewLabel}</span>
             <span className="gp-series-preview-ch">{ch?.name ?? channelId}</span>
           </div>
           {shown.length === 0 ? (
@@ -828,12 +915,20 @@ function SeriesAddSplitCard({ spec, episodes, channels, channelId }: SeriesAddSp
                   p.tvdbSeason != null && p.tvdbEpisode != null
                     ? `S${p.tvdbSeason}E${p.tvdbEpisode}`
                     : null;
+                const rowKey = `${channelKey(p.ch)}-${
+                  p.startAt ? Date.parse(p.startAt) : p.start
+                }`;
+                const isSelf = rowKey === selfKey;
                 return (
-                  <li key={progId(p)} className="gp-series-preview-row">
+                  <li
+                    key={progId(p)}
+                    className={`gp-series-preview-row${isSelf ? ' is-self' : ''}`}
+                  >
                     <span className="gp-series-preview-when">
-                      {p.startAt ? jpAirDate(p.startAt).slice(5, 16) : p.start}
+                      {p.startAt ? jpAirDate(p.startAt).slice(5, 14) : p.start}
                     </span>
                     <span className="gp-series-preview-title">{p.title}</span>
+                    {isSelf && <span className="gp-series-preview-self">この番組</span>}
                     {se && <span className="gp-series-preview-se">{se}</span>}
                   </li>
                 );
@@ -947,5 +1042,97 @@ function useTvdbCast(tvdbId: number | null): ApiTvdbCastMember[] {
     };
   }, [tvdbId]);
   return cast;
+}
+
+// Scan the broadcaster-supplied extended descriptor for http(s) URLs and
+// pair each one with a friendly label. Labels prefer (a) the line
+// immediately preceding the URL ("★番組HP\nhttp://..." is the common
+// broadcaster pattern), then (b) a hand-curated brand name for known
+// social hosts, then (c) the bare host. Duplicates are collapsed by URL.
+const URL_RE = /https?:\/\/[^\s<>"'）)】\]]+/g;
+const HOST_LABELS: Record<string, string> = {
+  'twitter.com': 'X',
+  'x.com': 'X',
+  'youtube.com': 'YouTube',
+  'youtu.be': 'YouTube',
+  'instagram.com': 'Instagram',
+  'tiktok.com': 'TikTok',
+  'facebook.com': 'Facebook',
+  'line.me': 'LINE',
+};
+
+interface ExtractedLink { url: string; label: string; host: string }
+
+function extractLinks(ext: Record<string, string> | null): ExtractedLink[] {
+  if (!ext) return [];
+  const seen = new Set<string>();
+  const out: ExtractedLink[] = [];
+  for (const value of Object.values(ext)) {
+    URL_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = URL_RE.exec(value)) !== null) {
+      let url = m[0];
+      while (/[.,。、!?！？:;]$/.test(url)) url = url.slice(0, -1);
+      if (seen.has(url)) continue;
+      seen.add(url);
+
+      let label = url;
+      let host = '';
+      try {
+        host = new URL(url).hostname.replace(/^www\./, '');
+        const known = Object.entries(HOST_LABELS).find(([h]) => host === h || host.endsWith('.' + h));
+        label = known ? known[1] : host;
+      } catch {
+        // keep defaults
+      }
+
+      const before = value.slice(0, m.index);
+      const lastLine = before.split(/\r?\n/).pop()?.replace(/^[★☆●・※\s]+/, '').trim();
+      if (lastLine && lastLine.length > 0 && lastLine.length <= 14) {
+        label = lastLine;
+      }
+
+      out.push({ url, label, host });
+    }
+  }
+  return out;
+}
+
+// Compact rounded-rect "external link" affordance — favicon + label, with
+// subtle border + hover lift. Pulls the favicon via Google's s2 service so
+// the chip carries genuine brand recognition (X glyph, YouTube play, TBS
+// logo) rather than a generic icon. Falls back to a coloured monogram if
+// the image can't load.
+function LinkChip({ link }: { link: ExtractedLink }) {
+  const [failed, setFailed] = useState(false);
+  const faviconSrc = link.host
+    ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(link.host)}&sz=64`
+    : '';
+  const monogram = (link.label.match(/[A-Za-z0-9一-龯ぁ-んァ-ヶ]/)?.[0] ?? '?').toUpperCase();
+  return (
+    <a
+      href={link.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={link.url}
+      className="gp-link-chip"
+    >
+      <span className="gp-link-mark" aria-hidden="true">
+        {!failed && faviconSrc ? (
+          <img
+            src={faviconSrc}
+            alt=""
+            width={14}
+            height={14}
+            loading="lazy"
+            onError={() => setFailed(true)}
+          />
+        ) : (
+          <span className="gp-link-monogram">{monogram}</span>
+        )}
+      </span>
+      <span className="gp-link-label">{link.label}</span>
+    </a>
+  );
 }
 

@@ -91,6 +91,15 @@ const STRIP_SUFFIX_RE: RegExp[] = [
   /[\s　]*\(?[\s　]*\d+\s*\/\s*\d+[\s　]*\)?[\s　]*$/,
 ];
 
+// Trailing single digit glued directly to a Japanese kana/kanji — common
+// sequel/season suffix on anime & dorama (異世界のんびり農家２, 進撃の巨人3,
+// 晩酌の流儀2). Applied ONLY when the title wasn't extracted out of a
+// `「…」` quote, because in that case the digit is part of the canonical
+// title (映画「ロボコップ３」 → "ロボコップ3" — the 3 is the film's name).
+// Limited to one digit so two-digit tails (ハチ公20, year tags like
+// "桜2002") survive untouched. Lookbehind keeps the preceding kana/kanji.
+const TRAILING_KANA_DIGIT_RE = /(?<=[\u3040-\u30FF\u4E00-\u9FFF])\d$/;
+
 // Trailing separator — only applied when there's no matching opener
 // somewhere earlier in the string. `牙狼 -魔戒ノ花-` has a paired pair
 // of `-` so we keep both; `Show・` has an orphan `・` to strip.
@@ -116,6 +125,14 @@ const BLOCK_PREFIXES = [
   'シネマ',
   '映画',
   '\\d+時のアニメ',
+  // Broadcast-slot identifier `<weekday><hour>` used by all major commercial
+  // networks (月9 / 火10 / 木10 / 日5 / 土9 …). Always followed by a space-
+  // then-title or a quoted show title. Picking these up as a block prefix
+  // routes `日5「夜桜さんちの大作戦」#32「愛の結晶」` through the
+  // QUOTED_HOST_PREFIX_RE branch (which derives from BLOCK_PREFIXES) and
+  // extracts the quoted show name, instead of falling into the else branch
+  // that drops both `「…」` segments as episode subtitles.
+  '[日月火水木金土]\\d+',
 ];
 const BLOCK_PREFIX_RE = new RegExp(
   `^(?:${BLOCK_PREFIXES.join('|')})[\\s　]+`
@@ -246,13 +263,20 @@ export function normalizeTitle(raw: string): string {
   //    prefix (whitespace OK); otherwise we'd strip real show names like
   //    `おじゃる丸` out of `アニメ　おじゃる丸「小町とオカメ」`.
   const leading = t.trimStart();
+  let wasQuoteExtracted = false;
   if (QUOTED_HOST_PREFIX_RE.test(leading)) {
     const afterPrefix = leading.replace(BLOCK_PREFIX_RE, '');
     const inner = extractQuoted(afterPrefix) ?? extractQuoted(leading);
-    if (inner) t = inner;
+    if (inner) {
+      t = inner;
+      wasQuoteExtracted = true;
+    }
   } else if (leadsWithQuoted(t)) {
     const inner = extractQuoted(t);
-    if (inner) t = inner;
+    if (inner) {
+      t = inner;
+      wasQuoteExtracted = true;
+    }
   } else {
     // Otherwise, drop any quoted segments — they're almost always chapter
     // or episode subtitles, not show names. Do this twice to clean up
@@ -289,6 +313,13 @@ export function normalizeTitle(raw: string): string {
 
   // 11. Promo-tail cut: drop whitespace + Japanese blurb containing `!`/`?`.
   t = stripPromoTail(t);
+
+  // 11b. Strip the kana/kanji-glued sequel digit. Done after stripPromoTail
+  //      so cases like `エイゴビート２　How many?/...` (digit + promo tail)
+  //      lose the promo first and THEN drop the trailing 2. Skipped when the
+  //      working title was extracted out of a `「…」` quote because in that
+  //      case the digit is part of the canonical title (映画「ロボコップ３」).
+  if (!wasQuoteExtracted) t = t.replace(TRAILING_KANA_DIGIT_RE, '');
 
   // 12. Collapse whitespace runs to a single ASCII space, trim.
   t = t.replace(/[\s　]+/g, ' ').trim();
@@ -504,6 +535,13 @@ function parseTitleEpisodeNumber(title: string): number | null {
   // `(2025)` or runtime markers like `(60min)`.
   const parenM = norm.match(/（\s*(\d{1,3})\s*）/);
   if (parenM) return Number(parenM[1]);
+  // Bare `N話` / `N回` preceded by whitespace or string start — broadcasters
+  // who drop the `第` prefix (`孤独のグルメSeason11 3話 ...`, `４話 本厚木の…`).
+  // Whitespace requirement avoids matching `Season11` mid-string and
+  // ensures the digit is actually a standalone episode marker, not the
+  // tail of a series name.
+  const bareM = norm.match(/(?:^|[\s　])(\d+)\s*[話回]/);
+  if (bareM) return Number(bareM[1]);
   return null;
 }
 
@@ -747,6 +785,16 @@ export interface MatchService {
   enrichUnmatched(limit?: number): Promise<{ resolved: number; missed: number }>;
   /** Manual match: set tvdb_id for a program + pin the normalized title. */
   linkProgram(programId: string, tvdbId: number): Promise<TvdbEntry>;
+  /**
+   * Single-program rematch. For a *matched* program: re-fetch the TVDB
+   * entry (and the series episode list when applicable) and re-apply the
+   * S/E lookup so matcher improvements / new episodes propagate without
+   * waiting for the next bulk run. For an *unmatched* program: run the
+   * same auto-search the bulk matcher uses, ignoring stale overrides so
+   * the user can retry after fixing a normalization rule. Returns the
+   * resolved entry, or `null` when no match was found.
+   */
+  rematchProgram(programId: string): Promise<TvdbEntry | null>;
   /** Manual unmatch: clear program.tvdb_id + pin an explicit "no match". */
   unlinkProgram(programId: string): Promise<void>;
   /**
@@ -1003,6 +1051,92 @@ class DbMatchService implements MatchService {
       if (ids.length > 0) await this.applyTvdbToPrograms(tvdbId, ids, episodes, showTitles);
     }
     return fresh;
+  }
+
+  async rematchProgram(programId: string): Promise<TvdbEntry | null> {
+    const [prog] = await db
+      .select({
+        id: programs.id,
+        title: programs.title,
+        genreKey: programs.genreKey,
+        tvdbId: programs.tvdbId,
+      })
+      .from(programs)
+      .where(eq(programs.id, programId))
+      .limit(1);
+    if (!prog) throw new Error(`program ${programId} not found`);
+
+    // Already matched — refresh the cached TVDB entry + episode list and
+    // re-apply S/E for this program. We deliberately do NOT touch the
+    // override here (no user_set flip); this is a "refresh metadata"
+    // action, not a "user confirms link" action.
+    if (prog.tvdbId != null) {
+      const fresh = await tvdbService.getById(prog.tvdbId);
+      if (!fresh) return null;
+      const episodes = fresh.type === 'series'
+        ? await tvdbService.getSeriesEpisodes(prog.tvdbId)
+        : [];
+      await upsertTvdbEntry(fresh, episodes);
+      const showTitles = [fresh.title, fresh.titleEn].filter(
+        (t): t is string => Boolean(t)
+      );
+      await this.applyTvdbToPrograms(prog.tvdbId, [programId], episodes, showTitles);
+      return fresh;
+    }
+
+    // Unmatched — run an on-demand auto-search. Mirrors the search/scoring
+    // path in `enrichUnmatched`, but scoped to this single program.
+    // Existing overrides are intentionally bypassed: the user clicking
+    // "再マッチ" implies they want a fresh attempt regardless of a stale
+    // null-override pinned by a prior failed run.
+    const key = normalizeTitle(prog.title);
+    if (!key || GENERIC_TITLES.has(key)) return null;
+
+    const allowMovie = prog.genreKey === 'movie';
+    let hits = await tvdbService.search(key);
+    let scoreKey = key;
+    let best = pickBest(hits, scoreKey, { allowMovie });
+    if (!best) {
+      const head = key.split(/\s+/)[0] ?? '';
+      if (head.length >= 3 && head !== key) {
+        hits = await tvdbService.search(head);
+        scoreKey = head;
+        best = pickBest(hits, scoreKey, { allowMovie });
+      }
+    }
+
+    if (!best) {
+      await writeOverride(key, null, false);
+      this.misses++;
+      return null;
+    }
+
+    const episodes = best.type === 'series'
+      ? await tvdbService.getSeriesEpisodes(best.id)
+      : [];
+    await upsertTvdbEntry(best, episodes);
+    await writeOverride(key, best.id, false);
+
+    const showTitles = [best.title, best.titleEn].filter(
+      (t): t is string => Boolean(t)
+    );
+    await this.applyTvdbToPrograms(best.id, [programId], episodes, showTitles);
+
+    // Spread to siblings sharing the same normalized title that are still
+    // unmatched — same cohort behaviour as `linkProgram`.
+    const candidates = await db
+      .select({ id: programs.id, title: programs.title })
+      .from(programs)
+      .where(and(isNull(programs.tvdbId), ne(programs.id, programId)));
+    const ids = candidates
+      .filter((r) => normalizeTitle(r.title) === key)
+      .map((r) => r.id);
+    if (ids.length > 0) {
+      await this.applyTvdbToPrograms(best.id, ids, episodes, showTitles);
+    }
+
+    this.hits++;
+    return best;
   }
 
   async setProgramEpisode(

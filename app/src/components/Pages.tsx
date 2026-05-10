@@ -1335,7 +1335,7 @@ export const ReservesPage = ({
   const programById = new Map(programs.map((p) => [progId(p), p]));
 
   // Relative-date label for an upcoming reserve. Returns one of:
-  //   - 'まもなく'  (within +180 minutes of now, regardless of date)
+  //   - 'まもなく'  (today's broadcast day AND within +180 minutes of now)
   //   - '本日' / '明日' / '明後日' / '7日後' (broadcast-day delta 0..6)
   //   - 'MM/DD'    (everything further out)
   // The broadcast-day boundary (JST 05:00) is what the rest of the app
@@ -1343,8 +1343,8 @@ export const ReservesPage = ({
   // calendar date — consistent with the grid header and date picker.
   const todayYmd = jstTodayYmd();
   const upcomingLabel = (startIso: string, startMin: number): string => {
-    if (startMin < MOCK_NOW_MIN + 180) return 'まもなく';
     const startYmd = jstTodayYmd(new Date(startIso));
+    if (startYmd === todayYmd && startMin < MOCK_NOW_MIN + 180) return 'まもなく';
     if (startYmd === todayYmd) return '本日';
     if (startYmd === addDays(todayYmd, 1)) return '明日';
     if (startYmd === addDays(todayYmd, 2)) return '明後日';
