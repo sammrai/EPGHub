@@ -298,6 +298,17 @@ function leadsWithQuoted(s: string): boolean {
  * Japanese kana/kanji and an exclamation/question punctuation. Handles
  * `ShowName<wide-space>episode promo!`. Does NOT fire when the tail is
  * purely ASCII (English show names like `BanG Dream! It's MyGO!!!!!`).
+ *
+ * Embedded-`!` show-name carve-out: when the title splits into 3+
+ * whitespace-separated segments AND the second segment has a
+ * non-terminal `!`/`?` (i.e. content after the punctuation), the second
+ * segment is treated as part of the show name (`突撃！カネオくん`-shape).
+ * In that case we strip from the third segment forward, but only if a
+ * later segment is itself promo-shaped (kana+`!`/`?`); otherwise we
+ * fall back to the conservative "cut at first whitespace" path so we
+ * don't accidentally keep an unrelated trailing subtitle. Source:
+ * programs.id svc-3211240960_2026-05-10T09:05:00.000Z (issue #18) —
+ * `有吉のお金発見　突撃！カネオくん　いま世界が注目！...`.
  */
 function stripPromoTail(s: string): string {
   const ws = s.match(/[\s　]/);
@@ -305,6 +316,37 @@ function stripPromoTail(s: string): string {
   const tail = s.slice(ws.index!);
   if (!/[\u3040-\u30FF\u4E00-\u9FFF]/.test(tail)) return s;
   if (!/[!?]/.test(tail)) return s;
+  // Split into whitespace-bounded segments to detect the embedded-`!`
+  // show-name shape (`<host>　<host-with-!>　<promo>`). Only inspect when
+  // there are 3+ segments — 2-segment titles always cut at the first
+  // whitespace (the second segment is either pure promo or, rarely, a
+  // subtitle, in which case we still want it gone for TVDB search).
+  const segments = s.split(/[\s　]+/);
+  if (segments.length >= 3) {
+    const seg2 = segments[1] ?? '';
+    const hasInternalExclaim = /[!?]/.test(seg2) && !/[!?]\s*$/.test(seg2);
+    if (hasInternalExclaim) {
+      // Find the first segment from index 2 onwards that is promo-shaped
+      // (kana/kanji + `!`/`?`). Stripping at its boundary preserves the
+      // canonical `<seg1> <seg2>` show name while still dropping the
+      // promo blurb. If no later segment is promo-shaped we have no
+      // structural signal that seg3+ is promo at all, so fall through
+      // to the default first-whitespace cut.
+      let kept = segments[0] + ' ' + seg2;
+      let foundPromo = false;
+      for (let i = 2; i < segments.length; i++) {
+        const seg = segments[i] ?? '';
+        const segHasKana = /[\u3040-\u30FF\u4E00-\u9FFF]/.test(seg);
+        const segHasExcl = /[!?]/.test(seg);
+        if (segHasKana && segHasExcl) {
+          foundPromo = true;
+          break;
+        }
+        kept += ' ' + seg;
+      }
+      if (foundPromo) return kept;
+    }
+  }
   return s.slice(0, ws.index!);
 }
 

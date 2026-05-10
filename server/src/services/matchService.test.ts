@@ -478,6 +478,11 @@ const borderline: Case[] = [
     note: 'after ideographic space, the 2nd half is a promo clause — strip',
   },
   {
+    raw: '有吉のお金発見　突撃！カネオくん　いま世界が注目！最新「畳」事情を大調査[字]',
+    expected: '有吉のお金発見 突撃!カネオくん',
+    note: 'embedded-! show-name carve-out in stripPromoTail: 3 segments where seg2 (`突撃！カネオくん`) carries a non-terminal `!` is preserved as part of the show name; seg3 onward is the promo blurb. Source: programs.id svc-3211240960_2026-05-10T09:05:00.000Z (issue #18).',
+  },
+  {
     raw: 'ＬａＬａ　ＴＶ「コンコンパッパッ～今日から芸農人！～」＃１　［字］',
     expected: 'LaLa TV',
     note: 'LaLa TV is not a known block prefix so the quoted content is treated as an episode subtitle and stripped. This keeps TVDB searching on "LaLa TV" which is safer than a weekly show name.',
