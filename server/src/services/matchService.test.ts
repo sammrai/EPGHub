@@ -14,7 +14,8 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeTitle, searchKeyCandidates } from './matchService.ts';
+import { normalizeTitle, scoreOf, searchKeyCandidates } from './matchService.ts';
+import type { TvdbEntry } from '../schemas/tvdb.ts';
 
 interface Case {
   raw: string;
@@ -639,5 +640,69 @@ describe('searchKeyCandidates — show-name resolution fan-out', () => {
   test('duplicate primary/head deduped', () => {
     const got = searchKeyCandidates('鬼滅');
     assert.deepEqual(got, ['鬼滅']);
+  });
+});
+
+// -------------------------------------------------------------------
+// Scoring — `scoreOf` ranks TVDB candidates against a normalized key.
+// `normalizeTitle` folds zenkaku punctuation (`？！＃` → `?!#`) on the
+// EPG-side key, but TVDB stores the broadcaster's original title so its
+// `title` / `titleEn` fields retain the zenkaku form. Without symmetric
+// folding, `?` (U+003F) ≠ `？` (U+FF1F) at every comparator and the show
+// scores 0. These tests pin down the symmetric fold introduced for
+// fix-match issue #5 (大きい女の子は好きですか？).
+// -------------------------------------------------------------------
+
+describe('scoreOf — zenkaku/hankaku punctuation folding', () => {
+  // Build a minimal `TvdbEntry` for scoring. `scoreOf` only reads
+  // `title` and `titleEn`, but TS needs the discriminated-union shape
+  // to be complete.
+  function makeSeries(title: string, titleEn?: string): TvdbEntry {
+    return {
+      id: 1,
+      slug: 'x',
+      title,
+      titleEn: titleEn ?? title,
+      network: '',
+      year: 2026,
+      poster: '',
+      matchedBy: '',
+      type: 'series',
+      totalSeasons: 1,
+      currentSeason: 1,
+      currentEp: 1,
+      totalEps: 12,
+      status: 'continuing',
+    };
+  }
+
+  test('zenkaku ？ in TVDB title vs hankaku ? in normalized key still scores exact', () => {
+    // Issue #5: TVDB returns `大きい女の子は好きですか？` (U+FF1F) but the
+    // EPG-side normalized key is `大きい女の子は好きですか?` (U+003F).
+    // Pre-fix, every comparator failed and the show scored 0.
+    const entry = makeSeries('大きい女の子は好きですか？');
+    const score = scoreOf(entry, '大きい女の子は好きですか?');
+    assert.ok(score >= 1000, `expected exact-match score, got ${score}`);
+  });
+
+  test('zenkaku ！ in TVDB title vs hankaku ! in normalized key still scores exact', () => {
+    // Same class as above — `！` (U+FF01) vs `!` (U+0021).
+    const entry = makeSeries('進撃の巨人！');
+    const score = scoreOf(entry, '進撃の巨人!');
+    assert.ok(score >= 1000, `expected exact-match score, got ${score}`);
+  });
+
+  test('zenkaku digits in TVDB title vs hankaku digits in normalized key still scores exact', () => {
+    // `１９９２` (U+FF11..FF14) vs `1992` (ASCII).
+    const entry = makeSeries('テスト１９９２');
+    const score = scoreOf(entry, 'テスト1992');
+    assert.ok(score >= 1000, `expected exact-match score, got ${score}`);
+  });
+
+  test('non-matching titles still score 0 after folding', () => {
+    // Sanity check — folding does not relax matching to be too lenient.
+    const entry = makeSeries('全然違う作品');
+    const score = scoreOf(entry, '大きい女の子は好きですか?');
+    assert.equal(score, 0);
   });
 });

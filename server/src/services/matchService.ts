@@ -404,9 +404,23 @@ class PromisePool {
 // > tight substring. Loose matches are rejected.
 // -----------------------------------------------------------------
 
-function scoreOf(e: TvdbEntry, key: string): number {
-  const ja = (e.title ?? '').trim();
-  const en = (e.titleEn ?? '').trim();
+// Exported for unit tests so we can lock down behaviour around zenkaku /
+// hankaku folding without spinning up TVDB or DB layers.
+//
+// `normalizeTitle` already folds the EPG-side key through `zenkakuToHankaku`
+// (digits, Latin letters, `？！＃` → `?!#`). TVDB-side titles, however,
+// frequently retain the broadcaster's original zenkaku punctuation —
+// `大きい女の子は好きですか？` (U+FF1F) is a real example. Without folding
+// the candidate side too, a key ending in `?` and a title ending in `？`
+// fail every comparator (`===`, `startsWith`, `includes`) and the show
+// scores 0 even though the strings are otherwise identical. Apply the
+// same fold to the TVDB title/titleEn so the comparator sees both sides
+// in the same canonical form. This is symmetric, structural, and absorbs
+// the whole class of zenkaku-punctuation drift between EPG and TVDB
+// without growing search-level fan-out (no extra TVDB API calls).
+export function scoreOf(e: TvdbEntry, key: string): number {
+  const ja = zenkakuToHankaku((e.title ?? '').trim());
+  const en = zenkakuToHankaku((e.titleEn ?? '').trim());
   const kLower = key.toLowerCase();
   if (ja === key || en === key) return 1000;
   if (en.toLowerCase() === kLower) return 950;
