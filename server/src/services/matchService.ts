@@ -231,6 +231,14 @@ const BLOCK_PREFIXES = [
   'ザ・ミステリー',
   '水曜アニメ',
   '金曜ミステリー',
+  // BS11's weekday anime programming block. Always followed by an
+  // individual show name (`機動戦士ガンダム 水星の魔女`, `機動戦士ガンダム
+  // THE ORIGIN 前夜 赤い彗星`), so we strip the block label whole to expose
+  // the show name to the matcher. The zenkaku digit variant `ＢＳ１１…` is
+  // covered by the zenkaku→hankaku fold that runs before this strip.
+  // Sources: programs.id svc-400211_2026-05-16T10:00:00.000Z (issue #34),
+  // svc-400211_2026-05-16T10:30:00.000Z (issue #35).
+  'BS11ガンダムアワー',
   'アニメ',
   'ドラマ\\d+',
   'ドラマ',

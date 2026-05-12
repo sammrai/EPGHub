@@ -1108,3 +1108,47 @@ describe('findEpisodeForProgram — BanG Dream! 2nd Season regression case', () 
     assert.deepEqual(hit, { s: 2, e: 11, name: 'ホシノナミダ' });
   });
 });
+
+describe('findEpisodeForProgram — BS11ガンダムアワー block-prefix regression cases', () => {
+  // svc-400211_2026-05-16T10:00:00.000Z (issue #34). tvdb_id=319976
+  // 「機動戦士ガンダム THE ORIGIN 前夜 赤い彗星」. The BS11 anime block
+  // prefix used to leak through normalizeTitle, blocking the TVDB
+  // search; once the prefix is stripped the show name resolves and
+  // `第９話` parses to E=9 via the standard 第N話 path.
+  test('issue #34: THE ORIGIN 前夜 赤い彗星 第9話 → S1E9 「コロニー落とし」', () => {
+    const list: Episode[] = [
+      { s: 1, e: 8, name: '前章', aired: '2025-04-01' },
+      { s: 1, e: 9, name: 'コロニー落とし', aired: '2025-05-16' },
+      { s: 1, e: 10, name: '次話', aired: '2025-06-01' },
+    ];
+    const hit = findEpisodeForProgram(
+      list,
+      '2026-05-16T10:00:00.000Z',
+      'BS11ガンダムアワー 機動戦士ガンダム THE ORIGIN 前夜 赤い彗星\u3000第９話',
+      ['機動戦士ガンダム THE ORIGIN 前夜 赤い彗星', '機動戦士ガンダム THE ORIGIN 前夜 赤い彗星'],
+    );
+    assert.deepEqual(hit, { s: 1, e: 9, name: 'コロニー落とし' });
+  });
+
+  // svc-400211_2026-05-16T10:30:00.000Z (issue #35). tvdb_id=418364
+  // 「機動戦士ガンダム 水星の魔女」. TVDB models the show as a single
+  // season with cumulative numbering (S1=24 episodes covering both
+  // broadcaster-side Season1+Season2). `Season2 第21話` therefore lands
+  // on S1E21 via the direct #N path once the BS11 block prefix is gone
+  // and the `Season2` marker is cut.
+  test('issue #35: 水星の魔女 Season2 第21話 → S1E21 (cumulative numbering)', () => {
+    const list: Episode[] = Array.from({ length: 24 }, (_, i) => ({
+      s: 1,
+      e: i + 1,
+      name: `ep ${i + 1}`,
+      aired: '2023-01-01',
+    }));
+    const hit = findEpisodeForProgram(
+      list,
+      '2026-05-16T10:30:00.000Z',
+      'BS11ガンダムアワー 機動戦士ガンダム 水星の魔女 Season2\u3000第21話',
+      ['機動戦士ガンダム 水星の魔女', '機動戦士ガンダム 水星の魔女'],
+    );
+    assert.deepEqual(hit, { s: 1, e: 21, name: 'ep 21' });
+  });
+});

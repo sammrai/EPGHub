@@ -414,8 +414,23 @@ const prefixes: Case[] = [
   },
   {
     raw: 'BS11ガンダムアワー 機動戦士ガンダム 水星の魔女 Season2　第18話',
-    expected: 'BS11ガンダムアワー 機動戦士ガンダム 水星の魔女',
-    note: 'Borderline — 機動戦士ガンダム 水星の魔女 would be ideal but retaining the block name preserves the existing behavior and keeps TVDB search usable',
+    expected: '機動戦士ガンダム 水星の魔女',
+    note: 'BS11 anime block prefix stripped; Season2 + ep number tail cut at the season marker. Source: issue #35.',
+  },
+  {
+    raw: 'BS11ガンダムアワー 機動戦士ガンダム THE ORIGIN 前夜 赤い彗星　第９話',
+    expected: '機動戦士ガンダム THE ORIGIN 前夜 赤い彗星',
+    note: 'BS11 anime block prefix stripped; the arc subtitle `前夜 赤い彗星` is part of the TVDB-canonical show title. Source: issue #34.',
+  },
+  {
+    raw: 'BS11ガンダムアワー 機動戦士ガンダム 水星の魔女 Season2　第21話',
+    expected: '機動戦士ガンダム 水星の魔女',
+    note: 'BS11 anime block prefix stripped; ep 21 is cumulative (TVDB Season 1 episode 21). Source: issue #35.',
+  },
+  {
+    raw: 'ＢＳ１１ガンダムアワー 機動戦士ガンダム 水星の魔女 Season2　第21話',
+    expected: '機動戦士ガンダム 水星の魔女',
+    note: 'Zenkaku BS11 variant — the zenkaku→hankaku fold runs before block-prefix strip so the same entry covers both.',
   },
   {
     raw: 'NEXT company「野生鳥獣被害解決の切り札に？自立走行巡回ロボット」',
@@ -652,7 +667,11 @@ describe('matchService whitelist complexity guards', () => {
     // justify the addition in the PR (general regex preferred over
     // literal). The skill's per-literal anti-pattern check fires
     // when this grows by literals more often than by regexes.
-    const SNAPSHOT_LIMIT = 18;
+    // Bumped 18→19 for `BS11ガンダムアワー` (issues #34/#35). Genuinely
+    // station-specific block label (only BS11 uses it, only for the
+    // multi-show Gundam rotation) — no general regex would absorb it
+    // without overreaching into unrelated `BS<NN>...` slot names.
+    const SNAPSHOT_LIMIT = 19;
     assert.ok(
       prefixes.length <= SNAPSHOT_LIMIT,
       `BLOCK_PREFIXES grew to ${prefixes.length} (limit ${SNAPSHOT_LIMIT}). ` +
