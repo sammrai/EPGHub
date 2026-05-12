@@ -932,6 +932,53 @@ describe('scoreOf — zenkaku/hankaku punctuation folding', () => {
     const score = scoreOf(entry, 'あいうえ');
     assert.equal(score, 0);
   });
+
+  test('script-variant tail: TVDB stores katakana brand suffix while EPG uses ASCII Latin', () => {
+    // Issue #37: programs.id `svc-400211_2026-05-12T16:00:00.000Z`
+    // (`こめかみっ！Girls　＃６「トマトまるごとパエリア」`).
+    // `normalizeTitle` reduces the EPG title to `こめかみっ!Girls`.
+    // TVDB stores the official Japanese form as `こめかみっ! ガールズ`
+    // (series 476071). Pre-fix every comparator failed because the
+    // shared CJK prefix `こめかみっ!` is followed by script-disjoint
+    // tails (ASCII `Girls` vs katakana `ガールズ`), so `ja.startsWith(key)`
+    // and `key.includes(ja)` all returned false. The script-variant
+    // tail relaxation accepts this exact structural shape: shared
+    // CJK prefix (≥ 4 kana/kanji chars) ending at `!`/`?`, and the
+    // divergent tails are one pure ASCII Latin and one pure katakana
+    // — no possibility of partial-text collision with an unrelated
+    // entry.
+    const entry = makeSeries('こめかみっ! ガールズ');
+    const score = scoreOf(entry, 'こめかみっ!Girls');
+    assert.ok(score > 0, `expected non-zero score for script-variant tail, got ${score}`);
+  });
+
+  test('script-variant tail: rejects when shared CJK prefix is too short (< 4 kana/kanji)', () => {
+    // Sanity gate: a 2-char CJK prefix (`こめ`) is too short to be a
+    // distinctive franchise root, so the script-variant relaxation
+    // MUST NOT fire even when the tails are script-disjoint. Protects
+    // against generic short-prefix collisions.
+    const entry = makeSeries('こめ! ガールズ');
+    const score = scoreOf(entry, 'こめ!Girls');
+    assert.equal(score, 0);
+  });
+
+  test('script-variant tail: rejects when tail lengths differ by more than 1.8x', () => {
+    // Sanity gate: a 5-char Latin tail can't anchor a 20-char katakana
+    // tail. Protects against a short brand suffix being matched against
+    // a much longer published subtitle that happens to be all katakana.
+    const entry = makeSeries('こめかみっ! ガールズアンドバンドサウンドプロジェクト');
+    const score = scoreOf(entry, 'こめかみっ!Girls');
+    assert.equal(score, 0);
+  });
+
+  test('script-variant tail: rejects when tail scripts overlap (not script-disjoint)', () => {
+    // Sanity gate: when the TVDB tail mixes katakana + Latin or has
+    // any non-katakana CJK, the structural promise (one pure Latin,
+    // one pure katakana) breaks and the branch MUST NOT fire.
+    const entry = makeSeries('こめかみっ! ガール子');
+    const score = scoreOf(entry, 'こめかみっ!Girls');
+    assert.equal(score, 0);
+  });
 });
 
 describe('suggestRuleKeyword — schedule-hit-based candidate picking', () => {

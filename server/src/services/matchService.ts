@@ -740,6 +740,60 @@ function compactWhitespace(s: string): string {
 // followed by the published subtitle.
 const STRUCTURAL_BOUNDARY_RE = /[\s:～〜~\-–—]/;
 
+// Script-variant tail detector. Some broadcasters style the
+// branded suffix in ASCII Latin (`こめかみっ!Girls`) while TVDB
+// stores the official Japanese rendering with the same suffix
+// transliterated to katakana (`こめかみっ! ガールズ`). The two
+// titles share a CJK franchise prefix that ends at `!`/`?` and
+// diverge only at the script of the trailing brand word, so a
+// boundary-aware prefix match is reliable when the divergent
+// tails are script-disjoint: one is pure ASCII Latin, the other
+// is pure katakana (no overlap → no accidental partial-text
+// collision with unrelated shows). Source: programs.id
+// svc-400211_2026-05-12T16:00:00.000Z (issue #37).
+const ASCII_LATIN_TAIL_RE = /^[A-Za-z][A-Za-z0-9]*$/;
+const KATAKANA_TAIL_RE = /^[\u30A0-\u30FF\u30FC]+$/;
+const CJK_PREFIX_RE = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/g;
+
+/**
+ * Score a TVDB title vs an EPG key when the two share a CJK prefix
+ * terminated by `!`/`?` and their tails are script-disjoint (one pure
+ * ASCII Latin, the other pure katakana). Returns 0 when the structural
+ * shape doesn't match. See the call site in `scoreOf` for the rationale.
+ */
+function scoreScriptVariantTail(ja: string, key: string): number {
+  // Find the latest `!` or `?` in `key` that is preceded by ≥ 4 CJK
+  // kana/kanji chars. Anchor on the EPG-side key because that's the
+  // canonical brand boundary on the broadcaster side.
+  let cut = -1;
+  for (let i = key.length - 1; i >= 0; i--) {
+    const ch = key[i];
+    if (ch === '!' || ch === '?') {
+      const head = key.slice(0, i);
+      const cjkCount = (head.match(CJK_PREFIX_RE) ?? []).length;
+      if (cjkCount >= 4) { cut = i; break; }
+    }
+  }
+  if (cut < 0) return 0;
+  const prefix = key.slice(0, cut + 1);
+  if (!ja.startsWith(prefix)) return 0;
+  const keyTail = key.slice(cut + 1).trim();
+  const jaTail = ja.slice(prefix.length).trim();
+  if (!keyTail || !jaTail) return 0;
+  const keyTailIsLatin = ASCII_LATIN_TAIL_RE.test(keyTail);
+  const jaTailIsKatakana = KATAKANA_TAIL_RE.test(jaTail);
+  const keyTailIsKatakana = KATAKANA_TAIL_RE.test(keyTail);
+  const jaTailIsLatin = ASCII_LATIN_TAIL_RE.test(jaTail);
+  const scriptDisjoint =
+    (keyTailIsLatin && jaTailIsKatakana) || (keyTailIsKatakana && jaTailIsLatin);
+  if (!scriptDisjoint) return 0;
+  const lenA = keyTail.length;
+  const lenB = jaTail.length;
+  const ratio = Math.max(lenA, lenB) / Math.max(1, Math.min(lenA, lenB));
+  if (ratio > 1.8) return 0;
+  return 620 - ja.length;
+}
+
 export function scoreOf(e: TvdbEntry, key: string): number {
   const ja = compactWhitespace(
     compactColon(zenkakuToHankaku((e.title ?? '').trim()).replace(TVDB_ANGLE_TAG_RE, ' ')),
@@ -775,6 +829,22 @@ export function scoreOf(e: TvdbEntry, key: string): number {
   ) {
     return 630 - en.length;
   }
+  // Script-variant tail relaxation: TVDB stores the franchise + katakana
+  // rendering (`こめかみっ! ガールズ`) while the broadcaster styles the
+  // brand suffix in ASCII Latin (`こめかみっ!Girls`). The shared CJK
+  // prefix ends at a `!`/`?` show-name boundary; the divergent tails are
+  // script-disjoint (one pure ASCII Latin, the other pure katakana) so
+  // there is no possibility of a partial-text collision with an unrelated
+  // entry. Gated tightly:
+  //   - The shared prefix must end with `!` or `?` AND contain ≥ 4 CJK
+  //     kana/kanji chars — short generic prefixes can't ride this branch.
+  //   - One tail pure ASCII-Latin (≥ 1 char, alpha first), the other
+  //     pure katakana. No mixed script on either side.
+  //   - Tail lengths within a 1.8x ratio so a 3-char Latin word can't
+  //     anchor a 20-char katakana tail (or vice versa).
+  // Source: programs.id svc-400211_2026-05-12T16:00:00.000Z (issue #37).
+  const variant = scoreScriptVariantTail(ja, key);
+  if (variant > 0) return variant;
   if (jaLenRatio <= 1.6 && ja.includes(key)) return 500 - ja.length;
   if (key.length >= 4) {
     const minCovered = key.length * CONTAINMENT_MIN_COVERAGE;
