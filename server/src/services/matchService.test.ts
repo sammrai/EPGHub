@@ -177,6 +177,23 @@ const quoted: Case[] = [
     expected: 'Dr.STONE SCIENCE FUTURE',
   },
   {
+    // Issue #29: all-zenkaku Dr.STONE title (including fullwidth `．`
+    // U+FF0E). Without the `．` → `.` fold in zenkakuToHankaku, the
+    // normalized key would be `Dr．STONE SCIENCE FUTURE` and the TVDB
+    // title `Dr.STONE` (ASCII period) fails every comparator in scoreOf.
+    raw: 'Ｄｒ．ＳＴＯＮＥ　ＳＣＩＥＮＣＥ　ＦＵＴＵＲＥ　第31話',
+    expected: 'Dr.STONE SCIENCE FUTURE',
+    note: 'fullwidth `．` (U+FF0E) folded to ASCII `.` so the key compares equal to TVDB `Dr.STONE`',
+  },
+  {
+    // Issue #30: same show, different broadcaster shape — `第３クール
+    // （第３１話）` season-then-cumulative-episode in fullwidth. The
+    // CUT_AT_SEASON_RE cuts at `第3クール` and the trailing `（第３１話）`
+    // is consumed too, leaving the canonical show name.
+    raw: 'Ｄｒ．ＳＴＯＮＥ　ＳＣＩＥＮＣＥ　ＦＵＴＵＲＥ　第３クール（第３１話）',
+    expected: 'Dr.STONE SCIENCE FUTURE',
+  },
+  {
     raw: '『Re:ゼロから始める異世界生活』4th season　第69話',
     expected: 'Re:ゼロから始める異世界生活',
   },

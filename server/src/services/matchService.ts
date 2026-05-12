@@ -18,8 +18,17 @@ const ZENKAKU_ASCII_OFFSET = 'Ａ'.charCodeAt(0) - 'A'.charCodeAt(0);
 
 // Fullwidth → ASCII for digits and Latin letters. We preserve the
 // ideographic space `　` as-is (it's later used as a soft-cut marker) and we
-// fold fullwidth punctuation (`！`, `？`, `＃`, `：`) to ASCII so subsequent
-// regexes don't need dual branches.
+// fold fullwidth punctuation (`！`, `？`, `＃`, `：`, `．`) to ASCII so
+// subsequent regexes don't need dual branches.
+//
+// The `．` (U+FF0E fullwidth full stop) fold mirrors the colon / hash / bang
+// folds: broadcasters render show names like `Ｄｒ．ＳＴＯＮＥ` as part of an
+// all-zenkaku title, but TVDB stores the canonical `Dr.STONE` with an ASCII
+// period. Without this fold, the normalized key carries `．` and the
+// `scoreOf` `startsWith` / `includes` comparators against the TVDB title
+// (which already uses `.`) all fail, leaving the program unmatched. Same
+// structural-punctuation justification as the existing folds. Source:
+// programs.id svc-3210242032_2026-05-14T13:00:00.000Z (issue #29).
 function zenkakuToHankaku(s: string): string {
   return s
     .replace(/[０-９]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - ZENKAKU_DIGIT_OFFSET))
@@ -27,7 +36,8 @@ function zenkakuToHankaku(s: string): string {
     .replace(/＃/g, '#')
     .replace(/！/g, '!')
     .replace(/？/g, '?')
-    .replace(/：/g, ':');
+    .replace(/：/g, ':')
+    .replace(/．/g, '.');
 }
 
 // Square-style bracket markers: both broadcaster codes like `[字][解][デ][再]`
