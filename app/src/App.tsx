@@ -936,6 +936,7 @@ export function App() {
           keywordRuleForProgram={keywordRuleForProgram}
           disabledKeywordRules={disabledKeywordRules}
           recordingIdForProgram={recordingIdForProgram}
+          reservedProgIds={reservedProgIdSet}
           onRefresh={async () => {
             // Surgical single-program refetch — keeps DebugDetailsModal
             // and GuidePanel mounted through the update. Calling the

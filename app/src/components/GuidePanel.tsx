@@ -14,7 +14,7 @@ import { seriesRuleCovers, seriesRuleOnOtherChannel, seriesRuleChannels as serie
 import { channelKey } from '../lib/channelKey';
 import { DebugDetailsModal, RematchButton } from './Modal';
 import { api } from '../api/epghub';
-import type { ApiTvdbCastMember } from '../api/epghub';
+import type { ApiTvdbCastMember, ApiProgram } from '../api/epghub';
 import type {
   Channel,
   Program,
@@ -54,6 +54,12 @@ export interface GuidePanelProps {
    *  使えず、こちらだけは substring スキャンで判定する。 */
   disabledKeywordRules?: Rule[];
   recordingIdForProgram?: (programId: string) => string | null;
+  /** Set of programIds with an active reservation. Used by the
+   *  related-episodes list to render a `予約済` chip on airings the
+   *  user has already reserved. Provided by the parent because
+   *  `useTvdbPrograms` re-adapts TVDB API rows that don't carry the
+   *  reservation join. */
+  reservedProgIds?: Set<string>;
   /** Called by the debug modal's 再マッチ button after a successful
    *  re-match so the parent re-fetches the schedule and propagates
    *  fresh tvdbSeason / tvdbEpisode back through props. */
@@ -94,6 +100,7 @@ function GuidePanelInner({
   keywordRuleForProgram,
   disabledKeywordRules,
   recordingIdForProgram,
+  reservedProgIds,
   onRefresh,
   onClose,
   onReserve,
@@ -117,7 +124,7 @@ function GuidePanelInner({
   // episode 7 even when 7 sits beyond the current 1-week range. The local
   // `programs` prop is only the seed — `useTvdbPrograms` returns the full
   // set keyed on `tvdb.id`.
-  const seriesEps = useTvdbPrograms(tvdb?.id ?? null, programs);
+  const seriesEps = useTvdbPrograms(tvdb?.id ?? null, programs, reservedProgIds);
   const related = (() => {
     // Same airing on parallel channel sources (svc-/m3u-) appears twice in
     // useTvdbPrograms because they're distinct channel rows. Collapse by
@@ -490,19 +497,22 @@ function GuidePanelInner({
           {related.length > 0 && (
             <Section title="関連番組">
               <ul className="gp-related-list">
-                {related.map((rel) => {
+                {(() => { const nowMs = Date.now(); return related.map((rel) => {
                   const rch = getChannel(channels, rel.ch);
                   const se =
                     rel.tvdbSeason != null && rel.tvdbEpisode != null
                       ? `S${rel.tvdbSeason}E${rel.tvdbEpisode}`
                       : null;
                   const sameCh = channelKey(rel.ch) === programChKey;
+                  const relIsPast = !!rel.endAt && Date.parse(rel.endAt) < nowMs;
+                  const relReserved = !!rel.rec;
                   return (
                     <li key={progId(rel)}>
                       <button
                         type="button"
-                        className={`gp-related-item${sameCh ? ' same-ch' : ''}`}
+                        className={`gp-related-item${sameCh ? ' same-ch' : ''}${relIsPast ? ' past' : ''}`}
                         onClick={() => onSelectProgram(rel)}
+                        disabled={relIsPast}
                       >
                         <div className="gp-related-when">
                           {rel.startAt ? jpAirDate(rel.startAt).slice(5, 14) : rel.start}
@@ -510,6 +520,7 @@ function GuidePanelInner({
                         <div className="gp-related-main">
                           <div className="gp-related-title">{rel.title}</div>
                           <div className="gp-related-meta">
+                            {relReserved && <span className="gp-related-reserved">予約済</span>}
                             {sameCh && <span className="gp-related-same-ch">同じチャンネル</span>}
                             <span>{rch?.name ?? rel.ch}</span>
                             <span className="gp-meta-sep">·</span>
@@ -520,7 +531,7 @@ function GuidePanelInner({
                       </button>
                     </li>
                   );
-                })}
+                }); })()}
               </ul>
             </Section>
           )}
@@ -1212,33 +1223,32 @@ function pickExtendedKv(
 // re-renders `programs` (recordings changed → reservedIds re-derives →
 // new program objects), and a naive seed-on-every-render would reset eps
 // back to the schedule window and visually drop the wider series view.
-function useTvdbPrograms(tvdbId: number | null, seed: Program[]): Program[] {
-  const [eps, setEps] = useState<Program[]>(() =>
-    tvdbId == null ? [] : seed.filter((p) => p.tvdb?.id === tvdbId),
-  );
+function useTvdbPrograms(
+  tvdbId: number | null,
+  seed: Program[],
+  reservedIds?: Set<string>,
+): Program[] {
+  const [rows, setRows] = useState<ApiProgram[] | null>(null);
   // Tracks the tvdbId we've already issued an API call for, so seed-only
   // re-renders (parent programs prop churn) don't trigger a re-seed.
   const lockedFor = useRef<number | null>(null);
   useEffect(() => {
     if (tvdbId == null) {
-      setEps([]);
+      setRows(null);
       lockedFor.current = null;
       return;
     }
     if (lockedFor.current === tvdbId) return;
-    // Switching to a new tvdbId — show the seed immediately while the API
-    // call below fills in episodes outside the loaded window.
-    setEps(seed.filter((p) => p.tvdb?.id === tvdbId));
+    // Switching to a new tvdbId — clear rows so the seed renders while the
+    // API call below fills in episodes outside the loaded window.
+    setRows(null);
     let cancelled = false;
     api.tvdb
       .listPrograms(tvdbId)
-      .then((rows) => {
+      .then((fetched) => {
         if (cancelled) return;
         lockedFor.current = tvdbId;
-        // Re-use the shared adapter so the toProgram → Program mapping
-        // matches the rest of the app. reservedIds is empty here — the
-        // related list only renders title/time so flags don't matter.
-        setEps(rows.map((r) => toProgram(r, new Set<string>(), new Date())));
+        setRows(fetched);
       })
       .catch(() => {
         // keep the seed as fallback
@@ -1249,8 +1259,18 @@ function useTvdbPrograms(tvdbId: number | null, seed: Program[]): Program[] {
     // `seed` intentionally excluded — see lockedFor / comment above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tvdbId]);
-  return eps;
+  // Re-adapt on every render so toggling a reservation (reservedIds churn)
+  // re-flags `rec` on the related list without re-issuing the API call.
+  return useMemo(() => {
+    if (tvdbId == null) return [];
+    const ids = reservedIds ?? EMPTY_SET;
+    const now = new Date();
+    if (rows) return rows.map((r) => toProgram(r, ids, now));
+    return seed.filter((p) => p.tvdb?.id === tvdbId);
+  }, [tvdbId, rows, seed, reservedIds]);
 }
+
+const EMPTY_SET: Set<string> = new Set();
 
 // Lazy cast lookup — returns `[]` until the server responds. Errors
 // silently: the UI falls back to ARIB broadcaster names when the TVDB

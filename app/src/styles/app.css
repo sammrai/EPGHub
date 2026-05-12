@@ -5559,4 +5559,32 @@ input[type=range] {
   margin-right: 4px;
 }
 
+.gp-related-reserved {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  border-radius: 3px;
+  border: 1px solid color-mix(in oklch, var(--rec) 55%, transparent);
+  color: var(--rec);
+  margin-right: 4px;
+}
+
+.gp-related-item.past,
+.gp-related-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.gp-related-item.past:hover,
+.gp-related-item:disabled:hover {
+  background: transparent;
+  color: var(--fg-secondary);
+}
+.gp-related-item.past:hover .gp-related-title,
+.gp-related-item:disabled:hover .gp-related-title {
+  color: var(--fg-secondary);
+}
+
 
