@@ -873,6 +873,46 @@ describe('scoreOf — zenkaku/hankaku punctuation folding', () => {
     const score = scoreOf(entry, key);
     assert.ok(score >= 1000, `expected exact-match score, got ${score}`);
   });
+
+  test('franchise head-fallback matches a TVDB title that opens with `<key> <published subtitle>` even when the subtitle balloons the length ratio', () => {
+    // Issue #33: programs.id `svc-3272502088_2026-05-16T08:30:00.000Z`
+    // (`本好きの下剋上　領主の養女　第六章「フェシュピールコンサート」[字][デ]`).
+    // `normalizeTitle` reduces the EPG title to
+    // `本好きの下剋上 領主の養女` (the arc subtitle survives because
+    // it's a real published phrase, not structural noise). The head-
+    // fallback in `searchKeyCandidates` then offers `本好きの下剋上`
+    // (the franchise root) as the secondary search key, which TVDB
+    // returns as series 366263 with the canonical Japanese title
+    // `本好きの下剋上 司書になるためには手段を選んでいられません`.
+    // Pre-fix: ja.length (29) / key.length (7) = 4.14 > 1.4 →
+    // `startsWith` branch rejected and the show scored 0, leaving the
+    // program unmatched. The structural-boundary relaxation accepts
+    // `ja.startsWith(key)` when the next char of `ja` is a published-
+    // subtitle delimiter (whitespace here), so the franchise head
+    // resolves and the program inherits the right tvdb_id. Sibling
+    // shape of the colon-boundary case (`ゴーストコンサート : missing
+    // Songs`) and the tilde-boundary case (`<show> ～<subtitle>～`).
+    const entry = makeSeries(
+      '本好きの下剋上 司書になるためには手段を選んでいられません',
+      'Ascendance of a Bookworm',
+    );
+    const score = scoreOf(entry, '本好きの下剋上');
+    assert.ok(score > 0, `expected non-zero score for franchise head fallback, got ${score}`);
+  });
+
+  test('franchise head-fallback rejects when the boundary char is NOT a structural delimiter', () => {
+    // Sanity check for the structural-boundary gate: when the TVDB
+    // title is a longer kanji/kana compound that just happens to share
+    // a 4-char prefix with the EPG key (no delimiter at the boundary),
+    // the relaxation MUST NOT fire — that's the regression class the
+    // ratio floor was originally protecting against. Example: a key
+    // `あいうえ` against a TVDB title `あいうえおかきくけこ` (no
+    // delimiter between `え` and `お`) is a coincidental prefix, not a
+    // franchise-subtitle pattern.
+    const entry = makeSeries('あいうえおかきくけこさしすせそ');
+    const score = scoreOf(entry, 'あいうえ');
+    assert.equal(score, 0);
+  });
 });
 
 describe('suggestRuleKeyword — schedule-hit-based candidate picking', () => {

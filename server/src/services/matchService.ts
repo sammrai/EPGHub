@@ -716,6 +716,22 @@ function compactWhitespace(s: string): string {
   return s.replace(WHITESPACE_RUN_RE, ' ').trim();
 }
 
+// Boundary characters TVDB consistently uses to separate the franchise
+// name from a long subtitle / tagline in the canonical Japanese title.
+// `<show> <subtitle>` (`本好きの下剋上 司書になるためには手段を選んでいられません`),
+// `<show> : <subtitle>` (`ゴーストコンサート : missing Songs`, after the
+// `\s*:\s*` → `:` collapse the boundary char IS the `:`), and
+// `<show>〜<subtitle>〜` / `<show>~<subtitle>~` (tilde-wrapped subtitles
+// common on broadcaster-style names). Treat the EPG key as a structural
+// prefix of the TVDB title when these are the boundary char — even if
+// the subtitle balloons the length ratio past the conservative
+// `startsWith` floor (1.4x). The franchise-with-arc-subtitle pattern
+// (本好きの下剋上 領主の養女 ↔ 本好きの下剋上 司書…) is the canonical
+// case: head-fallback in `searchKeyCandidates` reduces the EPG-side key
+// to the franchise name, and TVDB's canonical name is the franchise
+// followed by the published subtitle.
+const STRUCTURAL_BOUNDARY_RE = /[\s:～〜~\-–—]/;
+
 export function scoreOf(e: TvdbEntry, key: string): number {
   const ja = compactWhitespace(
     compactColon(zenkakuToHankaku((e.title ?? '').trim()).replace(TVDB_ANGLE_TAG_RE, ' ')),
@@ -731,6 +747,26 @@ export function scoreOf(e: TvdbEntry, key: string): number {
   const enLenRatio = en.length / Math.max(1, key.length);
   if (jaLenRatio <= 1.4 && ja.startsWith(key)) return 700 - ja.length;
   if (enLenRatio <= 1.4 && en.toLowerCase().startsWith(kLower)) return 680 - en.length;
+  // Franchise-with-subtitle relaxation: when the TVDB title starts with
+  // the EPG key AND the next char is a structural delimiter, the ratio
+  // floor doesn't apply — the rest of `ja` is a published subtitle, not
+  // an unrelated title. Gated by `key.length >= 4` so generic 3-char
+  // openers (`THE`, `BAR`, `ニュース`-ish) can't ride this branch.
+  // Source: programs.id svc-3272502088_2026-05-16T08:30:00.000Z (issue #33).
+  if (
+    key.length >= 4 &&
+    ja.startsWith(key) &&
+    STRUCTURAL_BOUNDARY_RE.test(ja[key.length] ?? '')
+  ) {
+    return 650 - ja.length;
+  }
+  if (
+    key.length >= 4 &&
+    en.toLowerCase().startsWith(kLower) &&
+    STRUCTURAL_BOUNDARY_RE.test(en[key.length] ?? '')
+  ) {
+    return 630 - en.length;
+  }
   if (jaLenRatio <= 1.6 && ja.includes(key)) return 500 - ja.length;
   if (key.length >= 4) {
     const minCovered = key.length * CONTAINMENT_MIN_COVERAGE;
