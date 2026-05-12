@@ -856,6 +856,23 @@ describe('scoreOf — zenkaku/hankaku punctuation folding', () => {
     const score = scoreOf(entry, key);
     assert.ok(score >= 1000, `expected exact-match score, got ${score}`);
   });
+
+  test('TVDB title carrying an embedded ＜LATIN＞ alias tag still scores exact against the EPG key', () => {
+    // Issue #31: programs.id `svc-400141_2026-05-14T15:30:00.000Z`
+    // (`牙狼＜GARO＞ -魔戒ノ花-　第７話「神話」`). TVDB stores the
+    // canonical title as `牙狼＜GARO＞-魔戒ノ花-` (alias-reading baked
+    // directly into the name). `normalizeTitle` strips `＜...＞` on
+    // the EPG side via ANGLE_TAG_RE, leaving `牙狼 -魔戒ノ花-` (with
+    // residual whitespace from the strip). Pre-fix the TVDB-side
+    // title kept the angle tag, so the two keys collided on every
+    // comparator. Symmetric `＜...＞` stripping + whitespace-compact
+    // on the scoreOf side lines both forms up to the same canonical
+    // `牙狼 -魔戒ノ花-` and the show scores exact.
+    const entry = makeSeries('牙狼＜GARO＞-魔戒ノ花-', 'GARO: Makai No Hana');
+    const key = normalizeTitle('牙狼＜GARO＞ -魔戒ノ花-　第７話「神話」');
+    const score = scoreOf(entry, key);
+    assert.ok(score >= 1000, `expected exact-match score, got ${score}`);
+  });
 });
 
 describe('suggestRuleKeyword — schedule-hit-based candidate picking', () => {

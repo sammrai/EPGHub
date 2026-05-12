@@ -694,10 +694,36 @@ function compactColon(s: string): string {
   return s.replace(COLON_SPACING_RE, ':');
 }
 
+// Strip `＜...＞` / `<...>` angle-bracket tags from the TVDB-side title so
+// it lines up with the EPG-side key that already passed through
+// `normalizeTitle` (which removes the same tags via `ANGLE_TAG_RE`).
+// TVDB sometimes bakes the Latin-alias reading directly into the canonical
+// title (`牙狼＜GARO＞-魔戒ノ花-`, series 348636). Without symmetric
+// stripping the EPG key `牙狼 -魔戒ノ花-` (where the angle tag was already
+// removed and replaced with whitespace) fails every `scoreOf` comparator
+// against the raw TVDB title, even though both sides refer to the same
+// show. Replacing the tag with a single space (not empty string) preserves
+// the EPG side's residual whitespace, so the two forms collapse to the
+// same canonical key after the whitespace-compact step below.
+// Source: programs.id svc-400141_2026-05-14T15:30:00.000Z (issue #31).
+const TVDB_ANGLE_TAG_RE = /[＜<][^＞>]*[＞>]/g;
+// Collapse whitespace runs (ASCII space + ideographic space) and trim, so
+// `牙狼 -魔戒ノ花-` (EPG side, residual space from angle-tag strip) and
+// `牙狼-魔戒ノ花-` (TVDB after angle strip) normalise to identical strings
+// regardless of how each side renders the residual whitespace.
+const WHITESPACE_RUN_RE = /[\s　]+/g;
+function compactWhitespace(s: string): string {
+  return s.replace(WHITESPACE_RUN_RE, ' ').trim();
+}
+
 export function scoreOf(e: TvdbEntry, key: string): number {
-  const ja = compactColon(zenkakuToHankaku((e.title ?? '').trim()));
-  const en = compactColon(zenkakuToHankaku((e.titleEn ?? '').trim()));
-  key = compactColon(key);
+  const ja = compactWhitespace(
+    compactColon(zenkakuToHankaku((e.title ?? '').trim()).replace(TVDB_ANGLE_TAG_RE, ' ')),
+  );
+  const en = compactWhitespace(
+    compactColon(zenkakuToHankaku((e.titleEn ?? '').trim()).replace(TVDB_ANGLE_TAG_RE, ' ')),
+  );
+  key = compactWhitespace(compactColon(key));
   const kLower = key.toLowerCase();
   if (ja === key || en === key) return 1000;
   if (en.toLowerCase() === kLower) return 950;
