@@ -1028,3 +1028,51 @@ describe('findEpisodeForProgram — 鬼平犯科帳 Roman-numeral season residue
     assert.deepEqual(hit, { s: 1, e: 1, name: 'ロッキーⅡ特集' });
   });
 });
+
+describe('findEpisodeForProgram — Re:ゼロから始める異世界生活 4th season regression case', () => {
+  // svc-400211_2026-05-13T16:00:00.000Z (issue #28). tvdb_id=305089.
+  // Title shape: `『<show>』<Nth> season　第<cumulative>話「<subtitle>」`
+  // — the show name is wrapped in `『』`, the season marker is the English
+  // `4th season` (not 第N期 / シーズンN), and the per-airing counter is
+  // CUMULATIVE across all seasons (S1=25 + S2=25 + S3=16 → +6 → #72).
+  // Two independent signals both point at S4E6:
+  //   - quoted subtitle `「ユリウス・ユークリウス」` — series-unique
+  //   - cumulative #72 fallback (25+25+16+6 = 72)
+  // Both must agree on S4E6 with the episode name `ユリウス・ユークリウス`.
+  const REZERO_S4_EPISODES: Episode[] = [
+    ...eps(1, 25, 'S1'),
+    ...eps(2, 25, 'S2'),
+    ...eps(3, 16, 'S3'),
+    { s: 4, e: 1, name: '君を連れ出す理由／ゴージャス・タイガー・リローデッド', aired: '2026-04-08' },
+    { s: 4, e: 2, name: '砂時間を越えろ', aired: '2026-04-15' },
+    { s: 4, e: 3, name: '監視塔の番人', aired: '2026-04-22' },
+    { s: 4, e: 4, name: '白い星空のアステリズム', aired: '2026-04-29' },
+    { s: 4, e: 5, name: '棒振り', aired: '2026-05-06' },
+    { s: 4, e: 6, name: 'ユリウス・ユークリウス', aired: '2026-05-13' },
+    { s: 4, e: 7, name: 'TBA', aired: '2026-05-20' },
+  ];
+
+  test('『…』-wrapped show + cumulative #72 + quoted subtitle → S4E6', () => {
+    const hit = findEpisodeForProgram(
+      REZERO_S4_EPISODES,
+      '2026-05-13T16:00:00.000Z',
+      '『Re:ゼロから始める異世界生活』4th season\u3000第72話「ユリウス・ユークリウス」',
+      ['Re：ゼロから始める異世界生活'],
+    );
+    assert.deepEqual(hit, { s: 4, e: 6, name: 'ユリウス・ユークリウス' });
+  });
+
+  test('cumulative #72 without quoted subtitle → S4E6 via cumulative fallback', () => {
+    // Same series, but the broadcaster drops the `「…」` subtitle. The
+    // cumulative-#N fallback (25 + 25 + 16 + 6 = 72) must still pin S4E6
+    // — locks in that the English `<N>th season` marker doesn't trip the
+    // per-season episode resolver into seeking a literal S1E72.
+    const hit = findEpisodeForProgram(
+      REZERO_S4_EPISODES,
+      '2026-05-13T16:00:00.000Z',
+      '『Re:ゼロから始める異世界生活』4th season\u3000第72話',
+      ['Re：ゼロから始める異世界生活'],
+    );
+    assert.deepEqual(hit, { s: 4, e: 6, name: 'ユリウス・ユークリウス' });
+  });
+});
