@@ -1061,6 +1061,22 @@ function deriveEpisodeSubtitle(programTitle: string, showTitles: string[]): stri
   // lookahead branch.
   s = s.replace(/(?<=^|[\s　])[\d０-９](?=$|[\s　「『])/g, ' ');
 
+  // Standalone fullwidth Roman-numeral residue — same justification as the
+  // digit residue above, but for broadcaster sequel markers written as
+  // Roman numerals (`鬼平犯科帳Ⅴ`, `暴れん坊将軍Ⅳ`, `必殺仕事人Ⅲ`). After
+  // the show-name strip those numerals are left orphaned between
+  // separators just like a bare digit. Without this branch the residue
+  // (`Ⅴ 市松小僧始末`) keeps the numeral glued to the subtitle and the
+  // `normalizeEpisodeName` equality check against TVDB's bare
+  // `市松小僧始末` fails.
+  // Restricted to fullwidth U+2160..U+2169 (Ⅰ..Ⅹ) — ASCII `II`/`III`
+  // collides too often with real subtitle content and substrings of
+  // show titles. Boundary lookbehind/lookahead match the digit residue
+  // branch so `<numeral>「subtitle」` (no whitespace) still fires.
+  // Source: programs.id svc-3210242032_2026-05-13T10:00:00.000Z
+  // (issue #27).
+  s = s.replace(/(?<=^|[\s　])[\u2160-\u2169]+(?=$|[\s　「『])/g, ' ');
+
   // Quote brackets — keep the inside, drop the wrappers.
   s = s.replace(/[「」『』]/g, ' ');
 

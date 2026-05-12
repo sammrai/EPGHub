@@ -973,3 +973,58 @@ describe('findEpisodeForProgram — ゴーストコンサート: missing Songs r
     assert.deepEqual(hit, { s: 1, e: 6, name: '漆身呑炭' });
   });
 });
+
+describe('findEpisodeForProgram — 鬼平犯科帳 Roman-numeral season residue (issue #27)', () => {
+  // svc-3210242032_2026-05-13T10:00:00.000Z (issue #27). EPG title is
+  // `鬼平犯科帳Ⅴ[再]　♯４「市松小僧始末」` — broadcaster glues a fullwidth
+  // Roman-numeral season marker (`Ⅴ`, U+2164) onto the show name. After
+  // `normalizeTitle` strips the marker (via TRAILING_KANA_ROMAN_RE) the
+  // show resolves to tvdb_id 204391, but `deriveEpisodeSubtitle` was
+  // leaving the bare `Ⅴ` in the residue (`Ⅴ 　♯４「市松小僧始末」` →
+  // `Ⅴ 市松小僧始末`), which prevented the subtitle name-match from
+  // hitting S5E4 (`市松小僧始末`). Without the name match the fallback
+  // path 2 (#N + rerun) would pick the LOWEST season carrying e===4
+  // (S1E4), not S5E4 — confidently wrong.
+  //
+  // The fix mirrors the standalone-1-digit residue branch with a
+  // fullwidth Roman-numeral branch (U+2160..U+2169 bounded by
+  // whitespace / quote-bracket / start/end-of-string).
+  const ONIHEI_S5_EPISODES: Episode[] = [
+    { s: 1, e: 4, name: '本所・桜屋敷', aired: '1989-07-26' },
+    { s: 5, e: 1, name: '土蜘蛛の金五郎', aired: '1994-03-09' },
+    { s: 5, e: 2, name: '怨恨', aired: '1994-03-16' },
+    { s: 5, e: 3, name: '蛙の長助', aired: '1994-04-13' },
+    { s: 5, e: 4, name: '市松小僧始末', aired: '1994-04-20' },
+    { s: 5, e: 5, name: '消えた男', aired: '1994-04-27' },
+    { s: 9, e: 4, name: '雨引の文五郎', aired: '2001-08-22' },
+  ];
+
+  test('鬼平犯科帳Ⅴ[再]　♯４「市松小僧始末」 → S5E4 via subtitle name match', () => {
+    const hit = findEpisodeForProgram(
+      ONIHEI_S5_EPISODES,
+      '2026-05-13T10:00:00.000Z',
+      '鬼平犯科帳Ⅴ[再]　♯４「市松小僧始末」',
+      ['鬼平犯科帳', '鬼平犯科帳'],
+    );
+    assert.deepEqual(hit, { s: 5, e: 4, name: '市松小僧始末' });
+  });
+
+  test('standalone Roman-numeral residue strip leaves real numerals inside subtitles alone', () => {
+    // Negative test: the new strip is constrained to numerals bounded
+    // by separators. A numeral that's part of an episode-name token
+    // (`ロッキーⅡ` inside a quoted subtitle) must survive — the quote-
+    // bracket strip runs AFTER the residue branch but the residue branch
+    // requires whitespace/quote/start/end on BOTH sides, so a numeral
+    // glued to kana/kanji inside `「…」` is preserved.
+    const list: Episode[] = [
+      { s: 1, e: 1, name: 'ロッキーⅡ特集', aired: '2026-01-01' },
+    ];
+    const hit = findEpisodeForProgram(
+      list,
+      '2026-01-01T10:00:00.000Z',
+      'ショウ名\u3000「ロッキーⅡ特集」',
+      ['ショウ名'],
+    );
+    assert.deepEqual(hit, { s: 1, e: 1, name: 'ロッキーⅡ特集' });
+  });
+});
