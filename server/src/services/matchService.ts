@@ -1077,6 +1077,21 @@ function deriveEpisodeSubtitle(programTitle: string, showTitles: string[]): stri
   // subtitle candidate.
   s = s.replace(/[\d０-９]+\s*食目/g, ' ');
 
+  // English / katakana season markers — `<N>(st|nd|rd|th) Season`,
+  // `Season<N>`, `シーズン<N>`. Mirrors the same shapes already covered
+  // by CUT_AT_SEASON_RE, but applied here in subtraction mode (strip
+  // just the marker, not the tail) because the per-airing subtitle
+  // follows the marker (`BanG Dream! 2nd Season　#11　ホシノナミダ` →
+  // the subtitle `ホシノナミダ` is what we want to keep). Without this
+  // strip, the residue would carry `2nd Season` and the equality
+  // check against the TVDB episode name fails — driving the matcher
+  // into the `#N` fallback which picks the highest season carrying
+  // e===N (S3E11 「パレオはもういません」) instead of S2E11.
+  // Source: programs.id svc-400141_2026-05-14T15:00:00.000Z (issue #32).
+  s = s.replace(/[\d０-９]+\s*(?:st|nd|rd|th)\s*[Ss]eason/g, ' ');
+  s = s.replace(/[Ss]eason\s*[\d０-９]+/g, ' ');
+  s = s.replace(/シーズン\s*[\d０-９]+/g, ' ');
+
   // Standalone single zenkaku/hankaku digit residue — broadcasters glue a
   // bare season marker onto the show name (`異世界のんびり農家２`,
   // `魔入りました！入間くん４`, `進撃の巨人3`); after the show-name strip

@@ -1076,3 +1076,35 @@ describe('findEpisodeForProgram — Re:ゼロから始める異世界生活 4th 
     assert.deepEqual(hit, { s: 4, e: 6, name: 'ユリウス・ユークリウス' });
   });
 });
+
+describe('findEpisodeForProgram — BanG Dream! 2nd Season regression case', () => {
+  // svc-400141_2026-05-14T15:00:00.000Z (issue #32). tvdb_id=320002.
+  // Title shape: `アニメ　<show> <N>nd Season　#<per-season-N>　<subtitle>`
+  // — the show name is plain (no `『』` wrapper), the season marker is
+  // the English `2nd Season`, and the episode number is per-season
+  // (NOT cumulative). The subtitle `ホシノナミダ` is series-unique and
+  // belongs to S2E11; without stripping the `2nd Season` marker from the
+  // derived subtitle, the residue carries `2nd Season ホシノナミダ` and
+  // the name-match equality against the TVDB episode name fails. The
+  // matcher then falls back to the `#N` path which picks the HIGHEST
+  // season carrying e===11 (S3E11 「パレオはもういません」) — the wrong
+  // episode. The fix strips `<N>(st|nd|rd|th) Season` (and the related
+  // `Season<N>` / `シーズン<N>` shapes) from the subtitle residue so the
+  // name match cleanly pins S2E11.
+  const BANG_DREAM_EPISODES: Episode[] = [
+    { e: 11, s: 0, name: 'Kizunairo no Ensemble', aired: '2021-08-20' },
+    { e: 11, s: 1, name: '歌えなくなっちゃった！', aired: '2017-04-08' },
+    { e: 11, s: 2, name: 'ホシノナミダ', aired: '2019-03-14' },
+    { e: 11, s: 3, name: 'パレオはもういません', aired: '2020-03-17' },
+  ];
+
+  test('アニメ　<show> 2nd Season #11 ホシノナミダ → S2E11 via subtitle name match', () => {
+    const hit = findEpisodeForProgram(
+      BANG_DREAM_EPISODES,
+      '2026-05-14T15:00:00.000Z',
+      'アニメ\u3000BanG Dream! 2nd Season\u3000#11\u3000ホシノナミダ',
+      ['BanG Dream!', 'BanG Dream!'],
+    );
+    assert.deepEqual(hit, { s: 2, e: 11, name: 'ホシノナミダ' });
+  });
+});
