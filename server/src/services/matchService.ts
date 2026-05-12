@@ -1041,6 +1041,26 @@ function deriveEpisodeSubtitle(programTitle: string, showTitles: string[]): stri
   // subtitle candidate.
   s = s.replace(/[\d０-９]+\s*食目/g, ' ');
 
+  // Standalone single zenkaku/hankaku digit residue — broadcasters glue a
+  // bare season marker onto the show name (`異世界のんびり農家２`,
+  // `魔入りました！入間くん４`, `進撃の巨人3`); after the show-name strip
+  // above, that digit is left orphaned as a 1-char token between
+  // separators (whitespace, quote-bracket, or end-of-string). Without
+  // this, the digit contaminates the residue and the derived subtitle
+  // candidate fails to match the TVDB episode name. Constraints:
+  //   - exactly ONE digit (preserves year tags `2026`, runtime `120`,
+  //     and `30年` shapes that the kanji-prefix-digit strip below also
+  //     guards against),
+  //   - preceded by whitespace or start-of-string,
+  //   - followed by whitespace, a quote-bracket opener, or end-of-string
+  //     (so `30年` / `110キロ` / `2026年` / `4DX` shapes are preserved —
+  //     in all those the digit is followed by kana/kanji/letters, not a
+  //     separator).
+  // Runs BEFORE the quote-bracket strip so a `<digit>「subtitle」` shape
+  // (no whitespace between digit and quote) still fires via the `[「『]`
+  // lookahead branch.
+  s = s.replace(/(?<=^|[\s　])[\d０-９](?=$|[\s　「『])/g, ' ');
+
   // Quote brackets — keep the inside, drop the wrappers.
   s = s.replace(/[「」『』]/g, ' ');
 

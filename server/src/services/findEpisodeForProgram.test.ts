@@ -731,6 +731,79 @@ describe('findEpisodeForProgram — 夜桜さんちの大作戦 bare kanji-prefi
   });
 });
 
+describe('findEpisodeForProgram — 異世界のんびり農家 season-suffix residue (issue #23)', () => {
+  // svc-400171_2026-05-12T15:30:00.000Z (issue #23). EPG title is
+  // `異世界のんびり農家２「来客日和」` — the show name carries a
+  // trailing zenkaku `２` season marker that `normalizeTitle` strips
+  // (via TRAILING_KANA_DIGIT_RE) when resolving the show to tvdb_id
+  // 418367, but `deriveEpisodeSubtitle` was leaving the bare `２` in
+  // the residue (`２「来客日和」` → `２ 来客日和`), which prevented the
+  // subtitle name-match from hitting S2E6 (`来客日和`).
+  //
+  // The fix adds a standalone-1-digit residue strip in
+  // `deriveEpisodeSubtitle` that catches a single zenkaku/hankaku digit
+  // bounded by whitespace / quote-bracket / start/end-of-string — exactly
+  // the shape a residual season marker takes after the show name has
+  // been removed. Single-digit only, so year tags `2026`, runtimes, and
+  // attribute shapes like `平成30年` / `刑事110キロ` / `4DX` survive.
+  const NONBIRI_NOUKA_EPISODES: Episode[] = [
+    { s: 1, e: 1, name: '万能農具', aired: '2023-01-06' },
+    { s: 1, e: 2, name: '第一村人', aired: '2023-01-13' },
+    { s: 1, e: 12, name: '誕生', aired: '2023-03-24' },
+    { s: 2, e: 1, name: 'ようこそ', aired: '2026-04-06' },
+    { s: 2, e: 2, name: '移住者たち', aired: '2026-04-13' },
+    { s: 2, e: 3, name: '冬です', aired: '2026-04-20' },
+    { s: 2, e: 4, name: '武闘会', aired: '2026-04-27' },
+    { s: 2, e: 5, name: '今日も平和', aired: '2026-05-04' },
+    { s: 2, e: 6, name: '来客日和', aired: '2026-05-11' },
+    { s: 2, e: 7, name: 'TBA', aired: '2026-05-18' },
+  ];
+
+  test('異世界のんびり農家２「来客日和」 → S2E6 via subtitle name match', () => {
+    const hit = findEpisodeForProgram(
+      NONBIRI_NOUKA_EPISODES,
+      '2026-05-12T15:30:00.000Z',
+      '異世界のんびり農家２「来客日和」',
+      ['異世界のんびり農家', '異世界のんびり農家'],
+    );
+    assert.deepEqual(hit, { s: 2, e: 6, name: '来客日和' });
+  });
+
+  test('standalone-1-digit residue strip preserves year/runtime/attribute tokens', () => {
+    // Negative test: the new strip is constrained to exactly one digit
+    // bounded by separators — multi-digit tokens (`2026`, `120`) and
+    // digit-glued-to-kana/kanji (`30年`, `110キロ`, `4DX`) must survive.
+    const list: Episode[] = [
+      { s: 1, e: 1, name: '2026年の幕開け', aired: '2026-01-01' },
+      { s: 1, e: 2, name: '120分スペシャル', aired: '2026-01-08' },
+      { s: 1, e: 3, name: '4DXで観る', aired: '2026-01-15' },
+    ];
+    // Each subtitle exactly equals an episode name; the strip must not
+    // touch the digit tokens inside the quoted segment.
+    const hit1 = findEpisodeForProgram(
+      list,
+      '2026-01-01T10:00:00.000Z',
+      'ショウ名\u3000「2026年の幕開け」',
+      ['ショウ名'],
+    );
+    assert.deepEqual(hit1, { s: 1, e: 1, name: '2026年の幕開け' });
+    const hit2 = findEpisodeForProgram(
+      list,
+      '2026-01-08T10:00:00.000Z',
+      'ショウ名\u3000「120分スペシャル」',
+      ['ショウ名'],
+    );
+    assert.deepEqual(hit2, { s: 1, e: 2, name: '120分スペシャル' });
+    const hit3 = findEpisodeForProgram(
+      list,
+      '2026-01-15T10:00:00.000Z',
+      'ショウ名\u3000「4DXで観る」',
+      ['ショウ名'],
+    );
+    assert.deepEqual(hit3, { s: 1, e: 3, name: '4DXで観る' });
+  });
+});
+
 describe('findEpisodeForProgram — cumulative fallback', () => {
   test('ダンダダン #18 with S1=12, S2=6 → S2E6', () => {
     // The motivating case. Broadcaster numbers continuously across
