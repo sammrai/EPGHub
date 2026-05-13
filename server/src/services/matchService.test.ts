@@ -859,6 +859,36 @@ describe('scoreOf — zenkaku/hankaku punctuation folding', () => {
     assert.equal(score, 0);
   });
 
+  test('short generic 4-char ASCII TVDB title (`Live`) does NOT match `Live News イット!` via containment', () => {
+    // Issue #38: programs.id `svc-3272402080_2026-05-13T06:45:00.000Z`
+    // (`Ｌｉｖｅ　Ｎｅｗｓ　イット！[字]　列島中が大気不安定、…`). The
+    // bare-title airings (`Ｌｉｖｅ　Ｎｅｗｓ　イット！[字]`) normalise to
+    // `Live News イット!` (16 chars). The asymmetric-containment branch
+    // (key ⊇ ja|en) previously scored TVDB id 29334 (movie titled `Live`,
+    // 4 chars) at 300 because `Live` is technically a substring of the
+    // EPG key AND 4/16 = 0.25 just barely clears the CONTAINMENT_MIN_COVERAGE
+    // floor — the broadcaster-side news show then got bound to an
+    // unrelated single-word English movie. Same shape as the `Bar`
+    // carve-out above, but the EPG key is short enough that the ratio
+    // floor alone can't catch it: structural guard rejects pure-ASCII
+    // Latin/digit TVDB titles ≤ 6 chars from the containment branch
+    // entirely. Legitimate same-name matches still pass via the exact
+    // branch (`Live` → `Live`, 1000) or via the searchKeyCandidates
+    // head fallback. Source: programs.id svc-3272402080_2026-05-13T06:45:00.000Z.
+    const entry = makeSeries('Live', 'Live');
+    const bareKey = normalizeTitle('Ｌｉｖｅ　Ｎｅｗｓ　イット！[字]');
+    assert.equal(bareKey, 'Live News イット!');
+    assert.equal(scoreOf(entry, bareKey), 0);
+    // Also lock the full-subtitle airing — the bug report variant.
+    const fullKey = normalizeTitle(
+      'Ｌｉｖｅ　Ｎｅｗｓ　イット！[字]　列島中が大気不安定、落雷突風ひょうに注意',
+    );
+    assert.equal(scoreOf(entry, fullKey), 0);
+    // Sanity: the same TVDB entry still matches the bare key `Live`
+    // exactly — the guard only fires for the containment branch.
+    assert.ok(scoreOf(entry, 'Live') >= 950);
+  });
+
   test('zenkaku ： in EPG title vs hankaku ` : ` in TVDB title still scores exact', () => {
     // Issue #21: programs.id `svc-3272402080_2026-05-10T16:25:00.000Z`.
     // EPG broadcasts `ゴーストコンサート：ｍｉｓｓｉｎｇ　Ｓｏｎｇｓ　＃０６`

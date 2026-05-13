@@ -848,8 +848,29 @@ export function scoreOf(e: TvdbEntry, key: string): number {
   if (jaLenRatio <= 1.6 && ja.includes(key)) return 500 - ja.length;
   if (key.length >= 4) {
     const minCovered = key.length * CONTAINMENT_MIN_COVERAGE;
-    const jaCovers = ja.length >= minCovered && key.includes(ja);
-    const enCovers = en.length >= minCovered && key.toLowerCase().includes(en.toLowerCase());
+    // Generic short ASCII-Latin TVDB titles (`Live`, `Bar`, `Wild`,
+    // `Cast`, …) are common English words that happen to head longer
+    // broadcaster titles purely by coincidence — `Live` appears at
+    // the head of `Live News イット!`, `Bar` heads `BAR レモン…`. The
+    // containment branch (TVDB title is a substring of the EPG key)
+    // gives these generics enough score to bind the program to a
+    // wholly unrelated TVDB entry. Reject ja/en candidates that are
+    // pure-ASCII letters/digits/space AND short enough to be one
+    // common English word; legitimate same-name matches still pass
+    // via the exact branch (above) or via the `searchKeyCandidates`
+    // head fallback which fans out to an isolated head key that the
+    // exact branch handles. CJK-rooted franchise heads (`ブラタモリ`,
+    // `アオアシ`, `小さな旅`) keep their containment match — they are
+    // not pure-ASCII so this guard does not fire. Source: programs.id
+    // svc-3272402080_2026-05-13T06:45:00.000Z (issue #38).
+    const isShortGenericAscii = (s: string): boolean =>
+      s.length > 0 && s.length <= 6 && /^[A-Za-z0-9 ]+$/.test(s);
+    const jaCovers =
+      ja.length >= minCovered && key.includes(ja) && !isShortGenericAscii(ja);
+    const enCovers =
+      en.length >= minCovered &&
+      key.toLowerCase().includes(en.toLowerCase()) &&
+      !isShortGenericAscii(en);
     if (jaCovers || enCovers) return 300;
   }
   return 0;
