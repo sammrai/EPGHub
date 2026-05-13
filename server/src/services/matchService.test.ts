@@ -420,23 +420,23 @@ const prefixes: Case[] = [
   },
   {
     raw: 'BS11ガンダムアワー 機動戦士ガンダム 水星の魔女 Season2　第18話',
-    expected: '機動戦士ガンダム 水星の魔女',
-    note: 'BS11 anime block prefix stripped; Season2 + ep number tail cut at the season marker. Source: issue #35.',
+    expected: 'BS11ガンダムアワー 機動戦士ガンダム 水星の魔女',
+    note: 'Broadcaster-block prefix preserved at normalize-time; Season2 + ep number tail cut. `searchKeyCandidates` tail fallback resolves the show name structurally. Source: issue #35.',
   },
   {
     raw: 'BS11ガンダムアワー 機動戦士ガンダム THE ORIGIN 前夜 赤い彗星　第９話',
-    expected: '機動戦士ガンダム THE ORIGIN 前夜 赤い彗星',
-    note: 'BS11 anime block prefix stripped; the arc subtitle `前夜 赤い彗星` is part of the TVDB-canonical show title. Source: issue #34.',
+    expected: 'BS11ガンダムアワー 機動戦士ガンダム THE ORIGIN 前夜 赤い彗星',
+    note: 'Broadcaster-block prefix preserved; arc subtitle stays in show name. `searchKeyCandidates` tail fanout finds the TVDB entry. Source: issue #34.',
   },
   {
     raw: 'BS11ガンダムアワー 機動戦士ガンダム 水星の魔女 Season2　第21話',
-    expected: '機動戦士ガンダム 水星の魔女',
-    note: 'BS11 anime block prefix stripped; ep 21 is cumulative (TVDB Season 1 episode 21). Source: issue #35.',
+    expected: 'BS11ガンダムアワー 機動戦士ガンダム 水星の魔女',
+    note: 'Broadcaster-block prefix preserved; ep 21 is cumulative (TVDB Season 1 episode 21). Source: issue #35.',
   },
   {
     raw: 'ＢＳ１１ガンダムアワー 機動戦士ガンダム 水星の魔女 Season2　第21話',
-    expected: '機動戦士ガンダム 水星の魔女',
-    note: 'Zenkaku BS11 variant — the zenkaku→hankaku fold runs before block-prefix strip so the same entry covers both.',
+    expected: 'BS11ガンダムアワー 機動戦士ガンダム 水星の魔女',
+    note: 'Zenkaku BS11 variant — the zenkaku→hankaku fold normalises BS11 prefix to ASCII form; the prefix itself is preserved for tail-fanout resolution.',
   },
   {
     raw: 'NEXT company「野生鳥獣被害解決の切り札に？自立走行巡回ロボット」',
@@ -673,11 +673,10 @@ describe('matchService whitelist complexity guards', () => {
     // justify the addition in the PR (general regex preferred over
     // literal). The skill's per-literal anti-pattern check fires
     // when this grows by literals more often than by regexes.
-    // Bumped 18→19 for `BS11ガンダムアワー` (issues #34/#35). Genuinely
-    // station-specific block label (only BS11 uses it, only for the
-    // multi-show Gundam rotation) — no general regex would absorb it
-    // without overreaching into unrelated `BS<NN>...` slot names.
-    const SNAPSHOT_LIMIT = 19;
+    // Reverted 19→18: `BS11ガンダムアワー` removed — broadcaster-specific
+    // block prefixes now resolve via the `searchKeyCandidates` tail
+    // fallback instead of a hardcoded literal (issues #34/#35).
+    const SNAPSHOT_LIMIT = 18;
     assert.ok(
       prefixes.length <= SNAPSHOT_LIMIT,
       `BLOCK_PREFIXES grew to ${prefixes.length} (limit ${SNAPSHOT_LIMIT}). ` +
@@ -720,37 +719,68 @@ describe('searchKeyCandidates — show-name resolution fan-out', () => {
     assert.deepEqual(got, ['鬼滅の刃']);
   });
 
-  test('documentary-style "<show> <subtitle>" → primary + head', () => {
-    // `ブラタモリ 国宝犬山城` falls back to the leading token when the
-    // full string misses TVDB. This is the only fan-out the helper
-    // does; structural sequel suffixes are stripped at normalize-time.
+  test('documentary-style "<show> <subtitle>" → primary + head + tail', () => {
+    // `ブラタモリ 国宝犬山城` falls back to the leading token (the
+    // documentary-style show name) AND the trailing tokens (covers the
+    // broadcaster-block-prefix shape — see BS11 test below). Callers
+    // iterate and stop at the first scoring hit, so the head is tried
+    // before the tail.
     const got = searchKeyCandidates('ブラタモリ 国宝犬山城');
-    assert.deepEqual(got, ['ブラタモリ 国宝犬山城', 'ブラタモリ']);
+    assert.deepEqual(got, ['ブラタモリ 国宝犬山城', 'ブラタモリ', '国宝犬山城']);
+  });
+
+  test('broadcaster-block prefix → tail resolves the show name (issues #34/#35)', () => {
+    // Issue #34/#35: programs.id `svc-400211_2026-05-16T10:00:00.000Z` /
+    // `svc-400211_2026-05-16T10:30:00.000Z`. After normalize the EPG
+    // key preserves the `BS11ガンダムアワー` block prefix (no more
+    // hardcoded literal in BLOCK_PREFIXES). Head fanout produces
+    // `BS11ガンダムアワー` (no TVDB hit). Tail fanout produces
+    // `機動戦士ガンダム 水星の魔女` — the clean show name TVDB matches
+    // at exact-tier (scoreOf 1000). This is the structural answer to
+    // "how do we handle a broadcaster prefix we haven't catalogued?":
+    // let the search-fanout phase try removing it, and let scoring
+    // confirm the correct candidate.
+    const got = searchKeyCandidates('BS11ガンダムアワー 機動戦士ガンダム 水星の魔女');
+    assert.deepEqual(got, [
+      'BS11ガンダムアワー 機動戦士ガンダム 水星の魔女',
+      'BS11ガンダムアワー',
+      '機動戦士ガンダム 水星の魔女',
+    ]);
   });
 
   test('head shorter than 3 chars is NOT added (avoids stop-word blowups)', () => {
-    // `AB CDE` — head 'AB' is 2 chars, dropped from candidates.
+    // `AB CDE` — head 'AB' is 2 chars, dropped. Tail 'CDE' is 3-char
+    // ASCII (minTailLen=4), also dropped.
     const got = searchKeyCandidates('AB CDE');
     assert.deepEqual(got, ['AB CDE']);
   });
 
-  test('3-char ASCII-only head is NOT promoted (issue #11: `BAR` head must not fan out)', () => {
-    // Issue #11: programs.id `svc-400181_2026-05-10T12:00:00.000Z`.
-    // Without this guard, the head fallback would emit `BAR` and
-    // exact-match the unrelated TVDB show `Bar` (tvdb_id 414326).
-    // The minHeadLen split (3 chars CJK ok, 4 chars ASCII required)
-    // structurally separates "show name token" from "noise opener"
-    // — `タッチ`/`鬼滅` keep working, but `BAR`/`THE`/`OUR` are dropped.
+  test('3-char ASCII head IS promoted; collision defense moved to scoring layer (issue #11)', () => {
+    // Issue #11: `BAR レモン・ハート 恋の入門ウイスキー` previously had
+    // its head `BAR` dropped here by a minHeadLen=4 ASCII guard, to
+    // prevent the head fanout from matching TVDB's generic `Bar`
+    // (tvdb_id 414326) at the case-insensitive exact tier (950).
+    // That defense moved to `scoreSide`: short pure-ASCII keys hit
+    // the 950 CJK admissibility gate and return 0. The candidate list
+    // here is now a pure structural relaxation. See the
+    // `scoreSide — 950 case-insensitive exact tier CJK gate` describe
+    // block below for the actual defense layer.
     const got = searchKeyCandidates('BAR レモン・ハート 恋の入門ウイスキー');
-    assert.deepEqual(got, ['BAR レモン・ハート 恋の入門ウイスキー']);
+    assert.deepEqual(got, [
+      'BAR レモン・ハート 恋の入門ウイスキー',
+      'BAR',
+      'レモン・ハート 恋の入門ウイスキー',
+    ]);
   });
 
-  test('3-char CJK kana/kanji head IS still promoted (negative case for the ASCII-only guard)', () => {
-    // Sibling lock for the test above: the minHeadLen split must be
-    // ASCII-only — 3-char CJK heads remain valid show-name tokens.
-    // `タッチ` (3 kana chars) is the canonical example.
+  test('3-char CJK kana/kanji head IS promoted (and matches at scoring layer)', () => {
+    // Sibling case to the BAR test above: 3-char CJK heads like
+    // `タッチ` are admitted (no minHeadLen split, no CJK gate at the
+    // candidate layer). `scoreSide`'s 950 gate is keyed on the
+    // *absence* of CJK, so `タッチ` passes through and matches TVDB's
+    // `タッチ` exactly. Tail also fans out.
     const got = searchKeyCandidates('タッチ 全国大会編');
-    assert.deepEqual(got, ['タッチ 全国大会編', 'タッチ']);
+    assert.deepEqual(got, ['タッチ 全国大会編', 'タッチ', '全国大会編']);
   });
 
   test('duplicate primary/head deduped', () => {
@@ -758,7 +788,7 @@ describe('searchKeyCandidates — show-name resolution fan-out', () => {
     assert.deepEqual(got, ['鬼滅']);
   });
 
-  test('ASCII-brand wide-space head is NOT promoted (issue #22: `WILD` of `WILD BLUE…` must not fan out)', () => {
+  test('ASCII-brand wide-space split is NOT promoted (issue #22: `WILD` of `WILD BLUE…` must not fan out)', () => {
     // Issue #22: programs.id `svc-3272302072_2026-05-10T16:10:00.000Z`.
     // `ＷＩＬＤ　ＢＬＵＥのわぶっていきましょう！[再]` normalises to
     // `WILD BLUEのわぶっていきましょう!` (the stripPromoTail carve-out
@@ -768,9 +798,9 @@ describe('searchKeyCandidates — show-name resolution fan-out', () => {
     // ASCII letters — that's the structural marker for "head is just a
     // brand fragment". Without this guard the head fanout would search
     // TVDB for `WILD` and bind the program to the unrelated 4-char
-    // entry `Wild` (tvdb_id 3496). Same shape as the BAR carve-out
-    // above but at a different layer (next-token check rather than
-    // length floor).
+    // entry `Wild` (tvdb_id 3496). The tail fanout is also suppressed
+    // in this shape (intra-brand whitespace, not a show↔prefix
+    // boundary).
     const got = searchKeyCandidates('WILD BLUEのわぶっていきましょう!');
     assert.deepEqual(got, ['WILD BLUEのわぶっていきましょう!']);
   });
@@ -780,9 +810,70 @@ describe('searchKeyCandidates — show-name resolution fan-out', () => {
     // also leads with ASCII. A canonical English show name followed by
     // a Japanese subtitle (`Naruto 全話振り返り`-shape) must still fan
     // out to the head — that's the documentary-style fallback the
-    // helper exists for.
+    // helper exists for. Tail also fans out.
     const got = searchKeyCandidates('Naruto 全話振り返り');
-    assert.deepEqual(got, ['Naruto 全話振り返り', 'Naruto']);
+    assert.deepEqual(got, ['Naruto 全話振り返り', 'Naruto', '全話振り返り']);
+  });
+});
+
+describe('scoreSide — 950 case-insensitive exact tier CJK gate (issue #11)', () => {
+  // The 950 tier accepts case-insensitive exact matches (TVDB `Bar` vs
+  // EPG key `BAR`). For short pure-ASCII keys this collides with TVDB's
+  // generic English entries by sheer casefold (BAR↔Bar, THE↔The,
+  // OUR↔Our). The gate requires CJK content OR length > 3 to admit
+  // a 950 match — same admissibility principle as the partial-match
+  // branches below. Previously this defense lived as a script+length
+  // head guard in `searchKeyCandidates`; now it's in the scoring layer
+  // where it can evaluate the actual evidence rather than pre-filtering
+  // the candidate list.
+  const makeSeries = (title: string, titleEn?: string): TvdbEntry => ({
+    id: 1,
+    slug: 'x',
+    title,
+    titleEn: titleEn ?? title,
+    network: '',
+    year: 2026,
+    poster: '',
+    matchedBy: '',
+    type: 'series',
+    totalSeasons: 1,
+    currentSeason: 1,
+    currentEp: 1,
+    totalEps: 12,
+    status: 'continuing',
+  });
+
+  test('rejects: 3-char pure-ASCII key (`BAR` ↔ TVDB `Bar`) → 0', () => {
+    const entry = makeSeries('Bar', 'Bar');
+    assert.equal(scoreOf(entry, 'BAR'), 0);
+  });
+
+  test('rejects: 3-char pure-ASCII key (`THE` ↔ TVDB `The`) → 0', () => {
+    const entry = makeSeries('The', 'The');
+    assert.equal(scoreOf(entry, 'THE'), 0);
+  });
+
+  test('accepts: 4-char pure-ASCII key still admits case-insensitive exact (`LIVE` ↔ TVDB `Live`)', () => {
+    // Length > 3 clears the gate. 4-char ASCII is the heuristic edge —
+    // `Live` does have its own false-positive surface (#38) but that's
+    // handled by the partial-match branches' CJK gate, not the 950 tier.
+    const entry = makeSeries('Live', 'Live');
+    assert.ok(scoreOf(entry, 'LIVE') >= 950);
+  });
+
+  test('accepts: 3-char CJK key passes (`タッチ` ↔ TVDB `タッチ`) — case-sensitive exact tier', () => {
+    // Japanese has no case distinction, so the case-sensitive exact
+    // (1000) branch fires first. The 950 gate is never reached.
+    const entry = makeSeries('タッチ');
+    assert.ok(scoreOf(entry, 'タッチ') >= 1000);
+  });
+
+  test('accepts: 3-char key with CJK content passes 950 gate', () => {
+    // Mixed-script short key with CJK present — gate admits.
+    // Synthetic: TVDB `aあ` (case-insensitive twin) vs key `Aあ`.
+    const entry = makeSeries('aあ');
+    const score = scoreOf(entry, 'Aあ');
+    assert.ok(score === 950, `expected 950 (CJK gate admits), got ${score}`);
   });
 });
 

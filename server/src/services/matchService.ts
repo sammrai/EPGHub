@@ -231,14 +231,6 @@ const BLOCK_PREFIXES = [
   'ザ・ミステリー',
   '水曜アニメ',
   '金曜ミステリー',
-  // BS11's weekday anime programming block. Always followed by an
-  // individual show name (`機動戦士ガンダム 水星の魔女`, `機動戦士ガンダム
-  // THE ORIGIN 前夜 赤い彗星`), so we strip the block label whole to expose
-  // the show name to the matcher. The zenkaku digit variant `ＢＳ１１…` is
-  // covered by the zenkaku→hankaku fold that runs before this strip.
-  // Sources: programs.id svc-400211_2026-05-16T10:00:00.000Z (issue #34),
-  // svc-400211_2026-05-16T10:30:00.000Z (issue #35).
-  'BS11ガンダムアワー',
   'アニメ',
   'ドラマ\\d+',
   'ドラマ',
@@ -740,161 +732,168 @@ function compactWhitespace(s: string): string {
 // followed by the published subtitle.
 const STRUCTURAL_BOUNDARY_RE = /[\s:～〜~\-–—]/;
 
-// Script-variant tail detector. Some broadcasters style the
-// branded suffix in ASCII Latin (`こめかみっ!Girls`) while TVDB
-// stores the official Japanese rendering with the same suffix
-// transliterated to katakana (`こめかみっ! ガールズ`). The two
-// titles share a CJK franchise prefix that ends at `!`/`?` and
-// diverge only at the script of the trailing brand word, so a
-// boundary-aware prefix match is reliable when the divergent
-// tails are script-disjoint: one is pure ASCII Latin, the other
-// is pure katakana (no overlap → no accidental partial-text
-// collision with unrelated shows). Source: programs.id
-// svc-400211_2026-05-12T16:00:00.000Z (issue #37).
 const ASCII_LATIN_TAIL_RE = /^[A-Za-z][A-Za-z0-9]*$/;
 const KATAKANA_TAIL_RE = /^[\u30A0-\u30FF\u30FC]+$/;
-const CJK_PREFIX_RE = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/g;
+// `CJK_RE` is the non-global twin of `CJK_RE_GLOBAL`. Two instances exist
+// because `.test()` on a /g RegExp is stateful via `lastIndex` — so we
+// keep one stateless (test/admissibility) and one global (counting via
+// `.match()` / `.matchAll()`).
+//
+// `CJK_RE` is the partial-match admissibility gate in `scoreSide`:
+// branches below the exact-match floor require the matched span to
+// contain CJK. Pure-ASCII spans (`Live`, `The Hit`, `Bar`) collide
+// between unrelated entries by alphabetic chance; legitimate ASCII
+// same-name shows reach the exact-match branch because broadcasters
+// send the full canonical title. Issues #11, #38, #40.
+const CJK_RE_GLOBAL = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/g;
+const CJK_RE = new RegExp(CJK_RE_GLOBAL.source);
 
-/**
- * Score a TVDB title vs an EPG key when the two share a CJK prefix
- * terminated by `!`/`?` and their tails are script-disjoint (one pure
- * ASCII Latin, the other pure katakana). Returns 0 when the structural
- * shape doesn't match. See the call site in `scoreOf` for the rationale.
- */
-function scoreScriptVariantTail(ja: string, key: string): number {
-  // Find the latest `!` or `?` in `key` that is preceded by ≥ 4 CJK
-  // kana/kanji chars. Anchor on the EPG-side key because that's the
-  // canonical brand boundary on the broadcaster side.
-  let cut = -1;
-  for (let i = key.length - 1; i >= 0; i--) {
-    const ch = key[i];
-    if (ch === '!' || ch === '?') {
-      const head = key.slice(0, i);
-      const cjkCount = (head.match(CJK_PREFIX_RE) ?? []).length;
-      if (cjkCount >= 4) { cut = i; break; }
-    }
-  }
-  if (cut < 0) return 0;
-  const prefix = key.slice(0, cut + 1);
-  if (!ja.startsWith(prefix)) return 0;
+// Score tiers (descending). `scoreSide` and `scoreJaScriptVariantTail`
+// use these; `scoreOf` picks the max across all scorers.
+//
+//   1000  exact match (case-sensitive)
+//    950  case-insensitive exact match
+//    700  plain prefix    — TVDB starts with key, ≤ 1.4x ratio
+//    650  franchise-head  — TVDB starts with key + structural delimiter,
+//                           key contains CJK and is ≥ 4 chars
+//    620  script-variant  — shared CJK prefix + script-disjoint tails (#37)
+//    500  plain substring — TVDB contains key, ≤ 1.6x ratio
+//    300  containment     — key contains TVDB, ≥ 25% coverage, CJK title
+//
+// Branches are tried top-down; failing a ratio gate lets the next
+// branch try (e.g. a TVDB title that starts with the key but exceeds
+// 1.4x ratio falls through to franchise-head, then to substring).
+//
+// Below the exact tiers we apply a `tier - title.length` penalty so
+// shorter (tighter-fitting) titles outrank longer ones within a tier.
+// The tier gaps are wide enough that this penalty does not break tier
+// ordering for any realistic TVDB title length. Exact-tier matches
+// (1000 / 950) do not apply the penalty — title.length === key.length
+// by definition, so there is no intra-tier ordering to do.
+const SCORE_EXACT = 1000;
+const SCORE_EXACT_CI = 950;
+const SCORE_PREFIX = 700;
+const SCORE_FRANCHISE_HEAD = 650;
+const SCORE_SCRIPT_TAIL = 620;
+const SCORE_SUBSTRING = 500;
+const SCORE_CONTAINMENT = 300;
+
+// Ratio gates for `scoreSide`. The ladder ratchets (prefix tightest →
+// containment loosest) because the false-positive surface grows as the
+// match shape weakens. Invariant: PREFIX < SUBSTRING < SCRIPT_TAIL.
+const PREFIX_RATIO_MAX = 1.4; // TVDB title ≤ 1.4x EPG key length
+const SUBSTRING_RATIO_MAX = 1.6; // TVDB title ≤ 1.6x EPG key length
+const SCRIPT_TAIL_RATIO_MAX = 1.8; // tail length symmetry (#37)
+
+type TailScript = 'L' | 'K';
+
+// Normalize a TVDB title for `scoreOf`. The EPG side is pre-normalised
+// upstream by `normalizeTitle`; this is the lightweight canonicaliser
+// that aligns the TVDB side to the same shape (zenkaku → hankaku, strip
+// `<...>` alias tags, collapse colon-spacing + whitespace).
+function normalizeForScoring(s: string): string {
+  return compactWhitespace(
+    compactColon(zenkakuToHankaku(s.trim()).replace(TVDB_ANGLE_TAG_RE, ' ')),
+  );
+}
+
+function classifyTailScript(s: string): TailScript | null {
+  return ASCII_LATIN_TAIL_RE.test(s) ? 'L' : KATAKANA_TAIL_RE.test(s) ? 'K' : null;
+}
+
+// Issue #37: TVDB stores the brand suffix in katakana (`こめかみっ! ガールズ`)
+// while broadcasters style it in ASCII Latin (`こめかみっ!Girls`). The two
+// share a CJK franchise prefix ending at `!` / `?`, and the divergent
+// tails are script-disjoint (one pure Latin, one pure katakana).
+//
+// ja-only contract: TVDB's `titleEn` is either a romaji transliteration
+// or an English localization, neither of which carries a katakana suffix
+// — so calling this for the en side would only add false positives. The
+// parameter name `tvdbJaTitle` + this comment are the only guards; do
+// NOT call this function for `titleEn`.
+function scoreJaScriptVariantTail(tvdbJaTitle: string, key: string): number {
+  // Find the rightmost `!` / `?` in `key` whose prefix has ≥ 4 CJK
+  // chars — the canonical franchise-brand boundary on the broadcaster
+  // side. Generic short prefixes (e.g. `OK!`) can't anchor this branch.
+  const cut = [...key.matchAll(/[!?]/g)]
+    .filter((m) => (key.slice(0, m.index).match(CJK_RE_GLOBAL) ?? []).length >= 4)
+    .at(-1)?.index;
+  if (cut === undefined || !tvdbJaTitle.startsWith(key.slice(0, cut + 1))) return 0;
   const keyTail = key.slice(cut + 1).trim();
-  const jaTail = ja.slice(prefix.length).trim();
+  const jaTail = tvdbJaTitle.slice(cut + 1).trim();
   if (!keyTail || !jaTail) return 0;
-  const keyTailIsLatin = ASCII_LATIN_TAIL_RE.test(keyTail);
-  const jaTailIsKatakana = KATAKANA_TAIL_RE.test(jaTail);
-  const keyTailIsKatakana = KATAKANA_TAIL_RE.test(keyTail);
-  const jaTailIsLatin = ASCII_LATIN_TAIL_RE.test(jaTail);
-  const scriptDisjoint =
-    (keyTailIsLatin && jaTailIsKatakana) || (keyTailIsKatakana && jaTailIsLatin);
-  if (!scriptDisjoint) return 0;
-  const lenA = keyTail.length;
-  const lenB = jaTail.length;
-  const ratio = Math.max(lenA, lenB) / Math.max(1, Math.min(lenA, lenB));
-  if (ratio > 1.8) return 0;
-  return 620 - ja.length;
+  const keyScript = classifyTailScript(keyTail);
+  const jaScript = classifyTailScript(jaTail);
+  if (!keyScript || !jaScript || keyScript === jaScript) return 0;
+  const longer = Math.max(keyTail.length, jaTail.length);
+  const shorter = Math.min(keyTail.length, jaTail.length);
+  if (longer / shorter > SCRIPT_TAIL_RATIO_MAX) return 0;
+  return SCORE_SCRIPT_TAIL - tvdbJaTitle.length;
+}
+
+// Score a single TVDB-side title (ja or en) against the normalised EPG
+// key. `scoreOf` calls this for both sides and picks the max. See the
+// score-tier comment block above for the full ladder. Partial-match
+// branches (below the case-insensitive exact tier) require the matched
+// span to carry CJK — see `CJK_RE`.
+function scoreSide(title: string, key: string): number {
+  const titleLower = title.toLowerCase();
+  const keyLower = key.toLowerCase();
+  if (titleLower === keyLower) {
+    if (title === key) return SCORE_EXACT;
+    // 950 tier — case-insensitive exact. A short pure-ASCII key (`BAR`,
+    // `THE`, `OUR`) collides with TVDB's generic English entries
+    // (`Bar`, `The`, `Our`) by sheer casefold. Same false-positive
+    // class as the partial-match CJK gate (#11, #38, #40): require
+    // CJK content in the key, OR length > 3. Source: issue #11 —
+    // previously the `BAR` collision was prevented at the
+    // `searchKeyCandidates` layer by a script+length head guard; moved
+    // here so the candidate list stays simple and admissibility lives
+    // in the scoring layer.
+    if (!CJK_RE.test(key) && key.length <= 3) return 0;
+    return SCORE_EXACT_CI;
+  }
+  const ratio = title.length / Math.max(1, key.length);
+  // Plain prefix.
+  if (ratio <= PREFIX_RATIO_MAX && titleLower.startsWith(keyLower)) {
+    return SCORE_PREFIX - title.length;
+  }
+  // Franchise-head: ratio floor doesn't apply — the tail is a published
+  // subtitle, not noise. Issue #33 (CJK accept), #40 (ASCII reject).
+  if (
+    key.length >= 4 &&
+    CJK_RE.test(key) &&
+    titleLower.startsWith(keyLower) &&
+    STRUCTURAL_BOUNDARY_RE.test(title[key.length] ?? '')
+  ) {
+    return SCORE_FRANCHISE_HEAD - title.length;
+  }
+  // Plain substring.
+  if (ratio <= SUBSTRING_RATIO_MAX && titleLower.includes(keyLower)) {
+    return SCORE_SUBSTRING - title.length;
+  }
+  // Containment: key contains TVDB title, gated by coverage so a short
+  // generic word can't ride a long key. Issue #11 (`Bar`), #38 (`Live`).
+  if (
+    key.length >= 4 &&
+    ratio >= CONTAINMENT_MIN_COVERAGE &&
+    keyLower.includes(titleLower) &&
+    CJK_RE.test(title)
+  ) {
+    return SCORE_CONTAINMENT;
+  }
+  return 0;
 }
 
 export function scoreOf(e: TvdbEntry, key: string): number {
-  const ja = compactWhitespace(
-    compactColon(zenkakuToHankaku((e.title ?? '').trim()).replace(TVDB_ANGLE_TAG_RE, ' ')),
+  const ja = normalizeForScoring(e.title ?? '');
+  const en = normalizeForScoring(e.titleEn ?? '');
+  const normKey = normalizeForScoring(key);
+  return Math.max(
+    scoreSide(ja, normKey),
+    scoreSide(en, normKey),
+    scoreJaScriptVariantTail(ja, normKey),
   );
-  const en = compactWhitespace(
-    compactColon(zenkakuToHankaku((e.titleEn ?? '').trim()).replace(TVDB_ANGLE_TAG_RE, ' ')),
-  );
-  key = compactWhitespace(compactColon(key));
-  const kLower = key.toLowerCase();
-  if (ja === key || en === key) return 1000;
-  if (en.toLowerCase() === kLower) return 950;
-  const jaLenRatio = ja.length / Math.max(1, key.length);
-  const enLenRatio = en.length / Math.max(1, key.length);
-  if (jaLenRatio <= 1.4 && ja.startsWith(key)) return 700 - ja.length;
-  if (enLenRatio <= 1.4 && en.toLowerCase().startsWith(kLower)) return 680 - en.length;
-  // Franchise-with-subtitle relaxation: when the TVDB title starts with
-  // the EPG key AND the next char is a structural delimiter, the ratio
-  // floor doesn't apply — the rest of `ja` is a published subtitle, not
-  // an unrelated title. Gated by `key.length >= 4` so generic 3-char
-  // openers (`THE`, `BAR`, `ニュース`-ish) can't ride this branch.
-  // Source: programs.id svc-3272502088_2026-05-16T08:30:00.000Z (issue #33).
-  //
-  // Additional gate: require the EPG key to contain at least one CJK
-  // kana/kanji char. Pure-ASCII keys (`The Hit`, `The Best`, `Top Gun`)
-  // are short generic English phrases that head dozens of unrelated
-  // longer TVDB titles via the structural delimiter (`The Hit` heads
-  // `The Hit List`, `Top Gun` heads `Top Gun: Maverick`, …). Legitimate
-  // ASCII-titled series are full canonical names on the broadcaster side
-  // so they bind via the exact-match branch above (`Suits` → `Suits`,
-  // `Friends` → `Friends`). The franchise-head relaxation is structurally
-  // a CJK-franchise pattern (broadcaster appends a Japanese arc subtitle
-  // after the franchise root), so gating it to keys with CJK content
-  // closes the ASCII false-positive class without touching the CJK
-  // success cases (`本好きの下剋上`, `アオアシ`, …). Source: programs.id
-  // svc-3208643056_2026-05-13T13:00:00.000Z (issue #40: `Ｔｈｅ　Ｈｉｔ`
-  // → falsely bound to TVDB `The Hit List` via this branch after the
-  // movie-genre gate correctly rejected TVDB `The Hit` 1984 film).
-  // Non-global variant of `CJK_PREFIX_RE` so `.test()` is stateless on
-  // the shared instance. Detects ANY kana/kanji char in the key.
-  const keyHasCjk = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(key);
-  if (
-    key.length >= 4 &&
-    keyHasCjk &&
-    ja.startsWith(key) &&
-    STRUCTURAL_BOUNDARY_RE.test(ja[key.length] ?? '')
-  ) {
-    return 650 - ja.length;
-  }
-  if (
-    key.length >= 4 &&
-    keyHasCjk &&
-    en.toLowerCase().startsWith(kLower) &&
-    STRUCTURAL_BOUNDARY_RE.test(en[key.length] ?? '')
-  ) {
-    return 630 - en.length;
-  }
-  // Script-variant tail relaxation: TVDB stores the franchise + katakana
-  // rendering (`こめかみっ! ガールズ`) while the broadcaster styles the
-  // brand suffix in ASCII Latin (`こめかみっ!Girls`). The shared CJK
-  // prefix ends at a `!`/`?` show-name boundary; the divergent tails are
-  // script-disjoint (one pure ASCII Latin, the other pure katakana) so
-  // there is no possibility of a partial-text collision with an unrelated
-  // entry. Gated tightly:
-  //   - The shared prefix must end with `!` or `?` AND contain ≥ 4 CJK
-  //     kana/kanji chars — short generic prefixes can't ride this branch.
-  //   - One tail pure ASCII-Latin (≥ 1 char, alpha first), the other
-  //     pure katakana. No mixed script on either side.
-  //   - Tail lengths within a 1.8x ratio so a 3-char Latin word can't
-  //     anchor a 20-char katakana tail (or vice versa).
-  // Source: programs.id svc-400211_2026-05-12T16:00:00.000Z (issue #37).
-  const variant = scoreScriptVariantTail(ja, key);
-  if (variant > 0) return variant;
-  if (jaLenRatio <= 1.6 && ja.includes(key)) return 500 - ja.length;
-  if (key.length >= 4) {
-    const minCovered = key.length * CONTAINMENT_MIN_COVERAGE;
-    // Generic short ASCII-Latin TVDB titles (`Live`, `Bar`, `Wild`,
-    // `Cast`, …) are common English words that happen to head longer
-    // broadcaster titles purely by coincidence — `Live` appears at
-    // the head of `Live News イット!`, `Bar` heads `BAR レモン…`. The
-    // containment branch (TVDB title is a substring of the EPG key)
-    // gives these generics enough score to bind the program to a
-    // wholly unrelated TVDB entry. Reject ja/en candidates that are
-    // pure-ASCII letters/digits/space AND short enough to be one
-    // common English word; legitimate same-name matches still pass
-    // via the exact branch (above) or via the `searchKeyCandidates`
-    // head fallback which fans out to an isolated head key that the
-    // exact branch handles. CJK-rooted franchise heads (`ブラタモリ`,
-    // `アオアシ`, `小さな旅`) keep their containment match — they are
-    // not pure-ASCII so this guard does not fire. Source: programs.id
-    // svc-3272402080_2026-05-13T06:45:00.000Z (issue #38).
-    const isShortGenericAscii = (s: string): boolean =>
-      s.length > 0 && s.length <= 6 && /^[A-Za-z0-9 ]+$/.test(s);
-    const jaCovers =
-      ja.length >= minCovered && key.includes(ja) && !isShortGenericAscii(ja);
-    const enCovers =
-      en.length >= minCovered &&
-      key.toLowerCase().includes(en.toLowerCase()) &&
-      !isShortGenericAscii(en);
-    if (jaCovers || enCovers) return 300;
-  }
-  return 0;
 }
 
 /**
@@ -903,15 +902,21 @@ export function scoreOf(e: TvdbEntry, key: string): number {
  * progressive relaxation of the primary key; callers iterate and stop
  * at the first scoring hit.
  *
- * Today the only relaxation is the leading-token fallback (covers
- * documentary-style `<show> <subtitle>` like
- * `ブラタモリ 国宝犬山城` → `ブラタモリ`). New relaxations should be
- * added here ONLY when they cannot be folded into `normalizeTitle`'s
- * strip rules — every fan-out candidate is one extra `tvdbService.search`
- * call against a rate-limited API. Trailing structural markers
- * (kana-glued digits / fullwidth Roman numerals) live in
- * `TRAILING_KANA_DIGIT_RE` / `TRAILING_KANA_ROMAN_RE` instead, where
- * one regex absorbs the whole class without an extra search.
+ * Two relaxations today:
+ *   1. **head fallback** — first whitespace-bounded token, for the
+ *      documentary-style `<show> <subtitle>` shape (`ブラタモリ 国宝犬山城`
+ *      → `ブラタモリ`).
+ *   2. **tail fallback** — all-but-first tokens, for the broadcaster-
+ *      block-prefix shape (`BS11ガンダムアワー 機動戦士ガンダム 水星の魔女`
+ *      → `機動戦士ガンダム 水星の魔女`). Lets unknown broadcaster blocks
+ *      resolve without a hardcoded prefix list.
+ *
+ * Each fan-out candidate is one extra `tvdbService.search` call against
+ * a rate-limited API, paid only when earlier candidates miss (callers
+ * stop at the first hit). Trailing structural markers (kana-glued
+ * digits / fullwidth Roman numerals) live in `TRAILING_KANA_DIGIT_RE` /
+ * `TRAILING_KANA_ROMAN_RE` instead, where one regex absorbs the whole
+ * class without an extra search.
  *
  * Exported for unit tests so the relaxation order can be locked
  * without spinning up the DB / HTTP layers.
@@ -924,32 +929,30 @@ export function searchKeyCandidates(key: string): string[] {
   };
   push(key);
   const tokens = key.split(/\s+/);
-  const head = tokens[0] ?? '';
-  // Length floor differs by script: a 3-char CJK kana/kanji head
-  // (`タッチ`, `朱蒙` is already 2 → blocked, `あさイチ` is 4 → kept) is
-  // typically a meaningful show name, but a 3-char ASCII head (`BAR`,
-  // `THE`, `OUR`) is almost always a generic English/genre word that
-  // collides with hundreds of unrelated TVDB titles. Without this guard
-  // a broadcaster title like `BAR レモン・ハート 恋の入門ウイスキー`
-  // would fan out to head=`BAR` and exact-match the unrelated TVDB show
-  // `Bar` (3 chars). Promotion to len ≥ 4 for ASCII-only heads
-  // structurally separates "show name token" from "noise opener" without
-  // a per-show literal guard.
-  const isAsciiOnly = /^[\x20-\x7E]+$/.test(head);
-  const minHeadLen = isAsciiOnly ? 4 : 3;
-  // ASCII-brand wide-space guard: if BOTH the head and its immediate
-  // successor are pure-ASCII letter/digit tokens, the head is a brand
-  // fragment (`WILD` of `WILD BLUE…`), not a standalone show name.
-  // Suppressing the head fanout here prevents the matcher from doing a
-  // search on `WILD` and binding the program to TVDB's generic 4-char
-  // `Wild` entry — same structural class as the BAR-vs-Bar guard above,
-  // but for brand names whose internal whitespace meets the length
-  // floor on each side. Source: programs.id
-  // svc-3272302072_2026-05-10T16:10:00.000Z (issue #22).
-  const next = tokens[1] ?? '';
-  const headIsAsciiBrandFragment =
-    isAsciiOnly && next.length > 0 && /^[A-Za-z0-9]/.test(next);
-  if (head.length >= minHeadLen && !headIsAsciiBrandFragment) push(head);
+  if (tokens.length < 2) return out;
+  const head = tokens[0];
+  const next = tokens[1];
+  // Basic length floor: reject 1-2 char tokens (`A`, `AB`, `あ`). Generic
+  // short-ASCII collisions (BAR↔Bar, THE↔The) are NOT filtered here —
+  // they're admitted as fanout candidates and rejected at the scoring
+  // layer via `scoreSide`'s case-insensitive exact tier CJK gate. This
+  // keeps the candidate list a pure structural relaxation; the
+  // false-positive defense lives where the evidence is evaluated.
+  const MIN_FANOUT_LEN = 3;
+  // ASCII-brand wide-space guard: when head AND the next token are
+  // both pure-ASCII letter/digit tokens, the whitespace is intra-brand
+  // (`WILD BLUE`), not a show↔prefix boundary. Issue #22.
+  const headIsAsciiOnly = /^[\x20-\x7E]+$/.test(head);
+  const headIsAsciiBrandFragment = headIsAsciiOnly && /^[A-Za-z0-9]/.test(next);
+  if (head.length >= MIN_FANOUT_LEN && !headIsAsciiBrandFragment) push(head);
+  // Tail fallback for broadcaster-block-prefix shapes: drop the leading
+  // token and try the rest. Suppressed when head was a brand fragment
+  // (the wide-space split was intra-brand, not show↔prefix). Issues
+  // #34, #35 (`BS11ガンダムアワー <show>`).
+  if (!headIsAsciiBrandFragment) {
+    const tail = tokens.slice(1).join(' ');
+    if (tail.length >= MIN_FANOUT_LEN) push(tail);
+  }
   return out;
 }
 
