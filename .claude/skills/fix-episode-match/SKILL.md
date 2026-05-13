@@ -138,6 +138,7 @@ each entry covers and whether it could collide with a real TVDB show:
 | ✅ Always OK | Structural rules content-agnostic | `[新]` flag-bracket strip, zenkaku ⟷ hankaku fold |
 | ✅ Preferred for new fixes | Single general regex covering a class | `[日月火水木金土]\d+` (slot codes) |
 | ⚠️ Almost never OK | Per-literal entries | `日曜劇場`, `金曜ロードショー` (inherited tech-debt) |
+| ❌ Use search-time fanout instead | Single-broadcaster / single-franchise prefix | shape `<station-brand-block> <show>` — let `searchKeyCandidates` enumerate the tail as a candidate |
 
 Per-literal additions only if there's no general regex that subsumes
 it AND the literal genuinely cannot be a TVDB show name.
@@ -145,6 +146,27 @@ it AND the literal genuinely cannot be a TVDB show name.
 The `whitelist complexity guards` tests in `matchService.test.ts`
 enforce: `BLOCK_PREFIXES.length <= SNAPSHOT_LIMIT` and `general regexes
 >= 2`. Bumping the snapshot is intentional and forces a review.
+
+### Cross-layer anti-patterns
+
+When the fix you're about to apply matches one of these shapes, the
+right answer is structurally elsewhere:
+
+- **Defense at the evidence layer, not at pre-filters.** A guard in
+  `normalizeTitle` / `searchKeyCandidates` whose only purpose is to
+  block a wrong-tier match in `scoreOf` should move into `scoreOf`
+  itself. Pre-filters drift from the scoring rules they protect.
+- **One unifying admissibility principle over scattered carve-outs.**
+  Repeated inline length / character-class tests across scoring
+  branches signal a missing structural property — extract as one named
+  predicate and apply uniformly.
+- **Search-time fanout over normalize-time strip.** Stripping a token
+  commits to one interpretation; enumerating both shapes as search
+  candidates lets scoring confirm. Cost is at most +1 lazy search per
+  candidate (callers stop at the first hit).
+- **Generic regex over per-instance literal.** If a regex absorbs the
+  class, the regex wins. If only a literal works, mark it as a carve-
+  out so the next reader knows it's an exception.
 
 ## Step 4: add a regression test
 
