@@ -14,7 +14,13 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeTitle, scoreOf, searchKeyCandidates, suggestRuleKeyword } from './matchService.ts';
+import {
+  isAutoOverrideValidForCohort,
+  normalizeTitle,
+  scoreOf,
+  searchKeyCandidates,
+  suggestRuleKeyword,
+} from './matchService.ts';
 import type { TvdbEntry } from '../schemas/tvdb.ts';
 
 interface Case {
@@ -963,6 +969,48 @@ describe('scoreOf — zenkaku/hankaku punctuation folding', () => {
     assert.equal(score, 0);
   });
 
+  test('franchise head-fallback rejects pure-ASCII key against longer TVDB title (issue #40: `The Hit` must not match `The Hit List`)', () => {
+    // Issue #40: programs.id `svc-3208643056_2026-05-13T13:00:00.000Z`
+    // (`Ｔｈｅ　Ｈｉｔ`, a Japanese sportfishing show on a JCOM/SunTV-
+    // class local broadcaster, ARIB genre `edu`). `normalizeTitle`
+    // reduces the EPG title to `The Hit` (7 chars, pure ASCII).
+    // `pickBest`'s movie-genre gate correctly rejects TVDB id 11907
+    // (`The Hit`, 1984 British film, `kind: 'movie'`) because no
+    // program in the cohort is tagged 映画. But on the next search,
+    // TVDB returns series 364620 (`The Hit List`, BBC 2019, `kind:
+    // 'series'`) and the structural-boundary franchise-head relaxation
+    // accepts the bind: `ja.startsWith('The Hit')` ✓, next char is ` `
+    // (structural delimiter) ✓ → score 638. Pre-fix the cohort got
+    // bound to an unrelated UK quiz series.
+    //
+    // The franchise-head relaxation is structurally a CJK-rooted
+    // pattern (broadcaster appends a Japanese arc subtitle after the
+    // canonical franchise root). For pure-ASCII keys the broadcaster
+    // sends the FULL canonical TVDB title (the brand is the name), so
+    // legitimate ASCII same-name matches like `Suits` → `Suits` bind
+    // via the exact-match branch above (score 1000) and don't depend
+    // on this relaxation at all. Gating the relaxation to keys with at
+    // least one CJK char closes the ASCII false-positive class without
+    // affecting the CJK success cases that motivated issue #33.
+    const entry = makeSeries('The Hit List', 'The Hit List');
+    const score = scoreOf(entry, 'The Hit');
+    assert.equal(score, 0);
+  });
+
+  test('franchise head-fallback still accepts CJK key against longer TVDB title (issue #33 — negative regression for the ASCII guard)', () => {
+    // Sanity check for the keyHasCjk gate added in issue #40: the
+    // original issue-#33 case (`本好きの下剋上` → TVDB `本好きの下剋上
+    // 司書になるためには手段を選んでいられません`) must still pass —
+    // the CJK franchise root is the structural shape the relaxation
+    // was built for.
+    const entry = makeSeries(
+      '本好きの下剋上 司書になるためには手段を選んでいられません',
+      'Ascendance of a Bookworm',
+    );
+    const score = scoreOf(entry, '本好きの下剋上');
+    assert.ok(score > 0, `expected non-zero score, got ${score}`);
+  });
+
   test('script-variant tail: TVDB stores katakana brand suffix while EPG uses ASCII Latin', () => {
     // Issue #37: programs.id `svc-400211_2026-05-12T16:00:00.000Z`
     // (`こめかみっ！Girls　＃６「トマトまるごとパエリア」`).
@@ -1008,6 +1056,47 @@ describe('scoreOf — zenkaku/hankaku punctuation folding', () => {
     const entry = makeSeries('こめかみっ! ガール子');
     const score = scoreOf(entry, 'こめかみっ!Girls');
     assert.equal(score, 0);
+  });
+});
+
+describe('isAutoOverrideValidForCohort — gate auto-override replay against the cohort movie signal', () => {
+  // Issue #40: programs.id `svc-3208643056_2026-05-13T13:00:00.000Z`
+  // (`Ｔｈｅ　Ｈｉｔ`, ARIB genre `edu` — a Japanese sportfishing show).
+  // The bare normalized key `The Hit` collided with TVDB id 11907
+  // (`The Hit`, 1984 British film, `kind: 'movie'`). `pickBest` already
+  // gates movie candidates when no program in the cohort is tagged
+  // genre `映画`, but `enrichUnmatched`'s auto-override replay path
+  // re-applied the previously-pinned tvdb_id for 30 days WITHOUT re-
+  // running that gate. This validator re-applies the gate on replay so
+  // a stale movie-pinned override heals automatically on the next pass
+  // (the call site falls through to fresh re-resolution, which now
+  // correctly returns "no match" for the Japanese fishing show).
+  test('rejects replay when pinned entry is `movie` and cohort has no movie genre', () => {
+    assert.equal(isAutoOverrideValidForCohort('movie', false), false);
+  });
+
+  test('accepts replay when pinned entry is `movie` and cohort DOES have a movie-tagged airing', () => {
+    // Mixed cohort: at least one program tagged genre 映画 means the
+    // movie-type candidate is structurally legitimate. Same shape as
+    // `pickBest`'s `allowMovie=true` branch.
+    assert.equal(isAutoOverrideValidForCohort('movie', true), true);
+  });
+
+  test('accepts replay when pinned entry is `series` regardless of cohort movie signal', () => {
+    // Series-type overrides are not affected by this gate — they always
+    // pass. This is the "Naruto-class" carve-out: a short pure-ASCII
+    // exact-match to a TV series stays bound on subsequent replays.
+    assert.equal(isAutoOverrideValidForCohort('series', false), true);
+    assert.equal(isAutoOverrideValidForCohort('series', true), true);
+  });
+
+  test('accepts replay when pinned entry kind is unknown (cache miss)', () => {
+    // If the cached tvdb_entries row is missing (override pre-dates the
+    // cache, or the row was deleted), we don't have the kind signal —
+    // don't drop the override on a guess, fall through to the regular
+    // TTL-based path so the override naturally re-resolves at 30d.
+    assert.equal(isAutoOverrideValidForCohort(undefined, false), true);
+    assert.equal(isAutoOverrideValidForCohort(null, false), true);
   });
 });
 

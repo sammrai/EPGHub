@@ -815,8 +815,28 @@ export function scoreOf(e: TvdbEntry, key: string): number {
   // an unrelated title. Gated by `key.length >= 4` so generic 3-char
   // openers (`THE`, `BAR`, `ニュース`-ish) can't ride this branch.
   // Source: programs.id svc-3272502088_2026-05-16T08:30:00.000Z (issue #33).
+  //
+  // Additional gate: require the EPG key to contain at least one CJK
+  // kana/kanji char. Pure-ASCII keys (`The Hit`, `The Best`, `Top Gun`)
+  // are short generic English phrases that head dozens of unrelated
+  // longer TVDB titles via the structural delimiter (`The Hit` heads
+  // `The Hit List`, `Top Gun` heads `Top Gun: Maverick`, …). Legitimate
+  // ASCII-titled series are full canonical names on the broadcaster side
+  // so they bind via the exact-match branch above (`Suits` → `Suits`,
+  // `Friends` → `Friends`). The franchise-head relaxation is structurally
+  // a CJK-franchise pattern (broadcaster appends a Japanese arc subtitle
+  // after the franchise root), so gating it to keys with CJK content
+  // closes the ASCII false-positive class without touching the CJK
+  // success cases (`本好きの下剋上`, `アオアシ`, …). Source: programs.id
+  // svc-3208643056_2026-05-13T13:00:00.000Z (issue #40: `Ｔｈｅ　Ｈｉｔ`
+  // → falsely bound to TVDB `The Hit List` via this branch after the
+  // movie-genre gate correctly rejected TVDB `The Hit` 1984 film).
+  // Non-global variant of `CJK_PREFIX_RE` so `.test()` is stateless on
+  // the shared instance. Detects ANY kana/kanji char in the key.
+  const keyHasCjk = /[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF]/.test(key);
   if (
     key.length >= 4 &&
+    keyHasCjk &&
     ja.startsWith(key) &&
     STRUCTURAL_BOUNDARY_RE.test(ja[key.length] ?? '')
   ) {
@@ -824,6 +844,7 @@ export function scoreOf(e: TvdbEntry, key: string): number {
   }
   if (
     key.length >= 4 &&
+    keyHasCjk &&
     en.toLowerCase().startsWith(kLower) &&
     STRUCTURAL_BOUNDARY_RE.test(en[key.length] ?? '')
   ) {
@@ -964,6 +985,56 @@ async function loadOverrides(): Promise<Map<string, OverrideRow>> {
   const map = new Map<string, OverrideRow>();
   for (const r of rows) map.set(r.normalizedTitle, r);
   return map;
+}
+
+/**
+ * Decide whether an *auto* override (not user-set) is still safe to replay
+ * for a cohort with this movie-genre signal. Mirrors the `allowMovie` gate
+ * `pickBest` applies during fresh resolution: if the pinned TVDB entry is
+ * a movie BUT no program in the cohort is ARIB-genre tagged as `映画`,
+ * the prior auto-match no longer reflects the current cohort's structural
+ * signals — drop the override and re-resolve.
+ *
+ * Why this exists: short EPG titles like `Ｔｈｅ　Ｈｉｔ` (a Japanese
+ * sportfishing show) normalize to bare ASCII (`The Hit`) that collides with
+ * one-off foreign films of the same name (TVDB id 11907, 1984 British film,
+ * `kind: 'movie'`). When a previous matching cycle pinned the cohort to the
+ * foreign film via auto-override, every later edu/sport airing of the same
+ * normalized key would inherit the wrong tvdb_id forever — `enrichUnmatched`
+ * replays auto-overrides up to 30d (`AUTO_REMATCH_TTL_MS`) without re-running
+ * `pickBest`'s genre gate. This validator restores the gate on replay so
+ * stale movie-pinned overrides heal automatically on the next pass.
+ *
+ * Source: programs.id svc-3208643056_2026-05-13T13:00:00.000Z (issue #40).
+ *
+ * Exported for unit tests so the rule is locked structurally.
+ */
+export function isAutoOverrideValidForCohort(
+  entryKind: string | null | undefined,
+  hasMovieGenre: boolean,
+): boolean {
+  if (entryKind === 'movie' && !hasMovieGenre) return false;
+  return true;
+}
+
+/**
+ * Look up `tvdbEntries.kind` for an arbitrary set of tvdb_ids. Returns a
+ * Map keyed by tvdb_id. Entries missing from `tvdb_entries` (the override
+ * pre-dates the cache, or the cache row was deleted) map to `undefined`,
+ * which `isAutoOverrideValidForCohort` treats as "still valid" — we don't
+ * want to drop an override solely because we don't know the kind yet.
+ */
+async function loadOverrideEntryKinds(
+  tvdbIds: number[],
+): Promise<Map<number, string | undefined>> {
+  const out = new Map<number, string | undefined>();
+  if (tvdbIds.length === 0) return out;
+  const rows = await db
+    .select({ tvdbId: tvdbEntries.tvdbId, kind: tvdbEntries.kind })
+    .from(tvdbEntries)
+    .where(inArray(tvdbEntries.tvdbId, tvdbIds));
+  for (const r of rows) out.set(r.tvdbId, r.kind ?? undefined);
+  return out;
 }
 
 async function upsertTvdbEntry(
@@ -1497,6 +1568,17 @@ class DbMatchService implements MatchService {
       byNormalized.set(key, entry);
     }
 
+    // Look up the pinned TVDB entries' `kind` so the auto-override replay
+    // can re-apply `pickBest`'s `allowMovie` gate (see
+    // `isAutoOverrideValidForCohort`). Only fetch kinds for tvdb_ids that
+    // actually appear as auto-override targets — keeps the lookup bounded
+    // even when title_overrides grows.
+    const autoOverrideTvdbIds = new Set<number>();
+    for (const ov of overrides.values()) {
+      if (!ov.userSet && ov.tvdbId != null) autoOverrideTvdbIds.add(ov.tvdbId);
+    }
+    const overrideEntryKinds = await loadOverrideEntryKinds(Array.from(autoOverrideTvdbIds));
+
     // Apply existing overrides immediately; queue titles that need TVDB.
     const needsTvdb: string[] = [];
     let resolved = 0;
@@ -1523,14 +1605,35 @@ class DbMatchService implements MatchService {
         // Auto override — re-resolve after TTL.
         const age = Date.now() - ov.updatedAt.getTime();
         if (age < AUTO_REMATCH_TTL_MS) {
-          if (ov.tvdbId != null) {
-            await this.applyTvdbToPrograms(ov.tvdbId, ids);
-            resolved += ids.length;
-          } else {
-            missed += ids.length;
+          // Re-apply the `allowMovie` gate the original `pickBest` call
+          // would impose today. If the pinned entry is a movie but this
+          // cohort has no `映画`-tagged airing, the prior auto-match no
+          // longer reflects the current structural signal — drop the
+          // override and fall through to re-resolution. See
+          // `isAutoOverrideValidForCohort` for the rationale + the
+          // source program that motivated it (issue #40).
+          const stillValid =
+            ov.tvdbId == null ||
+            isAutoOverrideValidForCohort(
+              overrideEntryKinds.get(ov.tvdbId),
+              group.hasMovieGenre,
+            );
+          if (stillValid) {
+            if (ov.tvdbId != null) {
+              await this.applyTvdbToPrograms(ov.tvdbId, ids);
+              resolved += ids.length;
+            } else {
+              missed += ids.length;
+            }
+            continue;
           }
-          continue;
+          // Fall through to re-resolution (the override is stale w.r.t.
+          // the current movie-genre gate). Note: we don't proactively
+          // clear the override row here — `writeOverride` at the end of
+          // re-resolution rewrites it with the fresh decision.
         }
+        // TTL expired OR auto override invalidated by the gate above —
+        // both fall through to `needsTvdb.push(key)` below.
       }
       needsTvdb.push(key);
       if (needsTvdb.length >= limit) break;
