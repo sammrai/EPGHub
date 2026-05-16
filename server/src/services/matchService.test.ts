@@ -331,6 +331,21 @@ const seasonEp: Case[] = [
     expected: 'ロッキーⅡ',
     note: 'extracted from quote (wasQuoteExtracted=true) → Roman strip skipped; the Ⅱ is part of the canonical film title (Rocky II)',
   },
+  {
+    raw: '彼女、お借りします５期',
+    expected: '彼女、お借りします',
+    note: 'Bare trailing `<N>期` season-cohort marker (zenkaku ５→5 folded) is the anime/dorama sequel suffix sibling of `Season<N>` / `シーズン<N>`. Stripped by the trailing `\\d+期$` STRIP_SUFFIX entry so the residue matches the canonical TVDB show. Source: issue #49.',
+  },
+  {
+    raw: '彼女、お借りします５期　第３話「テスト」',
+    expected: '彼女、お借りします',
+    note: 'CUT_AT_SEASON_RE removes the `第3話「テスト」` tail at step 9, then the trailing `\\d+期$` STRIP_SUFFIX removes the orphaned `5期`.',
+  },
+  {
+    raw: '某番組5期目',
+    expected: '某番組5期目',
+    note: '`5期目` (with `目`) is NOT a trailing season marker — the strip requires `期$`, not `期[\\s　]*$` followed by other chars. Protects show names containing `<N>期目` mid- or end-of-title.',
+  },
 ];
 
 // (秘) and ▼/▽ tail descriptors -------------------------------------------

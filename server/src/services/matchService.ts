@@ -172,6 +172,17 @@ const STRIP_SUFFIX_RE: RegExp[] = [
   /[\s　]*(?:前編|後編|中編)[\s　]*$/,
   /[\s　]*全\s*\d+\s*[話回][\s　]*$/,
   /[\s　]*第\s*\d+\s*回[\s　]*$/,
+  // Trailing bare `<N>期` season-cohort marker (broadcaster sequel marker
+  // for anime/dorama: `2期` / `3期` / `4期` / `5期`...). Sibling shape of
+  // the `<N>(st|nd|rd|th) Season` / `Season<N>` / `シーズン<N>` strips
+  // applied later. The non-bare `第N期` form is already cut by
+  // CUT_AT_SEASON_RE (closed-counter branch) along with its episode tail;
+  // this handles the residue where the broadcaster glues just `5期` to
+  // the end of the show name (`彼女、お借りします５期`), with or without
+  // an episode tail that's already been cut by step 9. Trailing-only by
+  // design — `<show> 5期記念SP` (where `5期記念` continues the title)
+  // must not lose `5期記念` mid-string. Source: issue #49.
+  /[\s　]*\d+\s*期[\s　]*$/,
   // Trailing episode number like "トムとジェリー 13" or "商道－サンド－ 79"
   // — require at least one whitespace before to avoid chopping "ハチ公20".
   /[\s　]+\d+[\s　]*$/,
