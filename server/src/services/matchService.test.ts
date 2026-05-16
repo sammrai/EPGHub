@@ -162,6 +162,17 @@ const quoted: Case[] = [
     expected: 'カードファイト!! ヴァンガード',
   },
   {
+    // Issue #46: `テレビアニメ` long-form prefix sibling of `TVアニメ`.
+    // Was normalising to `テレビアニメ シリーズ全編` because `テレビアニメ`
+    // wasn't a recognised BLOCK_PREFIX; the QUOTED_HOST branch never
+    // fired, the inner `「鬼滅の刃」` got dropped as a chapter subtitle,
+    // and the leading `テレビアニメ` survived. The trailing arc bracket
+    // `【竈門炭治郎 立志編】` is correctly discarded along with the
+    // broadcaster flags.
+    raw: 'テレビアニメ「鬼滅の刃」シリーズ全編再放送[字][解][デ]【竈門炭治郎　立志編】',
+    expected: '鬼滅の刃',
+  },
+  {
     raw: 'シネマ「クィーン」＜字幕スーパー＞＜レターボックスサイズ＞',
     expected: 'クィーン',
   },
@@ -681,7 +692,11 @@ describe('matchService whitelist complexity guards', () => {
     // Reverted 19→18: `BS11ガンダムアワー` removed — broadcaster-specific
     // block prefixes now resolve via the `searchKeyCandidates` tail
     // fallback instead of a hardcoded literal (issues #34/#35).
-    const SNAPSHOT_LIMIT = 18;
+    // Bumped 18→19: `テレビアニメ` added — long-form anime-block prefix
+    // siblings the existing `TVアニメ` / `アニメ` literals; no general
+    // regex captures it cleanly (the bare `アニメ` literal would absorb
+    // `テレビ` into the show name) so it's a separate entry (issue #46).
+    const SNAPSHOT_LIMIT = 19;
     assert.ok(
       prefixes.length <= SNAPSHOT_LIMIT,
       `BLOCK_PREFIXES grew to ${prefixes.length} (limit ${SNAPSHOT_LIMIT}). ` +

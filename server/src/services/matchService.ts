@@ -228,6 +228,15 @@ const BLOCK_PREFIXES = [
   '時代劇スペシャル',
   '時代劇',
   'TVアニメ',
+  // `テレビアニメ` is the long-form ASCII-free spelling broadcasters use for
+  // anime block intros (`テレビアニメ「鬼滅の刃」…`). Must precede the bare
+  // `アニメ` entry in the alternation so the regex consumes the full prefix
+  // and routes the title through QUOTED_HOST_PREFIX_RE instead of treating
+  // the leading `テレビ` as part of the show name. Source: programs.id
+  // svc-3272402080_2026-05-17T00:30:00.000Z (issue #46) — was normalising
+  // to `テレビアニメ シリーズ全編` because the prefix was unrecognised, so
+  // the inner `「鬼滅の刃」` got stripped as if it were a chapter subtitle.
+  'テレビアニメ',
   'ザ・ミステリー',
   '水曜アニメ',
   '金曜ミステリー',
