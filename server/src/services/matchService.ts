@@ -1181,6 +1181,41 @@ function parseTitleEpisodeNumber(title: string): number | null {
   return null;
 }
 
+/**
+ * Episode-number extraction from the EPG `desc` field. Broadcasters often
+ * keep the title bare (`勇者のクズ`) while putting the episode marker on
+ * its own line inside the synopsis (`...\r\n＃18　勇者の危機`). Rerun
+ * airings on weekday slots are the canonical case — the original Sunday
+ * airing line carries `#N`, the rerun title doesn't, so we'd miss the
+ * S/E stamp without this fallback.
+ *
+ * Free-form prose contains lots of stray digits ("20年前", "3人で…"), so
+ * the desc parser is intentionally strict: it only matches markers that
+ * appear at the start of a line (after optional whitespace) AND use a
+ * structural episode-marker shape — `[#＃]N` or `第N[話回夜]`. That mirrors
+ * how broadcasters format the meta line and rejects the prose digits.
+ */
+function parseDescEpisodeNumber(desc: string): number | null {
+  if (!desc) return null;
+  const norm = desc
+    .replace(/[０-９]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0))
+    .replace(/＃/g, '#');
+  for (const rawLine of norm.split(/\r?\n/)) {
+    const line = rawLine.replace(/^[\s　]+/, '');
+    if (!line) continue;
+    const hashM = line.match(/^[#＃]\s*(\d+)/);
+    if (hashM) return Number(hashM[1]);
+    const daiM = line.match(/^第\s*(\d+)\s*[話回夜]/);
+    if (daiM) return Number(daiM[1]);
+    const daiKanjiM = line.match(new RegExp(`^第\\s*([${KANJI_DIGIT_CHARS}]+)\\s*[話回夜]`));
+    if (daiKanjiM) {
+      const n = kanjiToInt(daiKanjiM[1]);
+      if (n != null) return n;
+    }
+  }
+  return null;
+}
+
 function kanjiToInt(s: string): number | null {
   if (!s) return null;
   const digits = s.split('').map((c) => KANJI_DIGIT_MAP[c]);
@@ -1403,7 +1438,8 @@ export function findEpisodeForProgram(
   episodes: Array<{ s: number; e: number; aired?: string; name?: string }>,
   programStartIso: string,
   programTitle: string,
-  showTitles?: string[]
+  showTitles?: string[],
+  programDesc?: string | null
 ): { s: number; e: number; name?: string } | null {
   // 1. Subtitle-derived name match.
   const candidates: string[] = [];
@@ -1448,8 +1484,13 @@ export function findEpisodeForProgram(
     }
   }
 
-  // 2. Title-parsed episode number.
-  const titleEp = parseTitleEpisodeNumber(programTitle);
+  // 2. Title-parsed episode number. Fall back to the EPG `desc` field when
+  // the title is bare — broadcasters often drop `#N` from the title on
+  // weekday rerun slots while keeping the original meta line (`＃18　…`)
+  // inside the synopsis. `parseDescEpisodeNumber` is intentionally strict
+  // (start-of-line markers only) to avoid picking up prose digits.
+  const titleEp = parseTitleEpisodeNumber(programTitle)
+    ?? (programDesc ? parseDescEpisodeNumber(programDesc) : null);
   if (titleEp != null) {
     const candidates = episodes.filter((ep) => ep.e === titleEp);
     if (candidates.length > 0) {
@@ -1745,7 +1786,12 @@ class DbMatchService implements MatchService {
     for (let i = 0; i < programIds.length; i += CHUNK) {
       const slice = programIds.slice(i, i + CHUNK);
       const rows = await db
-        .select({ id: programs.id, startAt: programs.startAt, title: programs.title })
+        .select({
+          id: programs.id,
+          startAt: programs.startAt,
+          title: programs.title,
+          desc: programs.desc,
+        })
         .from(programs)
         .where(inArray(programs.id, slice));
       for (const row of rows) {
@@ -1753,7 +1799,8 @@ class DbMatchService implements MatchService {
           episodes,
           row.startAt.toISOString(),
           row.title,
-          showTitles
+          showTitles,
+          row.desc
         );
         await db
           .update(programs)

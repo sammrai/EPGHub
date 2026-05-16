@@ -16,7 +16,7 @@ const [entry] = await db.select().from(tvdbEntries).where(eq(tvdbEntries.tvdbId,
 if (!entry) { console.error('tvdb entry not found'); process.exit(1); }
 const showTitles = [entry.title, entry.titleEn].filter((t): t is string => Boolean(t));
 const episodes = entry.episodes ?? [];
-const result = findEpisodeForProgram(episodes, prog.startAt.toISOString(), prog.title, showTitles);
+const result = findEpisodeForProgram(episodes, prog.startAt.toISOString(), prog.title, showTitles, prog.desc);
 console.log('showTitles:', showTitles);
 console.log('findEpisodeForProgram result:', result);
 process.exit(0);

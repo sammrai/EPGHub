@@ -1152,3 +1152,88 @@ describe('findEpisodeForProgram — BS11ガンダムアワー block-prefix regre
     assert.deepEqual(hit, { s: 1, e: 21, name: 'ep 21' });
   });
 });
+
+describe('findEpisodeForProgram — desc-fallback episode-number cases (issue #43)', () => {
+  // svc-3272502088_2026-05-19T16:59Z. tvdb_id=461513 「勇者のクズ」.
+  // The original Sunday airing carries `#18` in the title, but the
+  // Tuesday rerun trims the title to the bare show name and leaves the
+  // episode marker only in the EPG `desc` field (`...\r\n＃18 勇者の危機`).
+  // Without a desc fallback the matcher gets nothing from steps 1–3 and
+  // step 4 (aired-day) also misses because the rerun day doesn't match
+  // any TVDB `aired` date. The desc parser recovers `#18` and pins
+  // S1E18 via the direct #N path.
+  test('bare title + ＃N marker on its own desc line → resolved via desc fallback', () => {
+    const list: Episode[] = [
+      { s: 1, e: 17, name: '勇者の帰還', aired: '2026-05-10' },
+      { s: 1, e: 18, name: '勇者の危機', aired: '2026-05-17' },
+      { s: 1, e: 19, name: 'TBA', aired: '2026-05-24' },
+    ];
+    const desc =
+      'クズの「師匠」と自称「弟子」　弩級現代異能アクションの幕が開く！\r\n＃18　勇者の危機';
+    const hit = findEpisodeForProgram(
+      list,
+      '2026-05-19T16:59:00.000Z',
+      '勇者のクズ',
+      ['勇者のクズ', '勇者のクズ'],
+      desc,
+    );
+    assert.deepEqual(hit, { s: 1, e: 18, name: '勇者の危機' });
+  });
+
+  test('desc with `第N話` on its own line → parsed via desc fallback', () => {
+    const list: Episode[] = [
+      { s: 1, e: 4, name: 'A' },
+      { s: 1, e: 5, name: 'B' },
+    ];
+    const desc = '見どころは…\n第5話「B」\n出演: …';
+    const hit = findEpisodeForProgram(
+      list,
+      '2026-05-19T16:59:00.000Z',
+      '番組名',
+      ['番組名'],
+      desc,
+    );
+    assert.deepEqual(hit, { s: 1, e: 5, name: 'B' });
+  });
+
+  test('title-parsed #N still wins over desc — title is authoritative', () => {
+    const list: Episode[] = [
+      { s: 1, e: 3, name: 'C' },
+      { s: 1, e: 7, name: 'G' },
+    ];
+    // Title says #3 but desc references a different episode (#7).
+    // Title is the canonical signal; desc fallback only fires when
+    // the title yields no episode number.
+    const desc = '前回までのあらすじ：第7話「G」を振り返って…';
+    const hit = findEpisodeForProgram(
+      list,
+      '2026-05-19T16:59:00.000Z',
+      '番組名 #3',
+      ['番組名'],
+      desc,
+    );
+    assert.deepEqual(hit, { s: 1, e: 3, name: 'C' });
+  });
+
+  test('desc digits inside prose are NOT picked up (no false positives)', () => {
+    // The desc has "20年前" and "3人" in prose but no structural marker.
+    // The strict start-of-line requirement rejects both.
+    const list: Episode[] = eps(1, 20);
+    const desc = '20年前、3人の勇者は旅立った。今夜、その物語が動き出す。';
+    const hit = findEpisodeForProgram(
+      list,
+      '2027-01-01T16:59:00.000Z',
+      '番組名',
+      ['番組名'],
+      desc,
+    );
+    assert.equal(hit, null);
+  });
+
+  test('desc fallback is optional — undefined desc behaves like before', () => {
+    const list: Episode[] = eps(1, 12);
+    // No desc → no desc fallback. Title parses #4 → S1E4.
+    const hit = findEpisodeForProgram(list, '2026-05-19T16:59:00.000Z', 'タイトル #4');
+    assert.deepEqual(hit, { s: 1, e: 4, name: undefined });
+  });
+});
