@@ -443,6 +443,11 @@ const prefixes: Case[] = [
     expected: 'NEXT company',
     note: 'The quoted chunk is the episode topic, not the show name',
   },
+  {
+    raw: '火アニバル　マリッジトキシン　＃０７[字]　「蟲使いの結婚式」毒をもって恋を制す！',
+    expected: '火アニバル マリッジトキシン',
+    note: 'Fuji TV "Tuesday anime" block prefix (`<weekday-block> <show>` shape). `火アニバル` is not catalogued in BLOCK_PREFIXES — same design as `BS11ガンダムアワー` (issues #34/#35): the broadcaster prefix stays attached at normalize-time and the `searchKeyCandidates` tail fanout (`マリッジトキシン`) resolves the show via TVDB. `＃０７[字]` + quoted episode subtitle + promo tail all strip cleanly. Source: programs.id svc-3272402080_2026-05-19T14:00:00.000Z (issue #44).',
+  },
 ];
 
 // Zenkaku handling ---------------------------------------------------------
@@ -745,6 +750,25 @@ describe('searchKeyCandidates — show-name resolution fan-out', () => {
       'BS11ガンダムアワー 機動戦士ガンダム 水星の魔女',
       'BS11ガンダムアワー',
       '機動戦士ガンダム 水星の魔女',
+    ]);
+  });
+
+  test('Fuji TV weekday-anime block prefix → tail resolves show (issue #44)', () => {
+    // Issue #44: programs.id `svc-3272402080_2026-05-19T14:00:00.000Z`,
+    // raw EPG title `火アニバル　マリッジトキシン　＃０７[字]　…`.
+    // After normalize the key is `火アニバル マリッジトキシン` —
+    // `火アニバル` (Fuji TV "Tuesday anime" slot brand) is NOT in
+    // BLOCK_PREFIXES, following the same structural design as
+    // `BS11ガンダムアワー` (issues #34/#35). The primary candidate and
+    // the head `火アニバル` both miss on TVDB (no entry for the
+    // slot label); the tail `マリッジトキシン` resolves cleanly to
+    // tvdb_id 468734 at scoreOf 1000. Locks the candidate ordering
+    // for the weekday-anime slot shape.
+    const got = searchKeyCandidates('火アニバル マリッジトキシン');
+    assert.deepEqual(got, [
+      '火アニバル マリッジトキシン',
+      '火アニバル',
+      'マリッジトキシン',
     ]);
   });
 
