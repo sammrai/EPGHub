@@ -251,6 +251,20 @@ const BLOCK_PREFIXES = [
   'ザ・ミステリー',
   '水曜アニメ',
   '金曜ミステリー',
+  // ytv (svc-3272502088) late-night anime block — `Manga ANime PArk`,
+  // always written in zenkaku uppercase ASCII (`ＭＡＮＰＡ`) and
+  // followed by a `「…」` quote that frames the slot's airings. Often
+  // a double-feature (`ＭＡＮＰＡ「A／B」`) where A and B are two
+  // distinct shows sharing one broadcast slot — that case has no
+  // canonical 1:tvdb_id mapping, but recognising the prefix routes
+  // the title through the QUOTED_HOST branch so the inner reaches
+  // TVDB instead of the bare `MANPA` token (which would otherwise
+  // become the override key and risk future false positives). Entry
+  // is post-zenkaku-fold ASCII because step 1 of normalizeTitle has
+  // already folded ＭＡＮＰＡ → MANPA by the time the prefix
+  // regex runs. Source: programs.id
+  // svc-3272502088_2026-05-18T16:59:00.000Z (issue #51).
+  'MANPA',
   'アニメ',
   'ドラマ\\d+',
   'ドラマ',

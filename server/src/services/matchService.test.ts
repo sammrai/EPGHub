@@ -173,6 +173,31 @@ const quoted: Case[] = [
     expected: '鬼滅の刃',
   },
   {
+    // Issue #51: ytv `ＭＡＮＰＡ` (Manga ANime PArk) late-night anime
+    // slot brand. Without the BLOCK_PREFIX entry the QUOTED_HOST branch
+    // never fires and the inner double-feature `「メイドさんは食べる
+    // だけ／日本三國」` gets dropped as if it were a chapter subtitle,
+    // leaving the bare prefix `MANPA` as the normalised key — a junk
+    // 5-char ASCII token that would write back as the override key
+    // and risk colliding with unrelated short ASCII TVDB titles. With
+    // the prefix recognised, the inner compound becomes the search
+    // key. The slot is a structural double-feature (two distinct
+    // shows in one airing) so the compound key matches no TVDB entry
+    // — the honest outcome is a null match, not a half-arbitrary
+    // pick. The single-show MANPA shape (`ＭＡＮＰＡ「<show>」`)
+    // inherits the same extraction and resolves normally.
+    raw: 'ＭＡＮＰＡ「メイドさんは食べるだけ／日本三國」',
+    expected: 'メイドさんは食べるだけ／日本三國',
+  },
+  {
+    // Issue #51 companion: single-show MANPA airing — the same
+    // BLOCK_PREFIX entry extracts the quoted inner as the show name
+    // instead of dropping it as a chapter subtitle, mirroring how
+    // `テレビアニメ「<show>」` resolves.
+    raw: 'ＭＡＮＰＡ「メイドさんは食べるだけ」',
+    expected: 'メイドさんは食べるだけ',
+  },
+  {
     raw: 'シネマ「クィーン」＜字幕スーパー＞＜レターボックスサイズ＞',
     expected: 'クィーン',
   },
@@ -721,7 +746,11 @@ describe('matchService whitelist complexity guards', () => {
     // siblings the existing `TVアニメ` / `アニメ` literals; no general
     // regex captures it cleanly (the bare `アニメ` literal would absorb
     // `テレビ` into the show name) so it's a separate entry (issue #46).
-    const SNAPSHOT_LIMIT = 19;
+    // Bumped 19→20: `MANPA` added — ytv late-night anime slot brand
+    // (`ＭＡＮＰＡ「A／B」`-shape). Post-zenkaku-fold ASCII literal; no
+    // general regex absorbs it without risking real ASCII show names
+    // (issue #51).
+    const SNAPSHOT_LIMIT = 20;
     assert.ok(
       prefixes.length <= SNAPSHOT_LIMIT,
       `BLOCK_PREFIXES grew to ${prefixes.length} (limit ${SNAPSHOT_LIMIT}). ` +
