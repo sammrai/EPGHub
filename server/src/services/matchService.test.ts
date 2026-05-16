@@ -616,6 +616,16 @@ const borderline: Case[] = [
     expected: 'WILD BLUEのわぶっていきましょう!',
     note: 'Issue #22: ASCII-brand wide-space carve-out in stripPromoTail. The folded form `WILD BLUE…!` would otherwise be cut at the first whitespace (between `WILD` and `BLUE`) because the tail carries kana+`!`, leaving just `WILD` — which the matcher then bound to TVDB id 3496 (`Wild`, 4 chars). With both seg1 and seg2-leader being pure-ASCII letters, the whitespace is intra-brand, not a show↔promo boundary, so promo-tail bails out and the full title survives. The matching `searchKeyCandidates` guard suppresses the head fanout for the same shape so `WILD` is never used as a search key on its own. Source: programs.id svc-3272302072_2026-05-10T16:10:00.000Z.',
   },
+  {
+    raw: 'アニメ　女神「異世界転生何になりたいですか」俺「勇者の肋骨で」　第７話',
+    expected: '女神「異世界転生何になりたいですか」俺「勇者の肋骨で」',
+    note: 'Issue #47 (dup #50): dialog-style show name where the `「…」` segments are part of the canonical title, not per-airing chapter subtitles. `isDialogStyleQuoted` detects the structural shape (2+ top-level quotes with a CJK bridge that is not a pure episode marker between consecutive quotes) and routes step 7 through a preserve-quotes branch instead of the default strip-quotes branch.  Block prefix `アニメ　` strips at step 8 and the trailing `第７話` cuts at step 9.  Source: programs.id svc-400141_2026-05-20T14:30:00.000Z.',
+  },
+  {
+    raw: 'アニメ　ふつうのショー「サブタイ1」第１話「サブタイ2」',
+    expected: 'ふつうのショー',
+    note: 'Negative test for `isDialogStyleQuoted`: with two top-level quotes BUT the bridge between them is a pure episode marker (`第１話`), the title is treated as the conventional `<show>「Q1」<ep>「Q2」` shape — strip both subtitles and keep the show name. Locks the bridge-not-episode-only side of the dialog detector.',
+  },
 ];
 
 const allCases: Case[] = [
@@ -1038,6 +1048,27 @@ describe('scoreOf — zenkaku/hankaku punctuation folding', () => {
     // class of broadcaster vs TVDB colon-spacing drift.
     const entry = makeSeries('ゴーストコンサート : missing Songs');
     const key = normalizeTitle('ゴーストコンサート：ｍｉｓｓｉｎｇ　Ｓｏｎｇｓ　＃０６');
+    const score = scoreOf(entry, key);
+    assert.ok(score >= 1000, `expected exact-match score, got ${score}`);
+  });
+
+  test('TVDB hard `『』` quotes vs EPG soft `「」` quotes still score exact for dialog-style show names', () => {
+    // Issue #47 (dup #50): programs.id `svc-400141_2026-05-20T14:30:00.000Z`
+    // (`アニメ　女神「異世界転生何になりたいですか」俺「勇者の肋骨で」　第７話`).
+    // `normalizeTitle` now preserves the dialog-style quoted segments
+    // (`isDialogStyleQuoted` detector — 2+ top-level quotes with a CJK
+    // bridge that isn't a pure episode marker) and the final `foldJaQuotes`
+    // pass folds `『』` → `「」`.  The symmetric fold inside
+    // `normalizeForScoring` lines the TVDB-stored `『…』』` form up with
+    // the EPG `「…」』` form so the canonical title compares equal byte-
+    // for-byte and scores exact.  Without either half of the fold the
+    // matcher reduces to `女神 俺` and never reaches TVDB id 473229.
+    const entry = makeSeries(
+      '女神『異世界転生何になりたいですか』俺『勇者の肋骨で』',
+    );
+    const key = normalizeTitle(
+      'アニメ　女神「異世界転生何になりたいですか」俺「勇者の肋骨で」　第７話',
+    );
     const score = scoreOf(entry, key);
     assert.ok(score >= 1000, `expected exact-match score, got ${score}`);
   });

@@ -313,6 +313,55 @@ function leadsWithQuoted(s: string): boolean {
   return /^[\s　]*[「『][^「」『』]+[」』]/.test(s);
 }
 
+// Episode-marker-only pattern: when the text BETWEEN two consecutive top-level
+// quoted segments is purely an episode counter (`第N話`, `第N回`, `#N`, …), the
+// two quotes are NOT dialog parts of the same show name — they're a show-name
+// quote followed by a per-airing subtitle quote.  Used to negate the
+// dialog-style detector below.
+const BETWEEN_QUOTES_EPISODE_ONLY_RE =
+  /^[\s　]*(?:第\s*[0-9一二三四五六七八九十百千]+\s*[話回夜局輪席章羽集週]|[#＃♯]\s*\d+)[\s　]*$/;
+
+// CJK kana/kanji presence test. A bare hiragana/katakana/kanji char between
+// two quoted segments is the signal that those segments are part of a longer
+// show-name string (`女神「Q1」俺「Q2」`-shape), not a `host「subtitle」` pair.
+const CJK_PRESENCE_RE = /[\u3040-\u30FF\u4E00-\u9FFF]/;
+
+/**
+ * Detect dialog-style show names where multiple `「…」` / `『…』` segments are
+ * part of the canonical title rather than per-airing chapter subtitles.
+ * Structural signature (broadcaster-agnostic):
+ *
+ *   `<part1>「Q1」<part2>「Q2」…[<ep marker tail>]`
+ *
+ * where at least one bridge between consecutive quoted segments contains a
+ * kana/kanji character AND is NOT a pure episode counter (`第N話`-shape).
+ *
+ * Source: programs.id svc-400141_2026-05-20T14:30:00.000Z (issue #47, dup #50)
+ * — `アニメ　女神「異世界転生何になりたいですか」俺「勇者の肋骨で」　第７話`.
+ * Without this gate the else-branch of step 7 strips both quoted segments and
+ * normalises to `女神 俺`, which can't reach the TVDB entry whose canonical
+ * name is `女神『異世界転生何になりたいですか』俺『勇者の肋骨で』`.
+ *
+ * Negative cases preserved by the bridge predicate:
+ *   - `<show>「Q1」第１話「Q2」` — bridge is pure episode marker → not dialog.
+ *   - `<show>「Q1」「Q2」` — bridge is empty/whitespace → not dialog.
+ *   - `<show>「Q」` — single quote → not dialog (handled by existing branches).
+ */
+function isDialogStyleQuoted(s: string): boolean {
+  const quotedRe = /[「『][^「」『』]+[」』]/g;
+  const matches = [...s.matchAll(quotedRe)];
+  if (matches.length < 2) return false;
+  for (let i = 0; i < matches.length - 1; i++) {
+    const m1 = matches[i];
+    const m2 = matches[i + 1];
+    const bridge = s.slice(m1.index! + m1[0].length, m2.index!);
+    if (!CJK_PRESENCE_RE.test(bridge)) continue;
+    if (BETWEEN_QUOTES_EPISODE_ONLY_RE.test(bridge)) continue;
+    return true;
+  }
+  return false;
+}
+
 /**
  * Drop everything after the first whitespace whose tail contains both
  * Japanese kana/kanji and an exclamation/question punctuation. Handles
@@ -484,6 +533,12 @@ export function normalizeTitle(raw: string): string {
       t = inner;
       wasQuoteExtracted = true;
     }
+  } else if (isDialogStyleQuoted(t)) {
+    // Dialog-style show name: the quoted segments are part of the canonical
+    // title (`女神「Q1」俺「Q2」`-shape). Leave the quotes intact; the trailing
+    // episode marker is cut by steps 9-11 below, and the leading block prefix
+    // by step 8.  See `isDialogStyleQuoted` for the structural detection rule.
+    wasQuoteExtracted = true;
   } else {
     // Otherwise, drop any quoted segments — they're almost always chapter
     // or episode subtitles, not show names. Do this twice to clean up
@@ -539,6 +594,12 @@ export function normalizeTitle(raw: string): string {
   // Strip orphan trailing comma / bullet / slash (dashes handled earlier
   // to preserve balanced `-subtitle-` wraps).
   t = t.replace(/\s*[・,、／\/]$/, '').trim();
+  // Fold Japanese hard/soft quote glyphs so the EPG-side key aligns with
+  // TVDB titles regardless of which convention the broadcaster picked.
+  // No-op for the common single-quoted-subtitle shape (those quotes are
+  // already stripped by step 7); matters when step 7 preserved them as
+  // part of a dialog-style title (`女神「Q1」俺「Q2」` ↔ `女神『Q1』俺『Q2』`).
+  t = foldJaQuotes(t);
 
   // 13. Fallback: if everything got stripped but the title was effectively
   //     just a bracketed chapter name like `【動物】`, use that.
@@ -796,13 +857,26 @@ const SCRIPT_TAIL_RATIO_MAX = 1.8; // tail length symmetry (#37)
 
 type TailScript = 'L' | 'K';
 
+// Fold Japanese quote glyphs to a single canonical pair so the two
+// conventions broadcasters and TVDB use interchangeably for show-name quoting
+// (`「…」` soft / `『…』` hard) compare equal at the scoring layer.  Applied to
+// both the EPG-side key (end of `normalizeTitle`) and the TVDB-side title
+// (`normalizeForScoring`).  Source: issue #47 — TVDB stores the dialog-style
+// title `女神『…』俺『…』` with hard quotes while EPG ships soft ones.
+function foldJaQuotes(s: string): string {
+  return s.replace(/[『]/g, '「').replace(/[』]/g, '」');
+}
+
 // Normalize a TVDB title for `scoreOf`. The EPG side is pre-normalised
 // upstream by `normalizeTitle`; this is the lightweight canonicaliser
 // that aligns the TVDB side to the same shape (zenkaku → hankaku, strip
-// `<...>` alias tags, collapse colon-spacing + whitespace).
+// `<...>` alias tags, collapse colon-spacing + whitespace, fold quote
+// glyphs).
 function normalizeForScoring(s: string): string {
-  return compactWhitespace(
-    compactColon(zenkakuToHankaku(s.trim()).replace(TVDB_ANGLE_TAG_RE, ' ')),
+  return foldJaQuotes(
+    compactWhitespace(
+      compactColon(zenkakuToHankaku(s.trim()).replace(TVDB_ANGLE_TAG_RE, ' ')),
+    ),
   );
 }
 
