@@ -1299,6 +1299,33 @@ function parseDescEpisodeNumber(desc: string): number | null {
   return null;
 }
 
+/**
+ * Flatten an ARIB `extended` map (`Record<string, string>`) into a
+ * single line-oriented string suitable for `parseDescEpisodeNumber`.
+ *
+ * Japanese broadcasters often split the synopsis between the short
+ * `desc` column and a richer `extended` map keyed by free-form labels
+ * like `番組内容`, `あらすじ`, `みどころ`. The episode marker (`＃N`,
+ * `第N話`) frequently lives only inside that map — either at the start
+ * of a value (`番組内容: ＃１『…』\r\n…`) or as the key itself
+ * (`＃１４あらすじ: …`). The plain `desc` parser misses both.
+ *
+ * We emit each entry as `key\nvalue\n` so the strict start-of-line
+ * matcher in `parseDescEpisodeNumber` can see markers in either
+ * position without needing show-specific logic.
+ */
+function flattenExtendedForMatching(
+  extended: Record<string, string> | null | undefined
+): string {
+  if (!extended) return '';
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(extended)) {
+    if (key) parts.push(key);
+    if (value) parts.push(value);
+  }
+  return parts.join('\n');
+}
+
 function kanjiToInt(s: string): number | null {
   if (!s) return null;
   const digits = s.split('').map((c) => KANJI_DIGIT_MAP[c]);
@@ -1874,16 +1901,26 @@ class DbMatchService implements MatchService {
           startAt: programs.startAt,
           title: programs.title,
           desc: programs.desc,
+          extended: programs.extended,
         })
         .from(programs)
         .where(inArray(programs.id, slice));
       for (const row of rows) {
+        // Concatenate `desc` + flattened `extended` so the desc-fallback
+        // parser sees ARIB-style episode markers that live only inside
+        // the extended map (`番組内容: ＃１『…』` or `＃１４あらすじ: …`).
+        // The strict start-of-line shape in `parseDescEpisodeNumber`
+        // rejects prose digits — see its docstring.
+        const flattenedExtended = flattenExtendedForMatching(row.extended);
+        const descForMatching = [row.desc ?? '', flattenedExtended]
+          .filter(Boolean)
+          .join('\n') || null;
         const ep = findEpisodeForProgram(
           episodes,
           row.startAt.toISOString(),
           row.title,
           showTitles,
-          row.desc
+          descForMatching
         );
         await db
           .update(programs)

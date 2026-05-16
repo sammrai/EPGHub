@@ -1237,3 +1237,58 @@ describe('findEpisodeForProgram — desc-fallback episode-number cases (issue #4
     assert.deepEqual(hit, { s: 1, e: 4, name: undefined });
   });
 });
+
+describe('findEpisodeForProgram — extended-jsonb episode marker (issue #48)', () => {
+  // svc-3211841008_2026-05-23T00:30Z. tvdb_id=272309 「弱虫ペダル」.
+  // Generic rerun: title is the bare show name (`弱虫ペダル[再][字]`),
+  // `desc` is the standard series synopsis with no episode marker, and
+  // the TVDB cache only carries aired dates up to 2023 — so steps 1–4
+  // all whiff on `desc` alone. The episode marker (`＃１『…』`) lives
+  // only inside the ARIB `extended` map under the `番組内容` key. The
+  // production code path in `applyTvdbToPrograms` flattens `extended`
+  // into the desc string passed here, so the strict start-of-line
+  // marker parser recovers `#1` and the [再] rerun branch pins S1E1.
+  test('＃N at the start of a flattened extended value resolves via desc fallback', () => {
+    const list: Episode[] = [
+      { s: 1, e: 1, name: 'アキバにタダで行けるから', aired: '2013-10-08' },
+      { s: 1, e: 2, name: '部員をふやすため', aired: '2013-10-15' },
+    ];
+    // Simulates `[desc, ...flatten(extended)].join('\n')` from
+    // applyTvdbToPrograms — keys and values both appear as their own
+    // lines so the start-of-line parser sees them.
+    const descForMatching = [
+      'アニメオタクの主人公・小野田坂道が、自転車を通じて信頼できる仲間と出会い、絆を深めるとともに、強敵との勝負で成長していく。',
+      '番組内容',
+      '＃１『アキバにタダでいけるから』\r\n千葉県総北高校に入学した小野田坂道は、…',
+    ].join('\n');
+    const hit = findEpisodeForProgram(
+      list,
+      '2026-05-23T00:30:00.000Z',
+      '弱虫ペダル[再][字]',
+      ['弱虫ペダル'],
+      descForMatching,
+    );
+    assert.deepEqual(hit, { s: 1, e: 1, name: 'アキバにタダで行けるから' });
+  });
+
+  test('＃N appearing only inside an extended *key* resolves via desc fallback', () => {
+    // Other shows embed the episode number in the *label* instead of
+    // the value (`＃１４あらすじ`, `＃２２あらすじ`). The flattening
+    // emits both keys and values as their own lines, so the start-of-
+    // line parser picks them up identically.
+    const list: Episode[] = eps(1, 20);
+    const descForMatching = [
+      '一般的なあらすじ…',
+      '＃１４あらすじ',
+      'スヨンをデートに誘うも断られてしまったヨルム。…',
+    ].join('\n');
+    const hit = findEpisodeForProgram(
+      list,
+      '2026-05-18T00:30:00.000Z',
+      'バチェラー航空[字]',
+      ['バチェラー航空'],
+      descForMatching,
+    );
+    assert.deepEqual(hit, { s: 1, e: 14, name: undefined });
+  });
+});

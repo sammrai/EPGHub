@@ -16,7 +16,13 @@ const [entry] = await db.select().from(tvdbEntries).where(eq(tvdbEntries.tvdbId,
 if (!entry) { console.error('tvdb entry not found'); process.exit(1); }
 const showTitles = [entry.title, entry.titleEn].filter((t): t is string => Boolean(t));
 const episodes = entry.episodes ?? [];
-const result = findEpisodeForProgram(episodes, prog.startAt.toISOString(), prog.title, showTitles, prog.desc);
+// Mirror applyTvdbToPrograms: flatten the ARIB `extended` map into the
+// desc text so the desc-fallback parser sees `番組内容: ＃１…` markers.
+const flattened = prog.extended
+  ? Object.entries(prog.extended).flatMap(([k, v]) => [k, v]).filter(Boolean).join('\n')
+  : '';
+const descForMatching = [prog.desc ?? '', flattened].filter(Boolean).join('\n') || null;
+const result = findEpisodeForProgram(episodes, prog.startAt.toISOString(), prog.title, showTitles, descForMatching);
 console.log('showTitles:', showTitles);
 console.log('findEpisodeForProgram result:', result);
 process.exit(0);
