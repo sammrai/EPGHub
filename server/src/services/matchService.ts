@@ -134,6 +134,39 @@ const CUT_AT_BARE_EP_RE = /[\s　]+\d+\s*(?:[話回]|食目)(?:[\s　].*|\s*$)/;
 // the episode-of-the-week blurb.
 const CUT_AT_ARROW_RE = /[▼▽★◆].*$/;
 
+// Slot-description tilde wrapper that quotes a DIFFERENT show. Some
+// broadcasters append a tilde-bracketed promo blurb after the show name
+// that names the parent / paired show in `「…」`, with a whitespace
+// boundary before the opening tilde:
+//   `マリトキ・ナビ[字]　～火曜よる11時「マリッジトキシン」～　#8`
+// Here `マリトキ・ナビ` is the actual show (a companion / "navi" promo
+// show for `マリッジトキシン`), the `～…～` block is the slot description,
+// and `「マリッジトキシン」` is the referenced parent anime. Without this
+// strip the inner-quote teardown in step 7 only removes the `「…」`,
+// leaving the `～火曜よる11時 ～` skeleton glued to the show name and
+// polluting the normalized key (different blurb each airing → different
+// override cache key, plus brittle fan-out).
+//
+// Structural detection (broadcaster-agnostic): the tilde wrapper is
+// recognised as a slot description — NOT a subtitle — when ALL of:
+//   1. The opening `～`/`〜` is preceded by whitespace (rules out
+//      `寺西一浩ミステリー・SPELL～死因～`, `ヴェラ～信念の女警部～`
+//      where the tilde is glued to the show name itself).
+//   2. The wrapped content contains an inner `「…」` / `『…』` quoted
+//      segment (real broadcaster subtitles like `～異世界行ったら本気だす～`
+//      never contain quotes; a quote signals a reference to a separate
+//      named entity).
+//   3. The wrapper closes with a matching `～`/`〜`.
+//
+// The whitespace-boundary rule is what keeps `ドラマ・よかれと思ってやったのに～男たちの「失敗学」裁判～`
+// safe — that title also contains a quote inside a tilde wrap, but the
+// opening `～` is glued to `に` (no whitespace), so it's correctly
+// classified as a subtitle with an inline quote.
+//
+// Source: programs.id svc-3272402080_2026-05-22T13:57:00.000Z (issue #52).
+const SLOT_TILDE_WRAPPER_RE =
+  /[\s　]+[～〜][^～〜]*[「『][^」』]*[」』][^～〜]*[～〜]/g;
+
 // `[xxx]　…` boundary cut. ARIB convention is for broadcasters to follow the
 // canonical show name with bracket meta tags ([字][再][多][デ][SS]…) and
 // then a fullwidth space before the per-airing subtitle:
@@ -533,6 +566,13 @@ export function normalizeTitle(raw: string): string {
   //    episode description, and anything — including quoted setlists —
   //    after them is unusable as a show title.
   t = t.replace(CUT_AT_ARROW_RE, ' ');
+
+  // 5b. Strip slot-description tilde wrappers that quote a different
+  //     show: `<show>　～<slot-info>「<other-show>」～　…`. Must run
+  //     before step 7's quoted-segment teardown so the entire `～…～`
+  //     skeleton goes away, not just the inner quote. See
+  //     `SLOT_TILDE_WRAPPER_RE` for the structural detection rule.
+  t = t.replace(SLOT_TILDE_WRAPPER_RE, ' ');
 
   // 6. Drop leading edition number like `第74回 NHK杯…`.
   t = t.replace(LEADING_EDITION_RE, '');

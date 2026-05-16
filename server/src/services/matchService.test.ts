@@ -239,6 +239,22 @@ const quoted: Case[] = [
     raw: '『Re:ゼロから始める異世界生活』4th season　第69話',
     expected: 'Re:ゼロから始める異世界生活',
   },
+  {
+    // Issue #52: companion/promo show whose title is followed by a
+    // whitespace-bounded tilde-wrapped slot description that quotes a
+    // DIFFERENT show (the parent anime). Without SLOT_TILDE_WRAPPER_RE
+    // the inner-quote teardown in step 7 strips only `「マリッジトキシン」`,
+    // leaving `～火曜よる11時 ～` glued to the show name and producing
+    // the polluted key `マリトキ・ナビ ～火曜よる11時 ～`. With the
+    // dedicated strip the entire `～…～` skeleton goes away and the
+    // canonical show name (`マリトキ・ナビ`) survives — TVDB has no
+    // entry for this companion show today so the program still ends
+    // up unmatched, but the cache key is now stable across airings
+    // (each airing's slot blurb / #N varies) and won't pollute
+    // title_overrides. Source: programs.id svc-3272402080_2026-05-22T13:57:00.000Z.
+    raw: 'マリトキ・ナビ[字]　～火曜よる１１時「マリッジトキシン」～　＃８',
+    expected: 'マリトキ・ナビ',
+  },
 ];
 
 // Season / episode patterns -------------------------------------------------
