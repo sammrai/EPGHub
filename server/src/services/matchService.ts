@@ -2113,11 +2113,16 @@ class DbMatchService implements MatchService {
     // re-apply S/E for this program. We deliberately do NOT touch the
     // override here (no user_set flip); this is a "refresh metadata"
     // action, not a "user confirms link" action.
+    //
+    // `forceRefresh: true` because the user clicking 再マッチ implies
+    // they want fresh upstream data, not whatever the FileCache is
+    // holding within its TTL window. Cost is +1 TVDB API call per
+    // click — negligible at user-initiated frequency.
     if (prog.tvdbId != null) {
       const fresh = await tvdbService.getById(prog.tvdbId);
       if (!fresh) return null;
       const episodes = fresh.type === 'series'
-        ? await tvdbService.getSeriesEpisodes(prog.tvdbId)
+        ? await tvdbService.getSeriesEpisodes(prog.tvdbId, { forceRefresh: true })
         : [];
       await upsertTvdbEntry(fresh);
       const showTitles = [fresh.title, fresh.titleEn].filter(
@@ -2152,8 +2157,10 @@ class DbMatchService implements MatchService {
       return null;
     }
 
+    // `forceRefresh: true` symmetric with the already-matched branch
+    // above — the user clicked 再マッチ, fresh fetch is the intent.
     const episodes = best.type === 'series'
-      ? await tvdbService.getSeriesEpisodes(best.id)
+      ? await tvdbService.getSeriesEpisodes(best.id, { forceRefresh: true })
       : [];
     await upsertTvdbEntry(best);
     await writeOverride(key, best.id, false);
