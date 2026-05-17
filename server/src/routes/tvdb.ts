@@ -11,9 +11,8 @@ import { rowToProgram } from '../services/programService.ts';
 
 export const tvdbRouter = new OpenAPIHono();
 
-// Cached per-season episode descriptor. Mirrors the jsonb shape we persist in
-// tvdb_entries.episodes, re-exposed so the UI can build S/E pickers without
-// re-fetching from TVDB.
+// Per-season episode descriptor served straight from `tvdbService` (which
+// reads the FileCache layer). The UI builds S/E pickers from this list.
 const TvdbEpisodeSchema = z
   .object({
     s: z.number().int().openapi({ example: 2 }),
@@ -95,7 +94,7 @@ const episodes = createRoute({
   tags: ['tvdb'],
   summary: 'TVDB シリーズのエピソード一覧',
   description:
-    'tvdb_entries.episodes にキャッシュされた aired-order エピソード配列を返す。UI の「話数選択」プルダウン向け。キャッシュ未ヒット時は空配列。',
+    'TVDB の aired-order エピソード配列を返す (FileCache 経由、`getSeriesEpisodes`)。UI の「話数選択」プルダウン向け。FileCache miss + TVDB API fail 時は空配列。',
   request: {
     params: z.object({
       id: z.coerce.number().int().openapi({ param: { in: 'path' }, example: 389042 }),
@@ -108,12 +107,8 @@ const episodes = createRoute({
 
 tvdbRouter.openapi(episodes, async (c) => {
   const { id } = c.req.valid('param');
-  const [row] = await db
-    .select({ episodes: tvdbEntries.episodes })
-    .from(tvdbEntries)
-    .where(eq(tvdbEntries.tvdbId, id))
-    .limit(1);
-  return c.json(row?.episodes ?? [], 200);
+  const list = await tvdbService.getSeriesEpisodes(id);
+  return c.json(list, 200);
 });
 
 const cast = createRoute({

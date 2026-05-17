@@ -69,10 +69,10 @@ export const tvdbEntries = pgTable('tvdb_entries', {
   runtime:   integer('runtime'),
   director:  text('director'),
   rating:    doublePrecision('rating'),
-  // TVDB episode list, kept inline so per-program episode lookup doesn't
-  // re-hit the TVDB API. Each entry has the aired-order season + number,
-  // the airdate (ISO "YYYY-MM-DD"), and optional display name.
-  episodes:  jsonb('episodes').$type<Array<{ s: number; e: number; aired?: string; name?: string }>>(),
+  // NOTE: TVDB episode list is NOT stored here. The FileCache layer
+  // (`${TVDB_CACHE_DIR}/detail/series:<id>`) is the single source of
+  // truth; readers call `tvdbService.getSeriesEpisodes(id)`. See
+  // CLAUDE.md "TVDB cache strategy".
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

@@ -67,7 +67,6 @@ describe('ruleService.update() — disable cascades scheduled reserves', { concu
         currentSeason: 1,
         currentEp: 1,
         totalEps: 12,
-        episodes: [],
       });
       await db.insert(programs).values([
         {

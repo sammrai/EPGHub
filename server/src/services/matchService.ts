@@ -1188,10 +1188,11 @@ async function loadOverrideEntryKinds(
   return out;
 }
 
-async function upsertTvdbEntry(
-  entry: TvdbEntry,
-  episodes?: Array<{ s: number; e: number; aired?: string; name?: string }>
-): Promise<void> {
+async function upsertTvdbEntry(entry: TvdbEntry): Promise<void> {
+  // Episode list deliberately NOT persisted here — see CLAUDE.md
+  // "TVDB cache strategy". The single source of truth is the FileCache
+  // layer (status-driven TTL). Readers call `tvdbService
+  // .getSeriesEpisodes(id)` instead of selecting a DB column.
   const base = {
     tvdbId: entry.id,
     slug: entry.slug,
@@ -1210,7 +1211,6 @@ async function upsertTvdbEntry(
     runtime: entry.type === 'movie' ? entry.runtime : null,
     director: entry.type === 'movie' ? entry.director : null,
     rating: entry.type === 'movie' ? entry.rating : null,
-    episodes: episodes && episodes.length > 0 ? episodes : null,
     updatedAt: new Date(),
   };
   await db
@@ -1235,11 +1235,6 @@ async function upsertTvdbEntry(
         runtime: base.runtime,
         director: base.director,
         rating: base.rating,
-        // Preserve an existing non-null episode list when the new upsert
-        // didn't fetch one (search-hit upsert from the auto-matcher).
-        episodes: base.episodes
-          ? (base.episodes as typeof tvdbEntries.$inferInsert.episodes)
-          : sql`coalesce(${tvdbEntries.episodes}, null)`,
         updatedAt: base.updatedAt,
       },
     });
@@ -1747,7 +1742,7 @@ export interface MatchService {
   /**
    * Per-airing S/E override. Writes tvdb_season / tvdb_episode /
    * tvdb_episode_name for a single program only — no cohort spread. When both
-   * args are numbers we look up the name from tvdb_entries.episodes; when
+   * args are numbers we look up the name from `tvdbService.getSeriesEpisodes`; when
    * either is null we clear all three fields.
    */
   setProgramEpisode(
@@ -1882,7 +1877,7 @@ class DbMatchService implements MatchService {
               const episodes = best.type === 'series'
                 ? await tvdbService.getSeriesEpisodes(best.id)
                 : [];
-              await upsertTvdbEntry(best, episodes);
+              await upsertTvdbEntry(best);
               await writeOverride(key, best.id, false);
               const showTitles = [best.title, best.titleEn].filter(
                 (t): t is string => Boolean(t)
@@ -1914,22 +1909,21 @@ class DbMatchService implements MatchService {
   ): Promise<void> {
     if (programIds.length === 0) return;
     const now = new Date();
-    // When the caller didn't supply an episode list / show titles (e.g.
-    // the override-hit path), pull both from tvdb_entries. Saves
-    // re-fetching from TVDB while still giving programs per-episode
-    // stamping AND letting `findEpisodeForProgram` derive subtitles.
-    if (!episodes || !showTitles) {
+    // When the caller didn't supply episodes / showTitles (e.g. the
+    // override-hit path), fetch episodes from `tvdbService` (FileCache
+    // layer, status-driven TTL) and titles from the `tvdb_entries`
+    // relational row. Per CLAUDE.md "TVDB cache strategy", episodes are
+    // NOT a DB column — `tvdbService.getSeriesEpisodes` is the only path.
+    if (!episodes) {
+      episodes = await tvdbService.getSeriesEpisodes(tvdbId);
+    }
+    if (!showTitles) {
       const [row] = await db
-        .select({
-          title: tvdbEntries.title,
-          titleEn: tvdbEntries.titleEn,
-          episodes: tvdbEntries.episodes,
-        })
+        .select({ title: tvdbEntries.title, titleEn: tvdbEntries.titleEn })
         .from(tvdbEntries)
         .where(eq(tvdbEntries.tvdbId, tvdbId))
         .limit(1);
-      if (!episodes) episodes = row?.episodes ?? undefined;
-      if (!showTitles && row) {
+      if (row) {
         showTitles = [row.title, row.titleEn].filter(
           (t): t is string => Boolean(t)
         );
@@ -2009,7 +2003,7 @@ class DbMatchService implements MatchService {
     const episodes = fresh.type === 'series'
       ? await tvdbService.getSeriesEpisodes(tvdbId)
       : [];
-    await upsertTvdbEntry(fresh, episodes);
+    await upsertTvdbEntry(fresh);
 
     // 2. Resolve the program's normalized title, pin it as a user override
     //    so every other program with the same normalized title matches too,
@@ -2064,7 +2058,7 @@ class DbMatchService implements MatchService {
       const episodes = fresh.type === 'series'
         ? await tvdbService.getSeriesEpisodes(prog.tvdbId)
         : [];
-      await upsertTvdbEntry(fresh, episodes);
+      await upsertTvdbEntry(fresh);
       const showTitles = [fresh.title, fresh.titleEn].filter(
         (t): t is string => Boolean(t)
       );
@@ -2100,7 +2094,7 @@ class DbMatchService implements MatchService {
     const episodes = best.type === 'series'
       ? await tvdbService.getSeriesEpisodes(best.id)
       : [];
-    await upsertTvdbEntry(best, episodes);
+    await upsertTvdbEntry(best);
     await writeOverride(key, best.id, false);
 
     const showTitles = [best.title, best.titleEn].filter(
@@ -2150,21 +2144,14 @@ class DbMatchService implements MatchService {
       return;
     }
 
-    // Set path — look up the episode name from the cached episode list on
-    // the linked tvdb_entry. Without a tvdbId we can't resolve a name, but
-    // we still allow writing the numeric S/E (name stays null).
+    // Set path — look up the episode name from `tvdbService` (FileCache
+    // layer; status-driven TTL). Without a tvdbId we can't resolve a
+    // name, but we still allow writing the numeric S/E (name stays null).
     let episodeName: string | null = null;
     if (prog.tvdbId != null) {
-      const [row] = await db
-        .select({ episodes: tvdbEntries.episodes })
-        .from(tvdbEntries)
-        .where(eq(tvdbEntries.tvdbId, prog.tvdbId))
-        .limit(1);
-      const eps = row?.episodes ?? null;
-      if (eps) {
-        const hit = eps.find((ep) => ep.s === season && ep.e === episode);
-        if (hit?.name) episodeName = hit.name;
-      }
+      const eps = await tvdbService.getSeriesEpisodes(prog.tvdbId);
+      const hit = eps.find((ep) => ep.s === season && ep.e === episode);
+      if (hit?.name) episodeName = hit.name;
     }
 
     await db

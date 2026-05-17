@@ -15,7 +15,9 @@ if (prog.tvdbId == null) { console.log('not linked to tvdb'); process.exit(0); }
 const [entry] = await db.select().from(tvdbEntries).where(eq(tvdbEntries.tvdbId, prog.tvdbId)).limit(1);
 if (!entry) { console.error('tvdb entry not found'); process.exit(1); }
 const showTitles = [entry.title, entry.titleEn].filter((t): t is string => Boolean(t));
-const episodes = entry.episodes ?? [];
+// Episodes live in the FileCache layer now (not DB) — fetch via tvdbService.
+const { tvdbService } = await import('../src/services/tvdbService.ts');
+const episodes = await tvdbService.getSeriesEpisodes(prog.tvdbId);
 // Mirror applyTvdbToPrograms: flatten the ARIB `extended` map into the
 // desc text so the desc-fallback parser sees `番組内容: ＃１…` markers.
 const flattened = prog.extended
