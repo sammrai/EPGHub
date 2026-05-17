@@ -215,6 +215,14 @@ function reportMatchUrl(p: Program): string {
   const titleLine = startShort
     ? `[match-report] ${p.title} — ${p.ch} (${startShort})`
     : `[match-report] ${p.title}`;
+  // Deep-link back to the modal in whatever app origin the reporter is
+  // currently on (dev / prod). The router uses `?modal=<programId>` as
+  // the source of truth (see CLAUDE.md frontend section), so the link
+  // re-opens this exact modal when clicked from the GitHub issue.
+  const viewUrl =
+    typeof window !== 'undefined' && p.id
+      ? `${window.location.origin}/?modal=${encodeURIComponent(p.id)}`
+      : null;
   const lines = [
     '### マッチ報告',
     '',
@@ -224,6 +232,7 @@ function reportMatchUrl(p: Program): string {
     `- ch: \`${p.ch}\``,
     `- startAt: \`${p.startAt ?? '(unknown)'}\``,
   ];
+  if (viewUrl) lines.push(`- link: ${viewUrl}`);
   if (p.ep) lines.push(`- ep: \`${p.ep}\``);
   if (p.series) lines.push(`- series: \`${p.series}\``);
   lines.push(

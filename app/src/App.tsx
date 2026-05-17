@@ -45,7 +45,7 @@ import {
 import { api, ApiError } from './api/epghub';
 import type { ApiRecording, ApiUpdateRecording } from './api/epghub';
 import { progId } from './lib/epg';
-import { addDays, jstTodayYmd } from './lib/broadcastDay';
+import { addDays, broadcastDayOfMs, jstTodayYmd } from './lib/broadcastDay';
 import { modalDepthOf, pushModalToUrl, wasOpenedInApp } from './lib/modalUrl';
 import type { Channel, Program, Recording, Rule, TvdbEntry, TvdbSeries } from './data/types';
 
@@ -85,17 +85,63 @@ export function App() {
   const [searchParams, setSearchParams] = useSearchParams();
   const page = pageFromPath(location.pathname);
 
-  // ?date=YYYY-MM-DD — only meaningful on the guide route. Elsewhere we
-  // still need *some* date to bound the schedule fetch, so we fall back
-  // to today. This matches the pre-routing behaviour where every page
-  // shared the same `selectedDate` piece of state.
+  // ?date=YYYY-MM-DD — only meaningful on the guide route.
   const urlDate = page === 'guide' ? searchParams.get('date') : null;
-  const selectedDate = urlDate && YMD_RE.test(urlDate) ? urlDate : jstTodayYmd();
+  const modalIdParam = searchParams.get('modal');
+  // Deep-link 情報を mount 時に一度だけ凍結。?modal= の値が in-app クリック
+  // 等で変わっても deepLinkIso/Ch は最初の値のまま保持される ので grid が
+  // 勝手に動かない。reload は新規 mount なので reload 時の URL を再キャプチャ。
+  const [initialDeepLink] = useState(() => {
+    if (typeof window === 'undefined') return null;
+    const id = new URL(window.location.href).searchParams.get('modal');
+    if (!id) return null;
+    const m = id.match(/^(.+)_(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)$/);
+    return m ? { ch: m[1], iso: m[2] } : null;
+  });
+  const deepLinkIso = initialDeepLink?.iso ?? null;
+  const deepLinkCh = initialDeepLink?.ch ?? null;
+  // 日付は useState で persist。URL から派生させると modal ❌ で
+  // modalIdParam が消えた瞬間に selectedDate が「今日」へ jump して grid
+  // が動いてしまうため、明示的に state を持つ。初期値の優先順位:
+  //  1. mount 時に modal がある & ?date= がユーザ未操作 → modal の放送日
+  //     (= ?date=19&modal=...21 のような不整合 URL でも modal を優先)
+  //  2. ?date= が指定されていればその値
+  //  3. それ以外は今日
+  // URL の ?date= が後から user の day-nav 等で変わった時は useEffect
+  // で state に同期。modal の追加・削除は state を変えない (= ❌ で grid
+  // 位置がズレない)。
+  const [selectedDate, setSelectedDateState] = useState<string>(() => {
+    if (typeof window === 'undefined') return jstTodayYmd();
+    const u = new URL(window.location.href).searchParams;
+    const date = u.get('date');
+    const modal = u.get('modal');
+    let modalDay: string | null = null;
+    if (modal) {
+      const m = modal.match(/^(.+)_(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)$/);
+      if (m) {
+        const ms = Date.parse(m[2]);
+        if (Number.isFinite(ms)) modalDay = broadcastDayOfMs(ms);
+      }
+    }
+    // mismatch URL では modal を優先 (date=null vs modalDay=設定済も含む)
+    if (modal && modalDay && (!date || !YMD_RE.test(date) || date !== modalDay)) {
+      return modalDay;
+    }
+    if (date && YMD_RE.test(date)) return date;
+    return modalDay ?? jstTodayYmd();
+  });
+  // urlDate がユーザ操作 (day-nav) で変わったら state に同期。modal の
+  // 開閉では urlDate が変わらない (= 同期発火しない) のでズレない。
+  useEffect(() => {
+    if (urlDate && YMD_RE.test(urlDate) && urlDate !== selectedDate) {
+      setSelectedDateState(urlDate);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlDate]);
 
   const setSelectedDate = useCallback(
     (d: string) => {
-      // Stay on the current route; just update ?date=. Preserve any other
-      // params the user may have added (e.g. modal).
+      setSelectedDateState(d);
       setSearchParams(
         (prev) => {
           const next = new URLSearchParams(prev);
@@ -108,15 +154,18 @@ export function App() {
     [setSearchParams]
   );
 
-  // Infinite-scroll: additional broadcast-days to load past the base.
-  // Resets whenever the base day changes.
-  // Infinite-scroll: start with just today + tomorrow so the initial paint
-  // is fast, then extend as the user scrolls toward the bottom. The
-  // day-picker dropdown exposes the full week independently; this only
-  // governs how much EPG data we pull in a single request.
+  // Infinite-scroll (両方向): selectedDate を中心に、前 priorDaysLoaded 日 +
+  // 後 daysLoaded 日 をロード。
+  //  - 下方向 (未来): selectedDate → +1, +2, ... と onLoadMore で append、
+  //    schedule.exhausted (= 該当日 0 件) で停止。`/` での挙動と同じ。
+  //  - 上方向 (過去): selectedDate → -1, -2, ... と onLoadPrior で prepend、
+  //    今日 (= jstTodayYmd()) で停止。`/` (selectedDate=today) では
+  //    そもそも today より前に行く余地が無いので発火しない。
   const [daysLoaded, setDaysLoaded] = useState<number>(2);
+  const [priorDaysLoaded, setPriorDaysLoaded] = useState<number>(0);
   useEffect(() => {
     setDaysLoaded(2);
+    setPriorDaysLoaded(0);
   }, [selectedDate]);
 
   // Live-scroll date display (課題#13). Tracks which broadcast day the Grid
@@ -127,9 +176,26 @@ export function App() {
   useEffect(() => {
     setDisplayedDate(selectedDate);
   }, [selectedDate]);
+  // selectedDate からあと何日前まで遡れるか (= today までの日数)。
+  // selectedDate=today なら 0 → backward load 自体が無効。
+  const maxPriorDays = useMemo(() => {
+    const today = jstTodayYmd();
+    const diff = Math.round(
+      (Date.parse(`${selectedDate}T05:00:00+09:00`) -
+        Date.parse(`${today}T05:00:00+09:00`)) / 86400000,
+    );
+    return Math.max(0, diff);
+  }, [selectedDate]);
+  const gridBaseDate = useMemo(
+    () => addDays(selectedDate, -priorDaysLoaded),
+    [selectedDate, priorDaysLoaded],
+  );
   const dateRange = useMemo(
-    () => Array.from({ length: daysLoaded }, (_, i) => addDays(selectedDate, i)),
-    [selectedDate, daysLoaded]
+    () => Array.from(
+      { length: priorDaysLoaded + daysLoaded },
+      (_, i) => addDays(gridBaseDate, i),
+    ),
+    [gridBaseDate, priorDaysLoaded, daysLoaded],
   );
   const schedule = useScheduleRange(dateRange);
   const loadMoreDays = useCallback(() => {
@@ -140,6 +206,9 @@ export function App() {
     if (schedule.exhausted) return;
     setDaysLoaded((n) => Math.min(n + 1, 60));
   }, [schedule.exhausted]);
+  const loadPriorDay = useCallback(() => {
+    setPriorDaysLoaded((n) => Math.min(n + 1, maxPriorDays));
+  }, [maxPriorDays]);
 
   const recordingsR = useRecordings();
   const rulesR = useRules();
@@ -158,6 +227,11 @@ export function App() {
   const [genreFilter, setGenreFilter] = useState<string>('all');
   const [bcType, setBcType] = useState<GridBcType>('all');
   const [selectedProg, setSelectedProg] = useState<string | null>(null);
+  // セル側の「選択中」ハイライト用 ID。アプリ内クリックで開いた場合は
+  // selectedProg がセットされるが、deep link (`?modal=<id>` 直リンク) では
+  // openModal を経由しないので selectedProg は空のまま。URL の modal を
+  // フォールバックとして使うと、deep link でも対象セルが視覚的に強調される。
+  const highlightedId = selectedProg ?? modalIdParam;
   // scrubRange は Timeline ビュー内 (baseDate 05:00 JST 起点) の分オフセット。
   // 13*60=780 → baseDate 18:00 JST。デフォルトで放送日の夕方〜夜を映す。
   const [scrubRange, setScrubRange] = useState<ScrubRange>({ start: 13 * 60, end: 18 * 60 });
@@ -789,15 +863,21 @@ export function App() {
                           programs={programs}
                           channels={visibleChannels}
                           onSelect={openModal}
-                          selectedId={selectedProg}
+                          selectedId={highlightedId}
                           reservedIds={reservedIds}
                           seriesRuleChannels={seriesRuleChannels}
                           density={density}
-                          baseDate={selectedDate}
-                          daysLoaded={Math.max(1, schedule.loadedDays)}
+                          baseDate={gridBaseDate}
+                          anchorDate={selectedDate}
+                          daysLoaded={priorDaysLoaded + daysLoaded}
                           onLoadMore={loadMoreDays}
+                          onLoadPrior={maxPriorDays > priorDaysLoaded ? loadPriorDay : undefined}
                           onVisibleDateChange={setDisplayedDate}
                           genreFilter={genreFilter}
+                          atPriorBound={priorDaysLoaded >= maxPriorDays}
+                          atForwardBound={schedule.exhausted}
+                          scrollFocusIso={modalIdParam && deepLinkIso ? deepLinkIso : undefined}
+                          scrollFocusCh={modalIdParam && deepLinkCh ? deepLinkCh : undefined}
                         />
                       )}
                       {layout === 'timeline' && (
@@ -805,16 +885,22 @@ export function App() {
                           programs={programs}
                           channels={visibleChannels}
                           onSelect={openModal}
-                          selectedId={selectedProg}
+                          selectedId={highlightedId}
                           reservedIds={reservedIds}
                           seriesRuleChannels={seriesRuleChannels}
                           scrubRange={scrubRange}
                           setScrubRange={setScrubRange}
-                          baseDate={selectedDate}
-                          daysLoaded={Math.max(1, schedule.loadedDays)}
+                          baseDate={gridBaseDate}
+                          anchorDate={selectedDate}
+                          daysLoaded={priorDaysLoaded + daysLoaded}
                           onLoadMore={loadMoreDays}
+                          onLoadPrior={maxPriorDays > priorDaysLoaded ? loadPriorDay : undefined}
                           onVisibleDateChange={setDisplayedDate}
                           genreFilter={genreFilter}
+                          atPriorBound={priorDaysLoaded >= maxPriorDays}
+                          atForwardBound={schedule.exhausted}
+                          scrollFocusIso={modalIdParam && deepLinkIso ? deepLinkIso : undefined}
+                          scrollFocusCh={modalIdParam && deepLinkCh ? deepLinkCh : undefined}
                         />
                       )}
                       {layout === 'agenda' && (
@@ -822,7 +908,7 @@ export function App() {
                           programs={filteredPrograms}
                           channels={visibleChannels}
                           onSelect={openModal}
-                          selectedId={selectedProg}
+                          selectedId={highlightedId}
                           reservedIds={reservedIds}
                         />
                       )}

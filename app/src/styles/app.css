@@ -1054,6 +1054,59 @@ select.control-sm {
 }
 
 /* ============================================================
+   EDGE MARKERS (grid 上下端の境界カード)
+   ------------------------------------------------------------
+   無限スクロールが境界に達した時の "ここで終わり" 表示。グリッド全幅に
+   薄い帯を敷き、中のラベルは sticky-left で時刻列のすぐ脇に固定して
+   横スクロールしても見える。トーンは .prog セルの淡色版を踏襲。
+   ============================================================ */
+.grid-edge {
+  position: relative;
+  min-width: max-content;
+  padding: 14px 0;
+  background: var(--bg);
+}
+.grid-edge-top {
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(
+    to bottom,
+    color-mix(in oklch, var(--bg-elev) 35%, transparent),
+    transparent
+  );
+}
+.grid-edge-bottom {
+  border-top: 1px solid var(--border);
+  background: linear-gradient(
+    to top,
+    color-mix(in oklch, var(--bg-elev) 35%, transparent),
+    transparent
+  );
+}
+.grid-edge-label {
+  position: sticky;
+  left: 60px; /* sticky time-col (48px) のすぐ右に置く */
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg-muted);
+  letter-spacing: 0.02em;
+  box-shadow: 0 1px 0 oklch(0.15 0.04 255 / 0.04);
+}
+.grid-edge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fg-muted);
+  opacity: 0.6;
+}
+
+/* ============================================================
    PROGRAM BLOCKS
    ============================================================ */
 
@@ -1583,6 +1636,67 @@ select.control-sm {
   z-index: 25;
   pointer-events: none;
   box-shadow: 0 0 8px oklch(0.58 0.2 25 / 0.4);
+}
+
+/* ============================================================
+   TIMELINE EDGE MARKERS (横軸タイムライン用の左右端カード)
+   Grid の上下端カードと意味的に対 — pill を縦書きで表示し、横スク
+   ロールがエッジに来た時にユーザに境界を知らせる。
+   ============================================================ */
+.tl-edge {
+  position: absolute;
+  top: 36px;  /* ruler のすぐ下から */
+  bottom: 0;
+  width: 36px;
+  z-index: 22;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.tl-edge-left {
+  border-left: 1px solid var(--border);
+  background: linear-gradient(
+    to right,
+    color-mix(in oklch, var(--bg-elev) 35%, transparent),
+    transparent
+  );
+}
+.tl-edge-right {
+  border-right: 1px solid var(--border);
+  background: linear-gradient(
+    to left,
+    color-mix(in oklch, var(--bg-elev) 35%, transparent),
+    transparent
+  );
+}
+.tl-edge-label {
+  position: sticky;
+  top: 50%;
+  transform: translateY(-50%);
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--fg-muted);
+  letter-spacing: 0.02em;
+  box-shadow: 0 1px 0 oklch(0.15 0.04 255 / 0.04);
+  white-space: nowrap;
+}
+.tl-edge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fg-muted);
+  opacity: 0.6;
+  flex-shrink: 0;
 }
 
 /* Solid red marker sitting inside the ruler at the current-time column.

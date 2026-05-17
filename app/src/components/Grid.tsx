@@ -386,12 +386,33 @@ export interface GridViewProps {
    *  different rule), the cell stays in the blue "reserved" variant. */
   seriesRuleChannels?: Map<number, string[]>;
   /** Anchor date for the grid (YYYY-MM-DD, JST broadcast day). The grid
-   *  renders from `baseDate` 05:00 JST over `daysLoaded × 24` hours. */
+   *  renders from `baseDate` 05:00 JST over `daysLoaded × 24` hours.
+   *  This is the EARLIEST loaded day (may shift backward as the user
+   *  wheels up and `onLoadPrior` prepends a prior day). */
   baseDate: string;
+  /** The user-anchor date (= App's `selectedDate`). Stays put when a
+   *  backward prepend shifts `baseDate` earlier. Used as the initial-
+   *  scroll key so wheel-up prepending doesn't re-trigger the
+   *  now-centering useLayoutEffect. */
+  anchorDate?: string;
   /** How many broadcast days the grid currently renders. Grows as the user
-   *  scrolls toward the bottom (triggers `onLoadMore`). */
+   *  scrolls toward the bottom (triggers `onLoadMore`) or wheel-up at the
+   *  top (triggers `onLoadPrior`, which prepends a day before `baseDate`). */
   daysLoaded: number;
   onLoadMore: () => void;
+  /** Called when the user wheel-scrolls upward near the top. App will
+   *  prepend a day before `baseDate` (= shift `baseDate` back by 1) so
+   *  the user can see programs from earlier days. Pass `undefined` to
+   *  disable backward load (e.g., already at today's broadcast day). */
+  onLoadPrior?: () => void;
+  /** Render an "end-of-range" marker at the very top of the grid (= the
+   *  earliest loaded day's 05:00 JST). True when no further past days
+   *  can be loaded (App: `priorDaysLoaded >= maxPriorDays`). */
+  atPriorBound?: boolean;
+  /** Render an "end-of-range" marker at the very bottom (= the latest
+   *  loaded day's 29:00 JST). True when the server has no more future
+   *  EPG (App: `schedule.exhausted`). */
+  atForwardBound?: boolean;
   /** Called as the user scrolls past broadcast-day boundaries so the
    *  Subheader can show a live "表示中: MM/DD" chip (課題#13). Receives
    *  `baseDate`, `baseDate+1`, … as YYYY-MM-DD. */
@@ -400,6 +421,13 @@ export interface GridViewProps {
    *  non-matching programs faded (they stay in place to preserve grid
    *  context rather than being fully removed). */
   genreFilter?: string;
+  /** Deep link `?modal=<id>` で外部から開かれた時、現時刻ではなくこの ISO の
+   *  時刻が viewport 中央に来るように初期スクロールする。null/undefined の
+   *  通常 (in-app 起動) では「現時刻 80px 上」の従来挙動。 */
+  scrollFocusIso?: string;
+  /** Deep link 起動時の対象チャンネル ID。scrollLeft を寄せて該当列も viewport
+   *  内に入るようにする (時刻軸センタリングと対) 。未指定なら scrollLeft=0 のまま。 */
+  scrollFocusCh?: string;
 }
 
 interface GridCssVars extends CSSProperties {
@@ -421,7 +449,7 @@ function findScrollParent(el: HTMLElement | null): HTMLElement | null {
   return null;
 }
 
-export function GridView({ programs, channels, onSelect, selectedId, density, reservedIds, seriesRuleChannels, baseDate, daysLoaded, onLoadMore, onVisibleDateChange, genreFilter = 'all' }: GridViewProps) {
+export function GridView({ programs, channels, onSelect, selectedId, density, reservedIds, seriesRuleChannels, baseDate, anchorDate, daysLoaded, onLoadMore, onLoadPrior, onVisibleDateChange, genreFilter = 'all', scrollFocusIso, scrollFocusCh, atPriorBound, atForwardBound }: GridViewProps) {
   // 放送日連続ビュー: baseDate 05:00 JST を 0 分起点に、daysLoaded × 24時間分
   // を一枚のタイムラインで描画。スクロールが底近くに達すると onLoadMore で
   // 更に 1 日追加読み込みする (無限スクロール)。
@@ -492,17 +520,25 @@ export function GridView({ programs, channels, onSelect, selectedId, density, re
     '--px-per-min': `${pxPerMin}px`,
   };
 
-  // 初期スクロール: 現在時刻を上寄り (ビュー top+80px) に。baseDate が変わる
-  // (day-nav クリック等) ごとに再適用する。
+  // 役割を 2 つに分割した初期スクロール:
+  //  (1) day-nav 用 (この useLayoutEffect): anchorDate (= selectedDate) が
+  //      変わった時だけ「現在時刻を上寄り」or「scrollTop=0」へ。
+  //      Modal の open/close や backward 読み込みでは発火しない。
+  //  (2) deep-link 用 (下の useEffect, mount 時 1 回限り): RAF で target セル
+  //      を探し、scroller 上 1/4 + 該当列中央に置く。modal と被ったら押し上げる。
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const didInitialScroll = useRef<string>('');
+  const scrollKey = anchorDate ?? baseDate;
+  const lastScrollKey = useRef<string>('');
   useLayoutEffect(() => {
     if (!rootRef.current) return;
     const scroller = findScrollParent(rootRef.current);
     if (!scroller) return;
-    // baseDate が変わる度に 1 回だけ初期化する。density 変更等では動かさない。
-    if (didInitialScroll.current === baseDate) return;
-    didInitialScroll.current = baseDate;
+    if (lastScrollKey.current === scrollKey) return;
+    const firstRun = lastScrollKey.current === '';
+    lastScrollKey.current = scrollKey;
+    // 初回 mount で deep-link が指定されている場合は (2) に任せる
+    // — ここで上書きすると一瞬今日へ動いてから target へ戻る flash になる。
+    if (firstRun && scrollFocusIso) return;
     if (nowVisible) {
       scroller.scrollTop = Math.max(0, nowOffset - 80);
     } else {
@@ -510,23 +546,121 @@ export function GridView({ programs, channels, onSelect, selectedId, density, re
     }
     scroller.scrollLeft = 0;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseDate]);
+  }, [scrollKey]);
 
-  // 無限スクロール: 底まで残り 400px を切ったら onLoadMore。スクロール頻度が
-  // 高いので passive listener + ロック用 ref で多重呼び出しを抑止する。
-  // 同じリスナーで表示中の放送日も算出して onVisibleDateChange に流す (課題#13)。
+  // Deep link 起動時の精密スクロール — **mount 時 1 回限り**。
+  // target セル & modal が DOM に乗ったら、target を scroller の上 1/4 +
+  // 該当列の channel area センターに置き、modal と被らないよう modal の
+  // 真上 (24px マージン) に追加で押し上げる。
+  // 一度確定したら以後は無視 — wheel-up での backward 読み込みも、ユーザの
+  // 任意 scroll も、modal の ❌ も、何も再計算しない (= grid が勝手に動かない)。
+  const didDeepLinkScroll = useRef(false);
+  useEffect(() => {
+    if (didDeepLinkScroll.current) return;
+    if (!scrollFocusIso || !scrollFocusCh) {
+      didDeepLinkScroll.current = true; // deep-link が無い mount → 不要を記録
+      return;
+    }
+    if (!rootRef.current) return;
+    const scroller = findScrollParent(rootRef.current);
+    if (!scroller) return;
+    let attempts = 0;
+    let initialApplied = false;
+    let stableFrames = 0;
+    let raf = 0;
+    const MAX_FRAMES = 80; // ~1.3s at 60fps
+    const cellTopInScroller = (el: HTMLElement): number => {
+      let y = 0;
+      let cur: HTMLElement | null = el;
+      while (cur && cur !== scroller) {
+        y += cur.offsetTop;
+        cur = cur.offsetParent as HTMLElement | null;
+      }
+      return y;
+    };
+    const targetSel = `[data-testid="prog-${CSS.escape(scrollFocusCh)}_${scrollFocusIso}"]`;
+    const finish = () => {
+      didDeepLinkScroll.current = true;
+    };
+    const tick = () => {
+      attempts++;
+      const target = scroller.querySelector<HTMLElement>(targetSel);
+      if (target) {
+        if (!initialApplied) {
+          const cellY = cellTopInScroller(target);
+          scroller.scrollTop = Math.max(0, cellY - scroller.clientHeight * 0.25);
+          const cellRect = target.getBoundingClientRect();
+          const scrollerRect = scroller.getBoundingClientRect();
+          const cellContentX = cellRect.left - scrollerRect.left + scroller.scrollLeft;
+          const firstCol = scroller.querySelector<HTMLElement>('.ch-col');
+          const timeColW = firstCol ? firstCol.offsetLeft : 0;
+          const channelAreaCenter = timeColW + (scroller.clientWidth - timeColW) / 2;
+          scroller.scrollLeft = Math.max(
+            0,
+            cellContentX + cellRect.width / 2 - channelAreaCenter,
+          );
+          initialApplied = true;
+        }
+        const modal = document.querySelector<HTMLElement>('.guide-panel-floating');
+        if (modal) {
+          const t = target.getBoundingClientRect();
+          const m = modal.getBoundingClientRect();
+          const overlapH = t.left < m.right && t.right > m.left;
+          const overlapV = t.top < m.bottom && t.bottom > m.top;
+          if (overlapH && overlapV) {
+            const margin = 24;
+            const desiredTop = m.top - t.height - margin;
+            const delta = t.top - desiredTop;
+            scroller.scrollTop = Math.max(0, scroller.scrollTop + delta);
+            stableFrames = 0;
+          } else {
+            stableFrames++;
+            if (stableFrames >= 10) {
+              finish();
+              return;
+            }
+          }
+        }
+      }
+      if (attempts < MAX_FRAMES) raf = requestAnimationFrame(tick);
+      else finish();
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+    // ❶ scrollFocusIso/Ch は mount 時の deep-link 情報 (App 側で凍結済)。
+    // ❷ 依存に入れないので mount 後一切再 fire しない。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 両方向の遅延ロード — forward / backward を対称に扱う:
+  //   forward : scrollHeight - scrollTop - clientHeight < EDGE → onLoadMore
+  //   backward: scrollTop < EDGE → onLoadPrior
+  // それぞれ ロック用 ref で多重呼び出しを抑止し、対応する props が
+  // undefined なら無効化される (App 側で境界に達したら undefined を渡す)。
+  // scroll event は scrollTop が動いた時しか発火しないので、エッジに張り
+  // ついたまま wheel し続けた場合に備えて wheel listener も同じチェックを
+  // 走らせる。同じリスナー内で表示中の放送日も算出 (課題#13)。
+  const EDGE_PX = 400;
   const loadingMore = useRef(false);
+  const loadingPrior = useRef(false);
   const lastVisibleDate = useRef<string>(baseDate);
   useEffect(() => {
     if (!rootRef.current) return;
     const scroller = findScrollParent(rootRef.current);
     if (!scroller) return;
-    const onScroll = () => {
+    const checkEdges = () => {
       const remain = scroller.scrollHeight - (scroller.scrollTop + scroller.clientHeight);
-      if (remain < 400 && !loadingMore.current) {
+      if (onLoadMore && remain < EDGE_PX && !loadingMore.current) {
         loadingMore.current = true;
         onLoadMore();
       }
+      if (onLoadPrior && scroller.scrollTop < EDGE_PX && !loadingPrior.current) {
+        loadingPrior.current = true;
+        onLoadPrior();
+      }
+    };
+    const onScroll = () => {
+      checkEdges();
       if (onVisibleDateChange) {
         // Invert timeToPx for the scroll position. The focus zone is a
         // simple piecewise function so the inverse is also piecewise.
@@ -548,13 +682,49 @@ export function GridView({ programs, channels, onSelect, selectedId, density, re
         }
       }
     };
+    // wheel: scrollTop が動かない (エッジ張り付き状態) でも、ユーザの
+    // スクロール意図を捉えてエッジチェックを発火する。
+    const onWheel = () => checkEdges();
     scroller.addEventListener('scroll', onScroll, { passive: true });
-    return () => scroller.removeEventListener('scroll', onScroll);
-  }, [onLoadMore, onVisibleDateChange, baseDate, pxPerMin]);
+    scroller.addEventListener('wheel', onWheel, { passive: true });
+    return () => {
+      scroller.removeEventListener('scroll', onScroll);
+      scroller.removeEventListener('wheel', onWheel);
+    };
+  }, [onLoadMore, onLoadPrior, onVisibleDateChange, baseDate, pxPerMin]);
   useEffect(() => {
-    // 新しい日が載ったらロック解除。
+    // 新しい日が載ったら forward 側のロック解除。
     loadingMore.current = false;
   }, [daysLoaded]);
+
+  // baseDate が「前」にシフトした (= 過去日が prepend された) 時、見ている
+  // コンテンツが新たに加わった日のぶんだけ scroll content 内で下に押し下げ
+  // られるので、scrollTop も同量増やして visual position を維持する。
+  // そうしないと wheel-up のたびに視点が常に「新しく加わった先頭」に飛んで
+  // しまう。同じ effect で backward ロックも解除。
+  const prevBaseDate = useRef<string>(baseDate);
+  useLayoutEffect(() => {
+    if (prevBaseDate.current === baseDate) return;
+    const prev = prevBaseDate.current;
+    prevBaseDate.current = baseDate;
+    if (!prev || baseDate >= prev) return;
+    const scroller = rootRef.current ? findScrollParent(rootRef.current) : null;
+    if (!scroller) return;
+    const dayDiff = Math.round(
+      (Date.parse(`${prev}T05:00:00+09:00`) -
+        Date.parse(`${baseDate}T05:00:00+09:00`)) / 86400000,
+    );
+    if (dayDiff <= 0) return;
+    scroller.scrollTop += dayDiff * 24 * 60 * pxPerMin;
+    loadingPrior.current = false;
+  }, [baseDate, pxPerMin]);
+
+  // Last loaded day for the forward-bound caption (= baseDate + daysLoaded-1
+  // is the last 24h-slot start). When schedule has empty trailing days the
+  // App still keeps them rendered, so this is the calendar boundary, not
+  // necessarily the last *non-empty* day.
+  const firstDay = baseDate;
+  const lastDay = addDays(baseDate, Math.max(0, daysLoaded - 1));
 
   return (
     <div className="grid-view" style={gridStyle} ref={rootRef}>
@@ -567,6 +737,14 @@ export function GridView({ programs, channels, onSelect, selectedId, density, re
           </div>
         ))}
       </div>
+      {atPriorBound && (
+        <div className="grid-edge grid-edge-top" aria-hidden="false">
+          <div className="grid-edge-label">
+            <span className="grid-edge-dot" />
+            ここが起点 — {formatFullDateJa(firstDay)} 05:00 より前は表示できません
+          </div>
+        </div>
+      )}
       <div className="grid-body" style={{ height: totalHeightPx }}>
         <div className="time-col">
           {hourTicks.map((h) => {
@@ -665,6 +843,14 @@ export function GridView({ programs, channels, onSelect, selectedId, density, re
           </div>
         )}
       </div>
+      {atForwardBound && (
+        <div className="grid-edge grid-edge-bottom" aria-hidden="false">
+          <div className="grid-edge-label">
+            <span className="grid-edge-dot" />
+            ここまで放送予定 — {formatFullDateJa(lastDay)} 以降は EPG 未取得
+          </div>
+        </div>
+      )}
     </div>
   );
 }

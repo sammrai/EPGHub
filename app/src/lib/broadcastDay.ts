@@ -7,7 +7,14 @@
 // 深夜帯でもその時点で放送中の番組が載っている方の日付を初期選択する。
 // これで 02:00 JST に開いても now-line が前放送日の 26時位置で可視化される。
 export function jstTodayYmd(now: Date = new Date()): string {
-  const d = new Date(now.getTime() + (9 - 5) * 60 * 60 * 1000);
+  return broadcastDayOfMs(now.getTime());
+}
+
+// 任意の UNIX ms (= 番組の startAt 等) から、その瞬間が属する JST 放送日
+// (05:00 境界) を YYYY-MM-DD で返す。Deep link `?modal=<id>` から開く際に
+// その番組の放送日へ selectedDate を合わせるために使う。
+export function broadcastDayOfMs(ms: number): string {
+  const d = new Date(ms + (9 - 5) * 60 * 60 * 1000);
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
 }
 
