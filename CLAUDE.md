@@ -88,7 +88,14 @@ Misses are split into two classes with different defenses:
 - **Class B — episode-level miss** (show is matched, but the episode is missing from the cached episode list — usually because TVDB added new episodes since the show was first matched).
   Defense: reactive refresh enqueued from `applyTvdbToPrograms` when S/E resolves to null and the title carries an episode marker. The queue uses `pg-boss singletonKey: tvdb-eps:${tvdbId}` with a 4-hour cooldown so repeated misses against the same show collapse to one refresh. The refresh calls `tvdbService.getSeriesEpisodes(id, { forceRefresh: true })`. A daily safety-net cron catches misses without a marker.
 
-`FileCache` TTL for series detail (which carries the episode list inline) is status-driven and encoded per-entry in the cache envelope: `continuing` / `upcoming` → **2 days**, `ended` / `cancelled` → **30 days**, unknown → 7 days. The writer (`client.getSeriesExtended`) picks the TTL from the fetch response's `status.name` so readers don't need to know the policy. The Class B reactive refresh queue's `singletonKey` cooldown is **4 hours** per show — independent timer from the TTL: TTL controls when cache auto-expires, cooldown controls how often a force-refresh can fire.
+Timers (independent):
+
+| timer | value | controls |
+|---|---|---|
+| `FileCache` TTL (status-driven, per-entry) | `continuing` / `upcoming`: **2d** · `ended` / `cancelled`: **30d** · unknown: 7d | When the cached series-detail (episodes inline) auto-expires. Picked by the writer (`client.getSeriesExtended`) from `data.status.name` and stored in the envelope. |
+| Class A null-override TTL | **30d** (`AUTO_REMATCH_TTL_MS`) | How long `enrichUnmatched` skips TVDB search for a title that returned no hits. |
+| Class B refresh `singletonKey` cooldown | **4h** per show | How often a force-refresh can be enqueued for the same `tvdbId`. |
+| Safety-net sweep cron | daily **06:00 JST** | When the cron walks continuing shows with upcoming programs and enqueues refreshes. |
 
 Deferred (production-only concern): the default `TVDB_CACHE_DIR` is `/tmp/epghub/tvdb` which is wiped on container restart. Once the FileCache is the only persistence layer for TVDB metadata, a restart re-fetches everything until the cache warms up. Point `TVDB_CACHE_DIR` at a persistent volume in production deployments.
 
