@@ -41,6 +41,9 @@ export interface TimelineViewProps {
    *  backward prepend shifts `baseDate` earlier. Used as the
    *  initial-scroll key so prepending doesn't re-fire centering. */
   anchorDate?: string;
+  /** Increment to force a re-scroll to the now-position even when
+   *  `anchorDate` does not change. */
+  resetTick?: number;
   daysLoaded: number;
   onLoadMore: () => void;
   /** Called when the user wheels/scrolls left near the start. App will
@@ -80,6 +83,7 @@ export function TimelineView({
   setScrubRange,
   baseDate,
   anchorDate,
+  resetTick,
   daysLoaded,
   onLoadMore,
   onLoadPrior,
@@ -121,7 +125,7 @@ export function TimelineView({
   //      open/close や backward 読み込みでは発火しない。
   //  (2) deep-link 用 (下の useEffect): mount 時に 1 回だけ、scrollFocusIso
   //      の時刻を中央に。それ以降は一切再計算しない。
-  const scrollKey = anchorDate ?? baseDate;
+  const scrollKey = `${anchorDate ?? baseDate}|${resetTick ?? 0}`;
   const lastScrollKey = useRef<string>('');
   useLayoutEffect(() => {
     if (!scrollerRef.current) return;
@@ -282,14 +286,20 @@ export function TimelineView({
     loadingMore.current = false;
   }, [daysLoaded]);
 
-  // baseDate が「前」にシフトした (= 過去日が prepend された) 時、見ている
-  // 時刻位置がズレないよう scrollLeft を 1 日分 (= 1440 * pxPerMin) 押し
-  // 右方向に補正する。
+  // baseDate が「前」にシフトした時の visual-position preservation。
+  //   prior-load 由来 (anchorDate 不変、priorDaysLoaded++) のみ対象。
+  //   day-nav / sidebar click 由来 (anchorDate も変わる) ではスキップして
+  //   別の useLayoutEffect の now-position 寄せに任せる。
   const prevBaseDate = useRef<string>(baseDate);
+  const prevAnchorDate = useRef<string | undefined>(anchorDate);
   useLayoutEffect(() => {
-    if (prevBaseDate.current === baseDate) return;
+    const baseChanged = prevBaseDate.current !== baseDate;
+    const anchorChanged = prevAnchorDate.current !== anchorDate;
     const prev = prevBaseDate.current;
     prevBaseDate.current = baseDate;
+    prevAnchorDate.current = anchorDate;
+    if (!baseChanged) return;
+    if (anchorChanged) return;
     if (!prev || baseDate >= prev) return;
     if (!scrollerRef.current) return;
     const dayDiff = Math.round(
@@ -299,7 +309,7 @@ export function TimelineView({
     if (dayDiff <= 0) return;
     scrollerRef.current.scrollLeft += dayDiff * 24 * 60 * pxPerMin;
     loadingPrior.current = false;
-  }, [baseDate, pxPerMin]);
+  }, [baseDate, anchorDate, pxPerMin]);
 
   // Click-and-drag pan. The horizontal scrollbar is hidden (the minimap
   // is the primary scrubber), so drag-to-scroll is how users navigate the

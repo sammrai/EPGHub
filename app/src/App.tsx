@@ -167,6 +167,11 @@ export function App() {
     setDaysLoaded(2);
     setPriorDaysLoaded(0);
   }, [selectedDate]);
+  // Sidebar の「番組表」クリックで grid を強制的に now-position へ戻す
+  // ためのトークン。selectedDate がすでに today で同値の場合 setState が
+  // no-op になり Grid の scrollKey も変わらない → useLayoutEffect が再
+  // 発火しないので、別系統の tick を増やして強制的に key を変える。
+  const [resetTick, setResetTick] = useState<number>(0);
 
   // Live-scroll date display (課題#13). Tracks which broadcast day the Grid
   // or Timeline is currently showing; the Subheader surfaces it as a
@@ -822,6 +827,16 @@ export function App() {
       <Sidebar
         active={page}
         onNav={(p) => {
+          // 番組表をクリック = 「今日に戻る」リセット動作。Twitter のホーム
+          // アイコン的な挙動。selectedDate + 両側 daysLoaded を同一 batch
+          // で初期化することで、Grid/Timeline の初期スクロール useLayoutEffect
+          // が「正しい baseDate」で 1 度だけ now-position 寄せを実行する。
+          if (p === 'guide') {
+            setSelectedDateState(jstTodayYmd());
+            setDaysLoaded(2);
+            setPriorDaysLoaded(0);
+            setResetTick((t) => t + 1);
+          }
           navigate(PAGE_PATHS[p as Page] ?? '/');
         }}
         counts={counts}
@@ -869,6 +884,7 @@ export function App() {
                           density={density}
                           baseDate={gridBaseDate}
                           anchorDate={selectedDate}
+                          resetTick={resetTick}
                           daysLoaded={priorDaysLoaded + daysLoaded}
                           onLoadMore={loadMoreDays}
                           onLoadPrior={maxPriorDays > priorDaysLoaded ? loadPriorDay : undefined}
@@ -892,6 +908,7 @@ export function App() {
                           setScrubRange={setScrubRange}
                           baseDate={gridBaseDate}
                           anchorDate={selectedDate}
+                          resetTick={resetTick}
                           daysLoaded={priorDaysLoaded + daysLoaded}
                           onLoadMore={loadMoreDays}
                           onLoadPrior={maxPriorDays > priorDaysLoaded ? loadPriorDay : undefined}

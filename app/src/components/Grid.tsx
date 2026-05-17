@@ -395,6 +395,10 @@ export interface GridViewProps {
    *  scroll key so wheel-up prepending doesn't re-trigger the
    *  now-centering useLayoutEffect. */
   anchorDate?: string;
+  /** Increment to force a re-scroll to the now-position even when
+   *  `anchorDate` would not change (= sidebar "番組表" click while the
+   *  view is already on today). Combined into the scrollKey. */
+  resetTick?: number;
   /** How many broadcast days the grid currently renders. Grows as the user
    *  scrolls toward the bottom (triggers `onLoadMore`) or wheel-up at the
    *  top (triggers `onLoadPrior`, which prepends a day before `baseDate`). */
@@ -449,7 +453,7 @@ function findScrollParent(el: HTMLElement | null): HTMLElement | null {
   return null;
 }
 
-export function GridView({ programs, channels, onSelect, selectedId, density, reservedIds, seriesRuleChannels, baseDate, anchorDate, daysLoaded, onLoadMore, onLoadPrior, onVisibleDateChange, genreFilter = 'all', scrollFocusIso, scrollFocusCh, atPriorBound, atForwardBound }: GridViewProps) {
+export function GridView({ programs, channels, onSelect, selectedId, density, reservedIds, seriesRuleChannels, baseDate, anchorDate, resetTick, daysLoaded, onLoadMore, onLoadPrior, onVisibleDateChange, genreFilter = 'all', scrollFocusIso, scrollFocusCh, atPriorBound, atForwardBound }: GridViewProps) {
   // 放送日連続ビュー: baseDate 05:00 JST を 0 分起点に、daysLoaded × 24時間分
   // を一枚のタイムラインで描画。スクロールが底近くに達すると onLoadMore で
   // 更に 1 日追加読み込みする (無限スクロール)。
@@ -527,7 +531,7 @@ export function GridView({ programs, channels, onSelect, selectedId, density, re
   //  (2) deep-link 用 (下の useEffect, mount 時 1 回限り): RAF で target セル
   //      を探し、scroller 上 1/4 + 該当列中央に置く。modal と被ったら押し上げる。
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const scrollKey = anchorDate ?? baseDate;
+  const scrollKey = `${anchorDate ?? baseDate}|${resetTick ?? 0}`;
   const lastScrollKey = useRef<string>('');
   useLayoutEffect(() => {
     if (!rootRef.current) return;
@@ -697,16 +701,21 @@ export function GridView({ programs, channels, onSelect, selectedId, density, re
     loadingMore.current = false;
   }, [daysLoaded]);
 
-  // baseDate が「前」にシフトした (= 過去日が prepend された) 時、見ている
-  // コンテンツが新たに加わった日のぶんだけ scroll content 内で下に押し下げ
-  // られるので、scrollTop も同量増やして visual position を維持する。
-  // そうしないと wheel-up のたびに視点が常に「新しく加わった先頭」に飛んで
-  // しまう。同じ effect で backward ロックも解除。
+  // baseDate が「前」にシフトした時の visual-position preservation。
+  //   prior-load 由来 (anchorDate 不変、priorDaysLoaded++) のシフトのみ対象
+  //   で、scrollTop += 1日分の px で見ている番組をズラさない。
+  //   day-nav / sidebar click 由来 (= anchorDate も変わる) では preserve せず、
+  //   直前の scrollKey-driven useLayoutEffect の now-position 寄せに任せる。
   const prevBaseDate = useRef<string>(baseDate);
+  const prevAnchorDate = useRef<string | undefined>(anchorDate);
   useLayoutEffect(() => {
-    if (prevBaseDate.current === baseDate) return;
+    const baseChanged = prevBaseDate.current !== baseDate;
+    const anchorChanged = prevAnchorDate.current !== anchorDate;
     const prev = prevBaseDate.current;
     prevBaseDate.current = baseDate;
+    prevAnchorDate.current = anchorDate;
+    if (!baseChanged) return;
+    if (anchorChanged) return; // 意図的な日付変更 — preserve しない
     if (!prev || baseDate >= prev) return;
     const scroller = rootRef.current ? findScrollParent(rootRef.current) : null;
     if (!scroller) return;
@@ -717,7 +726,7 @@ export function GridView({ programs, channels, onSelect, selectedId, density, re
     if (dayDiff <= 0) return;
     scroller.scrollTop += dayDiff * 24 * 60 * pxPerMin;
     loadingPrior.current = false;
-  }, [baseDate, pxPerMin]);
+  }, [baseDate, anchorDate, pxPerMin]);
 
   // Last loaded day for the forward-bound caption (= baseDate + daysLoaded-1
   // is the last 24h-slot start). When schedule has empty trailing days the
