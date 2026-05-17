@@ -2480,8 +2480,8 @@ paths:
       tags:
         - tvdb
       summary: TVDB シリーズのエピソード一覧
-      description: tvdb_entries.episodes にキャッシュされた aired-order エピソード配列を返す。UI
-        の「話数選択」プルダウン向け。キャッシュ未ヒット時は空配列。
+      description: TVDB の aired-order エピソード配列を返す (FileCache 経由、`getSeriesEpisodes`)。UI
+        の「話数選択」プルダウン向け。FileCache miss + TVDB API fail 時は空配列。
       parameters:
         - schema:
             type:
