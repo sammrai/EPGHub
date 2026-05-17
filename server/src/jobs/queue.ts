@@ -49,6 +49,26 @@ export const QUEUE = {
    * filesystem is back above the threshold. See services/capacityService.
    */
   DISK_SWEEP: 'disk.sweep',
+  /**
+   * Force-refresh the FileCache-backed episode list for a specific TVDB
+   * show id and re-apply S/E to any programs of that show currently
+   * stuck at S/E null. Enqueued reactively by `applyTvdbToPrograms` when
+   * a program with an episode marker fails to resolve (Class B miss —
+   * cache stale relative to TVDB upstream), and by the safety-net sweep
+   * below for continuing shows with upcoming programs. Deduplicated via
+   * `singletonKey: tvdb-eps:${tvdbId}` with a 4h cooldown so repeated
+   * misses against the same show collapse to one fetch. See CLAUDE.md
+   * "TVDB cache strategy".
+   */
+  TVDB_EPISODES_REFRESH: 'tvdb.episodes.refresh',
+  /**
+   * Daily safety-net cron: walks continuing shows that have an
+   * upcoming program within the next 14 days and enqueues a
+   * TVDB_EPISODES_REFRESH job for each. Catches Class B misses that
+   * the reactive trigger didn't see (e.g. EPG titles without an
+   * episode marker but the show genuinely added new episodes upstream).
+   */
+  TVDB_EPISODES_SWEEP: 'tvdb.episodes.sweep',
 } as const;
 
 export type QueueName = (typeof QUEUE)[keyof typeof QUEUE];
@@ -71,3 +91,7 @@ export interface ThumbnailJob {
   recordingId: string;
 }
 export type DiskSweepJob = Record<string, never>;
+export interface TvdbEpisodesRefreshJob {
+  tvdbId: number;
+}
+export type TvdbEpisodesSweepJob = Record<string, never>;

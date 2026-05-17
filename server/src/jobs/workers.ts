@@ -9,6 +9,8 @@ import {
   type RecordStopJob,
   type RuleExpandJob,
   type ThumbnailJob,
+  type TvdbEpisodesRefreshJob,
+  type TvdbEpisodesSweepJob,
 } from './queue.ts';
 
 // Worker handlers — the actual recording/encoding plumbing lives here.
@@ -291,6 +293,62 @@ async function handleDiskSweep(jobs: PgBoss.Job<DiskSweepJob>[]): Promise<void> 
   }
 }
 
+async function handleTvdbEpisodesRefresh(
+  jobs: PgBoss.Job<TvdbEpisodesRefreshJob>[],
+): Promise<void> {
+  const { tvdbService } = await import('../services/tvdbService.ts');
+  const { matchService } = await import('../services/matchService.ts');
+  for (const job of jobs) {
+    const { tvdbId } = job.data;
+    try {
+      // 1. Bust the FileCache for this show's series-detail (which
+      //    carries episodes inline) so the next fetch hits TVDB.
+      // 2. Re-apply S/E to every program of this show whose
+      //    tvdb_episode is still null (the reason this job was
+      //    enqueued in the first place).
+      await tvdbService.getSeriesEpisodes(tvdbId, { forceRefresh: true });
+      const summary = await matchService.reapplyEpisodesForShow(tvdbId);
+      console.log(
+        `[tvdb.episodes.refresh] tvdbId=${tvdbId} resolved=${summary.resolved} skipped=${summary.skipped}`,
+      );
+    } catch (err) {
+      console.warn(
+        `[tvdb.episodes.refresh] tvdbId=${tvdbId} failed:`,
+        (err as Error).message,
+      );
+    }
+  }
+}
+
+async function handleTvdbEpisodesSweep(
+  jobs: PgBoss.Job<TvdbEpisodesSweepJob>[],
+): Promise<void> {
+  const { boss: pgBoss } = await import('./queue.ts');
+  const { matchService } = await import('../services/matchService.ts');
+  for (const _ of jobs) {
+    try {
+      // Walk continuing shows that have at least one upcoming program
+      // in the next 14 days; enqueue a refresh per show (singletonKey
+      // dedupes against reactive enqueues within the 4h cooldown).
+      const tvdbIds = await matchService.shouldSweepForRefresh();
+      let queued = 0;
+      for (const tvdbId of tvdbIds) {
+        const sent = await pgBoss.send(
+          QUEUE.TVDB_EPISODES_REFRESH,
+          { tvdbId },
+          { singletonKey: `tvdb-eps:${tvdbId}`, singletonSeconds: 4 * 3600 },
+        );
+        if (sent) queued++;
+      }
+      console.log(
+        `[tvdb.episodes.sweep] candidates=${tvdbIds.length} queued=${queued}`,
+      );
+    } catch (err) {
+      console.warn('[tvdb.episodes.sweep] failed:', (err as Error).message);
+    }
+  }
+}
+
 export async function registerWorkers(boss: PgBoss): Promise<void> {
   for (const name of Object.values(QUEUE)) {
     await boss.createQueue(name);
@@ -305,6 +363,16 @@ export async function registerWorkers(boss: PgBoss): Promise<void> {
   await boss.work<EpgLivePollJob>(QUEUE.EPG_LIVE_POLL, { batchSize: 1 }, handleEpgLivePoll);
   await boss.work<ThumbnailJob>(QUEUE.THUMBNAIL, { batchSize: 1 }, handleThumbnail);
   await boss.work<DiskSweepJob>(QUEUE.DISK_SWEEP, { batchSize: 1 }, handleDiskSweep);
+  await boss.work<TvdbEpisodesRefreshJob>(
+    QUEUE.TVDB_EPISODES_REFRESH,
+    { batchSize: 2 },
+    handleTvdbEpisodesRefresh,
+  );
+  await boss.work<TvdbEpisodesSweepJob>(
+    QUEUE.TVDB_EPISODES_SWEEP,
+    { batchSize: 1 },
+    handleTvdbEpisodesSweep,
+  );
 
   // Refresh EPG every 10 minutes (JST).
   await boss.schedule(QUEUE.EPG_REFRESH, '*/10 * * * *', {}, { tz: 'Asia/Tokyo' });
@@ -312,6 +380,9 @@ export async function registerWorkers(boss: PgBoss): Promise<void> {
   await boss.schedule(QUEUE.RANKING_SYNC, '0 */3 * * *', {}, { tz: 'Asia/Tokyo' });
   await boss.schedule(QUEUE.EPG_LIVE_POLL, '* * * * *', {}, { tz: 'Asia/Tokyo' });
   await boss.schedule(QUEUE.DISK_SWEEP, '0 * * * *', {}, { tz: 'Asia/Tokyo' });
+  // Daily safety-net sweep at 06:00 JST — off-peak hour, after most
+  // overnight EPG syncs have landed.
+  await boss.schedule(QUEUE.TVDB_EPISODES_SWEEP, '0 6 * * *', {}, { tz: 'Asia/Tokyo' });
 
   await boss.send(QUEUE.EPG_REFRESH, {});
   await boss.send(QUEUE.RULE_EXPAND, {});

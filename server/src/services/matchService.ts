@@ -1338,6 +1338,23 @@ function parseTitleEpisodeNumber(title: string): number | null {
  * structural episode-marker shape — `[#＃]N` or `第N[話回夜]`. That mirrors
  * how broadcasters format the meta line and rejects the prose digits.
  */
+/**
+ * Does this program carry an explicit episode signal (number marker or
+ * quoted subtitle)? Used by `applyTvdbToPrograms` to decide whether a
+ * null S/E resolution warrants a reactive FileCache refresh — refreshing
+ * for a program that genuinely has no marker would never help.
+ *
+ * Exported for tests.
+ */
+export function hasEpisodeMarker(title: string, desc: string | null): boolean {
+  if (parseTitleEpisodeNumber(title) != null) return true;
+  if (desc && parseDescEpisodeNumber(desc) != null) return true;
+  // Quoted subtitle signal — step 1 of the cascade matches against episode
+  // names, so a fresher cache might recognise it.
+  if (/[「『][^「」『』]+[」』]/.test(title)) return true;
+  return false;
+}
+
 function parseDescEpisodeNumber(desc: string): number | null {
   if (!desc) return null;
   const norm = desc
@@ -1750,6 +1767,21 @@ export interface MatchService {
     season: number | null,
     episode: number | null
   ): Promise<void>;
+  /**
+   * Re-apply S/E to every program of `tvdbId` whose `tvdb_episode` is
+   * still null. Called by the `tvdb.episodes.refresh` worker AFTER it
+   * has busted the FileCache, so the fresh episode list (now reflecting
+   * upstream TVDB additions) is consulted. No DB writes for programs
+   * whose S/E was already resolved.
+   */
+  reapplyEpisodesForShow(tvdbId: number): Promise<{ resolved: number; skipped: number }>;
+  /**
+   * Pick the candidate set for the daily `tvdb.episodes.sweep` cron:
+   * continuing/upcoming shows with at least one upcoming program in
+   * the next 14 days. Each id will be turned into a refresh job by
+   * the sweep handler (singletonKey dedupes against reactive enqueues).
+   */
+  shouldSweepForRefresh(): Promise<number[]>;
   /** In-process stats for /system. */
   stats(): { hits: number; misses: number };
 }
@@ -1951,6 +1983,14 @@ class DbMatchService implements MatchService {
     // from chronological order; that fallback was wrong far more often
     // than right and poisoned the Plex library with confident-looking
     // wrong metadata.
+    // Class B reactive trigger: when a program in this batch carries
+    // an explicit episode marker but the cached episode list fails to
+    // resolve, the FileCache is stale relative to upstream TVDB. Track
+    // such a miss and enqueue ONE refresh job at end-of-batch (the
+    // queue's singletonKey dedupes within 4h regardless, but bundling
+    // saves a few enqueue round-trips). See CLAUDE.md "TVDB cache
+    // strategy".
+    let sawUnresolvedMarker = false;
     const CHUNK = 1000;
     for (let i = 0; i < programIds.length; i += CHUNK) {
       const slice = programIds.slice(i, i + CHUNK);
@@ -1981,6 +2021,9 @@ class DbMatchService implements MatchService {
           showTitles,
           descForMatching
         );
+        if (!ep && hasEpisodeMarker(row.title, descForMatching)) {
+          sawUnresolvedMarker = true;
+        }
         await db
           .update(programs)
           .set({
@@ -1991,6 +2034,24 @@ class DbMatchService implements MatchService {
             tvdbEpisodeName: ep?.name ?? null,
           })
           .where(eq(programs.id, row.id));
+      }
+    }
+    if (sawUnresolvedMarker) {
+      // Fire-and-forget: enqueue a refresh for this show's episode cache.
+      // The queue's `singletonKey` deduplicates within 4h so concurrent
+      // misses across the batch collapse to one fetch. Failure to enqueue
+      // (e.g. pg-boss not running in tests) is non-fatal — match flow
+      // proceeds, the safety-net cron will catch it later.
+      try {
+        const { boss } = await import('../jobs/queue.ts');
+        const { QUEUE } = await import('../jobs/queue.ts');
+        await boss.send(
+          QUEUE.TVDB_EPISODES_REFRESH,
+          { tvdbId },
+          { singletonKey: `tvdb-eps:${tvdbId}`, singletonSeconds: 4 * 3600 },
+        );
+      } catch {
+        // boss not started — fine.
       }
     }
   }
@@ -2190,6 +2251,64 @@ class DbMatchService implements MatchService {
           .where(inArray(programs.id, ids.slice(i, i + CHUNK)));
       }
     }
+  }
+
+  async reapplyEpisodesForShow(
+    tvdbId: number,
+  ): Promise<{ resolved: number; skipped: number }> {
+    // Pull programs of this show currently stuck at tvdb_episode IS NULL.
+    // The refresh job has already busted the FileCache, so the next
+    // `getSeriesEpisodes` call returns whatever TVDB is now serving.
+    const unresolved = await db
+      .select({ id: programs.id })
+      .from(programs)
+      .where(and(eq(programs.tvdbId, tvdbId), isNull(programs.tvdbEpisode)));
+    if (unresolved.length === 0) return { resolved: 0, skipped: 0 };
+    const episodes = await tvdbService.getSeriesEpisodes(tvdbId);
+    const [entry] = await db
+      .select({ title: tvdbEntries.title, titleEn: tvdbEntries.titleEn })
+      .from(tvdbEntries)
+      .where(eq(tvdbEntries.tvdbId, tvdbId))
+      .limit(1);
+    const showTitles = entry
+      ? [entry.title, entry.titleEn].filter((t): t is string => Boolean(t))
+      : undefined;
+    const before = unresolved.length;
+    await this.applyTvdbToPrograms(
+      tvdbId,
+      unresolved.map((r) => r.id),
+      episodes,
+      showTitles,
+    );
+    // Count what got resolved by re-querying the same scope.
+    const stillNull = await db
+      .select({ id: programs.id })
+      .from(programs)
+      .where(and(eq(programs.tvdbId, tvdbId), isNull(programs.tvdbEpisode)));
+    const resolved = before - stillNull.length;
+    return { resolved, skipped: stillNull.length };
+  }
+
+  async shouldSweepForRefresh(): Promise<number[]> {
+    // Continuing shows with at least one program in the next 14 days.
+    // The 14-day window is wide enough to catch most weekly schedules
+    // while keeping the daily candidate set bounded (~200-500 shows in
+    // a typical EPG).
+    const horizonMs = 14 * 24 * 60 * 60 * 1000;
+    const upper = new Date(Date.now() + horizonMs);
+    const rows = await db
+      .select({ tvdbId: tvdbEntries.tvdbId })
+      .from(tvdbEntries)
+      .innerJoin(programs, eq(programs.tvdbId, tvdbEntries.tvdbId))
+      .where(
+        and(
+          eq(tvdbEntries.status, 'continuing'),
+          sql`${programs.startAt} >= NOW()`,
+          sql`${programs.startAt} <= ${upper}`,
+        ),
+      )
+      .groupBy(tvdbEntries.tvdbId);
+    return rows.map((r) => r.tvdbId);
   }
 
   stats() {

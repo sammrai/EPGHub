@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  hasEpisodeMarker,
   isAutoOverrideValidForCohort,
   normalizeTitle,
   scoreOf,
@@ -1401,6 +1402,37 @@ describe('suggestRuleKeyword — schedule-hit-based candidate picking', () => {
     assert.equal(
       suggestRuleKeyword('アニメA・あかね噺　＃６', schedule),
       'アニメA・あかね噺',
+    );
+  });
+});
+
+describe('hasEpisodeMarker — Class B reactive-refresh trigger signal', () => {
+  // Used by `applyTvdbToPrograms` to decide whether a null S/E
+  // resolution warrants a FileCache refresh. Should detect:
+  //   - explicit episode-number markers in title (`第N話`, `#N`, `＃N`)
+  //   - same in `desc` (start-of-line strict parser)
+  //   - quoted subtitle in title (matchable against episode names)
+  // Should reject titles with no episode signal (no point refreshing).
+  test('detects `第N話` in title', () => {
+    assert.equal(hasEpisodeMarker('彼女、お借りします 第3話', null), true);
+  });
+  test('detects `#N` in title (hankaku + zenkaku)', () => {
+    assert.equal(hasEpisodeMarker('show #5', null), true);
+    assert.equal(hasEpisodeMarker('show ＃５', null), true);
+  });
+  test('detects quoted subtitle in title (no number marker)', () => {
+    assert.equal(hasEpisodeMarker('こめかみっ! Girls「ほかほかごはん」', null), true);
+  });
+  test('detects start-of-line `＃N` in desc when title has nothing', () => {
+    assert.equal(hasEpisodeMarker('bare title', '＃18　勇者の危機'), true);
+  });
+  test('rejects bare title with no marker and no desc', () => {
+    assert.equal(hasEpisodeMarker('勇者のクズ', null), false);
+  });
+  test('rejects prose digits in desc (not a strict line marker)', () => {
+    assert.equal(
+      hasEpisodeMarker('show', 'この物語は18世紀のフランスを舞台にしています'),
+      false,
     );
   });
 });

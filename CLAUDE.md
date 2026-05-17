@@ -90,6 +90,8 @@ Misses are split into two classes with different defenses:
 
 `FileCache` TTL for series detail (which carries the episode list inline) is status-driven and encoded per-entry in the cache envelope: `continuing` / `upcoming` → **2 days**, `ended` / `cancelled` → **30 days**, unknown → 7 days. The writer (`client.getSeriesExtended`) picks the TTL from the fetch response's `status.name` so readers don't need to know the policy. The Class B reactive refresh queue's `singletonKey` cooldown is **4 hours** per show — independent timer from the TTL: TTL controls when cache auto-expires, cooldown controls how often a force-refresh can fire.
 
+Deferred (production-only concern): the default `TVDB_CACHE_DIR` is `/tmp/epghub/tvdb` which is wiped on container restart. Once the FileCache is the only persistence layer for TVDB metadata, a restart re-fetches everything until the cache warms up. Point `TVDB_CACHE_DIR` at a persistent volume in production deployments.
+
 `forceRefresh: true` on a tvdbService getter busts only the FileCache layer for that key — TTL-aware callers (above) drive when it fires.
 
 ## Project conventions
