@@ -43,8 +43,11 @@ export interface TvdbProvider {
   search(query: string): Promise<TvdbEntry[]>;
   getById(id: number): Promise<TvdbEntry | null>;
   catalog(): Promise<Record<string, TvdbEntry>>;
-  /** Episode list (aired order) for a series id, empty for movies. */
-  getSeriesEpisodes(id: number): Promise<SeriesEpisodeLite[]>;
+  /** Episode list (aired order) for a series id, empty for movies.
+   *  `forceRefresh: true` bypasses the on-disk FileCache layer for this
+   *  show's underlying series-extended fetch (so the next call writes a
+   *  fresh entry with a freshness window derived from show status). */
+  getSeriesEpisodes(id: number, opts?: { forceRefresh?: boolean }): Promise<SeriesEpisodeLite[]>;
   /** Actor cast for a series / movie id. Empty when no data is cached or
    *  the provider can't look it up (fixture mode). */
   getCast(id: number): Promise<TvdbCastMember[]>;
@@ -81,7 +84,7 @@ export class FixtureTvdbProvider implements TvdbProvider {
     return TVDB_CATALOG;
   }
 
-  async getSeriesEpisodes(): Promise<SeriesEpisodeLite[]> {
+  async getSeriesEpisodes(_id: number, _opts?: { forceRefresh?: boolean }): Promise<SeriesEpisodeLite[]> {
     return [];
   }
 
@@ -193,11 +196,13 @@ export class TvdbV4Provider implements TvdbProvider {
     return out;
   }
 
-  async getSeriesEpisodes(id: number): Promise<SeriesEpisodeLite[]> {
+  async getSeriesEpisodes(id: number, opts?: { forceRefresh?: boolean }): Promise<SeriesEpisodeLite[]> {
     // `/series/:id/extended?meta=episodes` already includes episodes; reuse
-    // that response so we don't make an extra roundtrip.
+    // that response so we don't make an extra roundtrip. `forceRefresh`
+    // threads down to the FileCache layer (bypass + write fresh with the
+    // status-driven TTL the client picks from the response).
     try {
-      const ex = await this.client.getSeriesExtended(id);
+      const ex = await this.client.getSeriesExtended(id, { force: opts?.forceRefresh });
       return seriesEpisodesLite(ex);
     } catch {
       return [];
@@ -305,8 +310,8 @@ export const tvdbService: TvdbProvider = {
   async catalog() {
     return (await getProvider()).catalog();
   },
-  async getSeriesEpisodes(id) {
-    return (await getProvider()).getSeriesEpisodes(id);
+  async getSeriesEpisodes(id, opts) {
+    return (await getProvider()).getSeriesEpisodes(id, opts);
   },
   async getCast(id) {
     return (await getProvider()).getCast(id);

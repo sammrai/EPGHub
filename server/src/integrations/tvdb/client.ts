@@ -88,7 +88,21 @@ export interface TvdbEnvelope<T> { status: string; data: T }
 const V4_BASE = 'https://api4.thetvdb.com/v4';
 const TOKEN_TTL_MS = 25 * 24 * 60 * 60 * 1000; // refresh before 30-day expiry
 const SEARCH_TTL_MS = 7 * 24 * 60 * 60 * 1000;  // 1 week — titles rarely change
-const DETAIL_TTL_MS = 7 * 24 * 60 * 60 * 1000;  // 1 week — series/movie detail is stable
+const DETAIL_TTL_MS = 7 * 24 * 60 * 60 * 1000;  // 1 week — series/movie detail is stable (default)
+
+// Status-driven TTL for series detail (which carries the episode list inline
+// via `meta=episodes`). Continuing / upcoming shows are still adding episodes
+// weekly so we keep their cache short; ended / cancelled shows are stable.
+// Default falls back to DETAIL_TTL_MS when status is unknown.
+const SERIES_EPS_TTL_CONTINUING_MS = 2 * 24 * 60 * 60 * 1000;  // 2 days
+const SERIES_EPS_TTL_ENDED_MS = 30 * 24 * 60 * 60 * 1000;       // 30 days
+
+function inferSeriesEpisodesTtl(rawStatus: string | null | undefined): number {
+  if (!rawStatus) return DETAIL_TTL_MS;
+  const s = rawStatus.toLowerCase();
+  if (s.includes('end') || s.includes('cancel')) return SERIES_EPS_TTL_ENDED_MS;
+  return SERIES_EPS_TTL_CONTINUING_MS;
+}
 
 import { FileCache } from '../../lib/fileCache.ts';
 import { resolve } from 'node:path';
@@ -169,7 +183,11 @@ export class TvdbV4HttpClient {
     // extended payload so we can compute totalSeasons / currentSeason /
     // currentEp without an extra roundtrip.
     const data = await this.authedGet<SeriesExtended>(`/series/${id}/extended?meta=episodes&short=false`);
-    await this.detailCache.set(cacheKey, data);
+    // Status-driven TTL: writers know the show status from this response,
+    // so encode the appropriate freshness window into the cache envelope.
+    // Readers transparently respect whatever TTL was stored.
+    const ttlMs = inferSeriesEpisodesTtl(data?.status?.name);
+    await this.detailCache.set(cacheKey, data, { ttlMs });
     return data;
   }
 

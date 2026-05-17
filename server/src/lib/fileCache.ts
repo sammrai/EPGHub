@@ -13,6 +13,11 @@ import { join } from 'node:path';
 
 interface CacheEnvelope<T> {
   at: number;
+  /** Per-entry TTL override. When absent, the FileCache's default TTL applies.
+   *  Used by callers (e.g. TVDB getSeriesExtended) to encode a freshness
+   *  policy that depends on the value itself (`continuing` show → short TTL,
+   *  `ended` show → long TTL) so reads don't need to know the policy. */
+  ttlMs?: number;
   value: T;
 }
 
@@ -37,7 +42,8 @@ export class FileCache {
     try {
       const raw = await readFile(this.pathFor(key), 'utf8');
       const env = JSON.parse(raw) as CacheEnvelope<T>;
-      if (Date.now() - env.at > this.ttlMs) return null;
+      const ttl = env.ttlMs ?? this.ttlMs;
+      if (Date.now() - env.at > ttl) return null;
       return env.value;
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null;
@@ -46,9 +52,13 @@ export class FileCache {
     }
   }
 
-  async set<T>(key: string, value: T): Promise<void> {
+  async set<T>(key: string, value: T, opts?: { ttlMs?: number }): Promise<void> {
     await this.ensureDir();
-    const env: CacheEnvelope<T> = { at: Date.now(), value };
+    const env: CacheEnvelope<T> = {
+      at: Date.now(),
+      ...(opts?.ttlMs != null ? { ttlMs: opts.ttlMs } : {}),
+      value,
+    };
     // Write temp then rename so partial writes don't poison the cache.
     const dst = this.pathFor(key);
     const tmp = `${dst}.tmp`;

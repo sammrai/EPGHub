@@ -61,7 +61,7 @@ npm run build            # tsc -b && vite build
 ### Key service boundaries
 - **`scheduleService`** owns the `programs` table; `programs.id = "${ch}_${startAt}"` so upserts across EPG refreshes are stable.
 - **`recordingService`** owns the unified `recordings` row that covers the whole lifecycle (`scheduled` → `recording` → `encoding` → `ready` / `failed` / `cancelled`). After the R0 unification there is no separate "reserve" table. `scheduledOrLive` vs `ready` filters pick the reserves vs library views in the UI.
-- **`matchService`** normalizes titles and resolves programs → `tvdb_entries`. Golden tests lock the normalization behaviour.
+- **`matchService`** normalizes titles and resolves programs → `tvdb_entries`. Golden tests lock the normalization behaviour. See "TVDB cache strategy" below for the show/episode freshness model.
 - **`ruleExpander`** walks enabled rules against the current schedule and emits reserves via `recordingService`.
 - **`epgLiveService`** subscribes to Mirakurun `/events/stream` so program extensions flow into active reserves in near real-time; `QUEUE.EPG_LIVE_POLL` is the 1-minute fallback.
 - **`tunerAllocator`** + **`capacityService`** guard against conflicts and disk exhaustion respectively.
@@ -75,6 +75,22 @@ npm run build            # tsc -b && vite build
 4. URL state: `?date=YYYY-MM-DD` and `?modal=<programId>`; the router is the source of truth so the back button closes modals. Date handling uses a **JST 05:00 broadcast-day boundary** (see `jstTodayYmd` in `App.tsx`).
 
 `data/channels.ts` + `data/channelStore.ts` model channels as DB-backed dynamic data; do **not** reintroduce a static `CHANNELS` constant.
+
+## TVDB cache strategy
+
+Single source of truth: TVDB v4 API. The `FileCache` (`${TVDB_CACHE_DIR}/{search,detail}/`) is the only cache layer — there is **no DB-side cache of TVDB metadata** (`tvdb_entries.episodes` was eliminated; the table holds only the relational anchor + identifying metadata).
+
+Misses are split into two classes with different defenses:
+
+- **Class A — search-level miss** (the show is not on TVDB at all).
+  Defense: `title_overrides` writes a `null` row with `user_set=false` and a 30-day TTL (`AUTO_REMATCH_TTL_MS`). `enrichUnmatched` skips TVDB search while the override is fresh, so minor / un-indexed shows do not flood the API.
+
+- **Class B — episode-level miss** (show is matched, but the episode is missing from the cached episode list — usually because TVDB added new episodes since the show was first matched).
+  Defense: reactive refresh enqueued from `applyTvdbToPrograms` when S/E resolves to null and the title carries an episode marker. The queue uses `pg-boss singletonKey: tvdb-eps:${tvdbId}` with a 4-hour cooldown so repeated misses against the same show collapse to one refresh. The refresh calls `tvdbService.getSeriesEpisodes(id, { forceRefresh: true })`. A daily safety-net cron catches misses without a marker.
+
+`FileCache` TTL for series detail (which carries the episode list inline) is status-driven and encoded per-entry in the cache envelope: `continuing` / `upcoming` → **2 days**, `ended` / `cancelled` → **30 days**, unknown → 7 days. The writer (`client.getSeriesExtended`) picks the TTL from the fetch response's `status.name` so readers don't need to know the policy. The Class B reactive refresh queue's `singletonKey` cooldown is **4 hours** per show — independent timer from the TTL: TTL controls when cache auto-expires, cooldown controls how often a force-refresh can fire.
+
+`forceRefresh: true` on a tvdbService getter busts only the FileCache layer for that key — TTL-aware callers (above) drive when it fires.
 
 ## Project conventions
 
