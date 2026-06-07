@@ -464,12 +464,14 @@ export function createMockApi(seed: MockApiSeed = {}): MockApi {
       }
 
       // --- programs (deep link might ask for one) ---
-      // Modal が開いた瞬間に GuidePanel が叩く `/rule-keyword` を空 stub で
-      // 受ける。実装は ProgramService の上にある推定ロジックで、E2E 上は
-      // 候補が出ない (= ルール作成ヒントが非表示) 状態を許容できればよい。
+      // Modal が開いた瞬間に GuidePanel が叩く `/rule-keyword` を「server に
+      // 推定材料なし」相当のレスポンスで受ける。`keyword: null` を返すと UI
+      // は `ruleKeyword ?? program.title.slice(0, 14)` のフォールバックに
+      // 流れるので、reserve-keyword-rule の "fallback でキーワード生成"
+      // 期待を壊さずに、search-smoke 側の console 404 も出ない。
       const ruleKwMatch = path.match(/^\/programs\/(.+)\/rule-keyword$/);
       if (ruleKwMatch && method === 'GET') {
-        return route.fulfill({ json: { keyword: '', matches: [] } });
+        return route.fulfill({ json: { keyword: null, matches: [] } });
       }
       const progMatch = path.match(/^\/programs\/(.+)$/);
       if (progMatch && method === 'GET') {
