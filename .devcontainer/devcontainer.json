@@ -1,6 +1,10 @@
 {
     "name": "${localWorkspaceFolderBasename}",
     "image": "mcr.microsoft.com/devcontainers/javascript-node:18-bookworm",
+    "runArgs": [
+        "--name",
+        "${localWorkspaceFolderBasename}"
+    ],
     "features": {
         "ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {},
         "ghcr.io/itsmechlark/features/postgresql:1": {},

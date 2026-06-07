@@ -2,7 +2,7 @@ import { and, asc, eq, gt, inArray } from 'drizzle-orm';
 import { db } from '../db/client.ts';
 import { programs, rankings, tvdbEntries } from '../db/schema.ts';
 import { tvdbService } from './tvdbService.ts';
-import { normalizeTitle } from './matchService.ts';
+import { normalizeTitle, searchTvdbForKey } from './matchService.ts';
 import { tvdbRowToEntry } from './ruleService.ts';
 import { fetchJcomRanking, type JcomGenreId, type JcomRankingRow } from '../integrations/jcom/client.ts';
 import type { TvdbEntry } from '../schemas/tvdb.ts';
@@ -36,33 +36,16 @@ const GENRE_TO_JCOM: Record<RankingGenre, JcomGenreId | null> = {
 };
 
 // -----------------------------------------------------------------
-// Matching helpers — same scoring shape as matchService. Duplicated here to
-// avoid exporting internal scoring from matchService (tight coupling risk).
+// Matching — delegate to matchService so EPG-side resolution and
+// JCOM-ranking resolution share one scorer + fan-out path. The previous
+// local copy compared raw TVDB titles byte-wise, missing the zenkaku-
+// fold / colon-spacing / quote-fold normalisation that the EPG path
+// applies symmetrically — JCOM titles like `最強の王様、二度目の人生は何をする?`
+// (hankaku ?) silently failed against TVDB's `最強の王様、二度目の人生は何をする？`
+// (zenkaku ？). Sharing `searchTvdbForKey` also gains the head/tail
+// fanout so franchise+subtitle titles (`本好きの下剋上 領主の養女` → head
+// `本好きの下剋上`) resolve when a single-shot search returns 0.
 // -----------------------------------------------------------------
-
-function scoreEntry(e: TvdbEntry, key: string): number {
-  const ja = (e.title ?? '').trim();
-  const en = (e.titleEn ?? '').trim();
-  const kLower = key.toLowerCase();
-  if (ja === key || en === key) return 1000;
-  if (en.toLowerCase() === kLower) return 950;
-  const jaLenRatio = ja.length / Math.max(1, key.length);
-  const enLenRatio = en.length / Math.max(1, key.length);
-  if (jaLenRatio <= 1.4 && ja.startsWith(key)) return 700 - ja.length;
-  if (enLenRatio <= 1.4 && en.toLowerCase().startsWith(kLower)) return 680 - en.length;
-  if (jaLenRatio <= 1.6 && ja.includes(key)) return 500 - ja.length;
-  if (key.length >= 4 && (key.includes(ja) || key.toLowerCase().includes(en.toLowerCase())))
-    return 300;
-  return 0;
-}
-
-function pickBest(hits: TvdbEntry[], key: string): TvdbEntry | null {
-  const ranked = hits
-    .map((e) => ({ e, s: scoreEntry(e, key) }))
-    .filter(({ s }) => s > 0)
-    .sort((a, b) => b.s - a.s);
-  return ranked[0]?.e ?? null;
-}
 
 // Tiny in-memory cache so syncAll() doesn't re-issue the same TVDB search
 // for titles that repeat across genre boards.
@@ -73,8 +56,7 @@ async function resolveTvdbId(title: string): Promise<number | null> {
   if (!key) return null;
   if (matchCache.has(key)) return matchCache.get(key)?.id ?? null;
   try {
-    const hits = await tvdbService.search(key);
-    const best = pickBest(hits, key);
+    const best = await searchTvdbForKey(key);
     matchCache.set(key, best);
     if (!best) return null;
     // Persist so the listing join finds a row.

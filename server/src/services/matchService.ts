@@ -1104,7 +1104,7 @@ export function searchKeyCandidates(key: string): string[] {
   return out;
 }
 
-function pickBest(
+export function pickBest(
   results: TvdbEntry[],
   key: string,
   opts?: { allowMovie?: boolean },
@@ -1123,6 +1123,29 @@ function pickBest(
     .filter(({ s }) => s > 0)
     .sort((a, b) => b.s - a.s);
   return ranked[0]?.e ?? null;
+}
+
+/**
+ * One-shot "key → best TVDB entry" resolver shared across every code path
+ * that takes an EPG/JCOM-style title key and resolves it to a TVDB show
+ * (`enrichUnmatched`, `rematchProgram`, `rankingService.resolveTvdbId`).
+ *
+ * Iterates `searchKeyCandidates(key)` and stops at the first candidate
+ * whose TVDB search returns a scoring hit via `pickBest`. Each candidate
+ * is one rate-limited TVDB call; callers stop at the first hit, so the
+ * fan-out is paid only when earlier candidates miss. Throws propagate so
+ * the caller decides whether to write a null-override / log / fall back.
+ */
+export async function searchTvdbForKey(
+  key: string,
+  opts?: { allowMovie?: boolean },
+): Promise<TvdbEntry | null> {
+  for (const scoreKey of searchKeyCandidates(key)) {
+    const hits = await tvdbService.search(scoreKey);
+    const best = pickBest(hits, scoreKey, opts);
+    if (best) return best;
+  }
+  return null;
 }
 
 // -----------------------------------------------------------------
@@ -1895,16 +1918,7 @@ class DbMatchService implements MatchService {
           const ids = group?.ids ?? [];
           const allowMovie = group?.hasMovieGenre ?? false;
           try {
-            // Iterate the candidate list (primary → progressive
-            // relaxations) and stop at the first scoring hit. See
-            // `searchKeyCandidates` for the order rationale.
-            const candidates = searchKeyCandidates(key);
-            let best: TvdbEntry | null = null;
-            for (const scoreKey of candidates) {
-              const hits = await tvdbService.search(scoreKey);
-              best = pickBest(hits, scoreKey, { allowMovie });
-              if (best) break;
-            }
+            const best = await searchTvdbForKey(key, { allowMovie });
             if (best) {
               const episodes = best.type === 'series'
                 ? await tvdbService.getSeriesEpisodes(best.id)
@@ -2141,15 +2155,7 @@ class DbMatchService implements MatchService {
     if (!key || GENERIC_TITLES.has(key)) return null;
 
     const allowMovie = prog.genreKey === 'movie';
-    // Same fan-out as `enrichUnmatched`: try the primary key, then
-    // progressively relaxed candidates (see `searchKeyCandidates`).
-    const searchKeys = searchKeyCandidates(key);
-    let best: TvdbEntry | null = null;
-    for (const scoreKey of searchKeys) {
-      const hits = await tvdbService.search(scoreKey);
-      best = pickBest(hits, scoreKey, { allowMovie });
-      if (best) break;
-    }
+    const best = await searchTvdbForKey(key, { allowMovie });
 
     if (!best) {
       await writeOverride(key, null, false);
