@@ -4,24 +4,6 @@
 // (model, tuner count, unique device id) without vendor-specific code.
 // Docs: https://info.hdhomerun.com/info/http_api
 
-// Resolve the HDHomeRun-style lineup URL for a registered channel_sources
-// row. For kind='iptv' the row's URL already *is* the lineup URL (that's how
-// the user registered it). For kind='mirakurun' the user registered the base
-// URL (e.g. http://host:40772), but Mirakurun's HDHomeRun emulation lives at
-// /api/iptv under that, so we append it transparently. Centralizing this
-// means sync + /tuners/live + any future probe share one rule.
-export function hdhomerunLineupUrl(kind: string, url: string): string {
-  if (kind !== 'mirakurun') return url;
-  try {
-    const u = new URL(url);
-    if (/\/api\/iptv\/?$/.test(u.pathname)) return url;
-    u.pathname = u.pathname.replace(/\/+$/, '') + '/api/iptv';
-    return u.toString();
-  } catch {
-    return url;
-  }
-}
-
 export interface HdhomerunDiscover {
   friendlyName: string | null;
   manufacturer: string | null;
@@ -119,14 +101,34 @@ export function parseDiscover(json: string): HdhomerunDiscover {
   };
 }
 
+// Yield candidate discover.json URLs in priority order. The primary derivation
+// covers the trailing-slash / file-with-extension cases; the fallback handles
+// extension-less resource tails like Mirakurun's `/api/iptv/playlist`, where
+// discover lives one level up (`/api/iptv/discover.json`).
+function* discoverCandidates(lineupUrl: string): Generator<string> {
+  const primary = deriveDiscoverUrl(lineupUrl);
+  yield primary;
+  let u: URL;
+  try { u = new URL(lineupUrl); } catch { return; }
+  u.search = ''; u.hash = '';
+  const trimmed = u.pathname.replace(/\/+$/, '');
+  const lastSlash = trimmed.lastIndexOf('/');
+  if (lastSlash <= 0) return;
+  const tail = trimmed.slice(lastSlash + 1);
+  if (!tail || /\./.test(tail)) return;
+  u.pathname = trimmed.slice(0, lastSlash + 1);
+  const fallback = new URL('discover.json', u).toString();
+  if (fallback !== primary) yield fallback;
+}
+
 export async function fetchHdhomerunDiscover(lineupUrl: string): Promise<HdhomerunDiscover | null> {
-  const discoverUrl = deriveDiscoverUrl(lineupUrl);
-  try {
-    const text = await fetchWithTimeout(discoverUrl);
-    return parseDiscover(text);
-  } catch {
-    // Provider doesn't implement HDHomeRun — that's fine, iptv still works
-    // with m3u+XMLTV alone. Caller just sees null and keeps metadata empty.
-    return null;
+  for (const url of discoverCandidates(lineupUrl)) {
+    try {
+      const text = await fetchWithTimeout(url);
+      return parseDiscover(text);
+    } catch {
+      // Try the next candidate; final failure → null (provider not HDHomeRun).
+    }
   }
+  return null;
 }

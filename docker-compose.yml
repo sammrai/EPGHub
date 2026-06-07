@@ -50,7 +50,10 @@ services:
       EPGHUB_FIXTURES: ${EPGHUB_FIXTURES:-off}
     volumes:
       - epghub-recordings:/var/lib/epghub/recordings
-      - epghub-tvdb-cache:/var/lib/epghub/tvdb-cache
+      # TVDB cache as a host bind mount so warm metadata survives container
+      # recreates (default TVDB_CACHE_DIR `/tmp/...` would be wiped on
+      # restart). Persisted on the host under ./data/tvdb-cache.
+      - ./data/tvdb-cache:/var/lib/epghub/tvdb-cache
     # No host port — the browser reaches the server through app (/api/*,
     # /docs, /openapi.json). Use `docker compose exec server sh` for shell
     # access if you need to curl from inside the network.
@@ -72,4 +75,3 @@ services:
 volumes:
   epghub-pg-data:
   epghub-recordings:
-  epghub-tvdb-cache:

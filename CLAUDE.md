@@ -76,6 +76,10 @@ npm run build            # tsc -b && vite build
 
 `data/channels.ts` + `data/channelStore.ts` model channels as DB-backed dynamic data; do **not** reintroduce a static `CHANNELS` constant.
 
+## Channel source protocol
+
+IPTV (HDHomeRun `discover.json` + m3u + XMLTV) is the baseline — Mirakurun and EPGStation both implement it on `/api/iptv`, so they register as `kind='iptv'` with the m3u URL as `channel_sources.url` (Plex/Jellyfin pattern). `fetchHdhomerunDiscover()` derives `discover.json` from a sibling/parent path of the m3u URL, and m3u + XMLTV alone are enough for a working device. Mirakurun-specific niceties (SSE program-extension stream in `epgLiveService`, ARIB extended attrs, JSON `/api/services`) layer on top of that baseline — never required for basic channel/programme sync. New providers only need to expose discover.json + m3u + XMLTV to plug in.
+
 ## TVDB cache strategy
 
 Single source of truth: TVDB v4 API. The `FileCache` (`${TVDB_CACHE_DIR}/{search,detail}/`) is the only cache layer — there is **no DB-side cache of TVDB metadata** (`tvdb_entries.episodes` was eliminated; the table holds only the relational anchor + identifying metadata).

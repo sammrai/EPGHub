@@ -53,8 +53,8 @@ interface ProbeSpec {
 // Mirakurun: /api/version returns {current, latest}, /api/iptv/discover.json
 // returns HDHomeRun metadata (used for FriendlyName / TunerCount only —
 // we register the base URL, not the iptv m3u path, because Mirakurun's
-// lineup is JSON not m3u and the existing syncMirakurun() REST pipeline
-// handles channels via /api/services).
+// lineup is JSON not m3u and MirakurunProvider handles channels via
+// /api/services).
 // -----------------------------------------------------------------
 async function probeMirakurun(host: string, port: number, signal: AbortSignal): Promise<RawHit | null> {
   const verUrl = `http://${host}:${port}/api/version`;

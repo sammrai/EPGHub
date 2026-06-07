@@ -464,6 +464,13 @@ export function createMockApi(seed: MockApiSeed = {}): MockApi {
       }
 
       // --- programs (deep link might ask for one) ---
+      // Modal が開いた瞬間に GuidePanel が叩く `/rule-keyword` を空 stub で
+      // 受ける。実装は ProgramService の上にある推定ロジックで、E2E 上は
+      // 候補が出ない (= ルール作成ヒントが非表示) 状態を許容できればよい。
+      const ruleKwMatch = path.match(/^\/programs\/(.+)\/rule-keyword$/);
+      if (ruleKwMatch && method === 'GET') {
+        return route.fulfill({ json: { keyword: '', matches: [] } });
+      }
       const progMatch = path.match(/^\/programs\/(.+)$/);
       if (progMatch && method === 'GET') {
         const id = decodeURIComponent(progMatch[1]);

@@ -21,6 +21,10 @@ coverage/
 .env.local
 .env.*.local
 
+# host bind mounts (docker-compose) — TVDB FileCache lives here so warm
+# metadata survives container recreates; not for version control
+data/
+
 # IDE / Claude runtime
 .claude/scheduled_tasks.lock
 **/tsconfig.tsbuildinfo

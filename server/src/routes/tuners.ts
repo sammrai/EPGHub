@@ -10,29 +10,9 @@ import { recordingService } from '../services/recordingService.ts';
 import { channelService } from '../services/channelService.ts';
 import { channelSyncService } from '../services/channelSyncService.ts';
 import { snapshotSlots } from '../services/tunerAllocator.ts';
-import { fetchAllTunerStatuses } from '../integrations/hdhomerun/tunerStatus.ts';
-import { hdhomerunLineupUrl } from '../integrations/hdhomerun/discover.ts';
-import { fetchMirakurunTunerStatuses } from '../integrations/mirakurun/tunerStatus.ts';
+import { createProvider } from '../providers/registry.ts';
 
 export const tunersRouter = new OpenAPIHono();
-
-// Cheap reachability probe for sources without per-tuner status. HEAD the
-// registered URL; fall through to GET if the upstream rejects HEAD (common
-// for streaming endpoints). 3s timeout keeps /tuners/live snappy even when
-// a device is down.
-async function probeUrlReachable(url: string): Promise<boolean> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 3_000);
-  try {
-    let res = await fetch(url, { method: 'HEAD', signal: ctrl.signal }).catch(() => null);
-    if (!res || (!res.ok && res.status === 405)) {
-      res = await fetch(url, { method: 'GET', signal: ctrl.signal }).catch(() => null);
-    }
-    return !!res && res.ok;
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 const listTuners = createRoute({
   method: 'get',
@@ -103,26 +83,14 @@ tunersRouter.openapi(allocation, async (c) => {
 });
 tunersRouter.openapi(liveDeviceStatus, async (c) => {
   const sources = await channelSyncService.list();
-  // Every registered source gets an entry. Three fetch paths:
-  //   - kind='mirakurun'                     → Mirakurun native /api/tuners
-  //   - kind='iptv' with HDHomeRun tunerCount → /tuner{N}/status
-  //   - anything else (plain m3u, EPGStation) → HEAD the source URL for a
-  //                                             basic reachability signal
-  // Providers without per-tuner status still surface reachable=true/false
-  // so the device modal can show "接続OK / 到達不可".
+  // Every registered source gets an entry. The provider implementation
+  // picks the right fetch path: Mirakurun → /api/tuners, plain HDHomeRun
+  // IPTV → /tuner{N}/status, m3u-only → fall back to a HEAD probe.
   const out = await Promise.all(
     sources.map(async (s) => {
-      let tuners: Awaited<ReturnType<typeof fetchMirakurunTunerStatuses>> = [];
-      let reachable: boolean;
-      if (s.kind === 'mirakurun') {
-        tuners = await fetchMirakurunTunerStatuses(s.url);
-        reachable = tuners.length > 0;
-      } else if ((s.tunerCount ?? 0) > 0) {
-        tuners = await fetchAllTunerStatuses(hdhomerunLineupUrl(s.kind, s.url), s.tunerCount ?? 0);
-        reachable = tuners.length > 0;
-      } else {
-        reachable = await probeUrlReachable(s.url);
-      }
+      const provider = createProvider(s);
+      const tuners = await provider.fetchTunerStatuses();
+      const reachable = tuners.length > 0 ? true : await provider.probeReachable();
       return {
         sourceId: s.id,
         name: s.name,
