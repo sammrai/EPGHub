@@ -371,6 +371,28 @@ function leadsWithQuoted(s: string): boolean {
   return /^[\s　]*[「『][^「」『』]+[」』]/.test(s);
 }
 
+// Dialog-in-title shape: the leading `「…」` / `『…』` is a quoted-speech
+// fragment that grammatically continues into the rest of the title as a
+// single Japanese sentence (`「XXX」と言った次期公爵様がなぜか溺愛してきます`
+// — a light-novel-style show name). Signal: the character IMMEDIATELY
+// after the closing quote is a hiragana (particle / conjugation / auxiliary
+// verb), never a katakana promo word (`オススメ`), episode counter (`第`,
+// `#`), ASCII season marker (`Season2`, `4th`) or kanji subtitle prefix
+// (`劇場版`). Broadcasters that use a leading quote as a subtitle-host
+// (`「風の群像」第16回`) always follow with a non-hiragana token.
+//
+// When this fires, the canonical show name is the FULL string (quote
+// included). Step 7 must skip both the leading-quote extraction AND the
+// else-branch quote teardown so the whole `「…」<hiragana-tail>` phrase
+// survives normalisation.
+//
+// Source: programs.id svc-3272302072_2026-07-04T16:30:00.000Z (issue #54).
+// Also covers #68 (episode 2 of the same show).
+function leadsWithDialogQuoteInTitle(s: string): boolean {
+  const m = s.match(/^[\s　]*[「『][^「」『』]+[」』](.)/);
+  return !!m && /[\u3040-\u309F]/.test(m[1]);
+}
+
 // Episode-marker-only pattern: when the text BETWEEN two consecutive top-level
 // quoted segments is purely an episode counter (`第N話`, `第N回`, `#N`, …), the
 // two quotes are NOT dialog parts of the same show name — they're a show-name
@@ -592,6 +614,13 @@ export function normalizeTitle(raw: string): string {
       t = inner;
       wasQuoteExtracted = true;
     }
+  } else if (leadsWithDialogQuoteInTitle(t)) {
+    // Leading `「…」` is dialog embedded in the show name (kana-particle tail).
+    // Keep the whole string; steps 9-11 strip the trailing episode marker.
+    // Mark wasQuoteExtracted so the trailing-digit strip below is skipped —
+    // a marker like `1` glued to kana in the show-name tail would otherwise
+    // be treated as a sequel digit. Issue #54.
+    wasQuoteExtracted = true;
   } else if (leadsWithQuoted(t)) {
     const inner = extractQuoted(t);
     if (inner) {

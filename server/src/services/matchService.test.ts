@@ -683,6 +683,16 @@ const borderline: Case[] = [
     expected: 'ふつうのショー',
     note: 'Negative test for `isDialogStyleQuoted`: with two top-level quotes BUT the bridge between them is a pure episode marker (`第１話`), the title is treated as the conventional `<show>「Q1」<ep>「Q2」` shape — strip both subtitles and keep the show name. Locks the bridge-not-episode-only side of the dialog detector.',
   },
+  {
+    raw: '[新]「きみを愛する気はない」と言った次期公爵様がなぜか溺愛してきます　＃１[字]',
+    expected: '「きみを愛する気はない」と言った次期公爵様がなぜか溺愛してきます',
+    note: 'Issue #54: leading `「…」` followed by a hiragana particle (`と`) is quoted-dialog embedded in the show name (light-novel-style title), NOT a subtitle host. `leadsWithDialogQuoteInTitle` gate fires before the generic `leadsWithQuoted` extract, so the whole `「…」と言った…` phrase survives normalisation and searchKeyCandidates emits the canonical TVDB title verbatim. Covers #68 (episode 2 of the same show).',
+  },
+  {
+    raw: '「風の群像」第16回',
+    expected: '風の群像',
+    note: 'Negative test for `leadsWithDialogQuoteInTitle`: after the closing `」` the tail starts with `第` (kanji episode-marker), not hiragana — the quote IS a subtitle host and must still be extracted. Locks the "hiragana-only" side of the dialog-in-title gate.',
+  },
 ];
 
 const allCases: Case[] = [
