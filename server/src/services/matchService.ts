@@ -1312,6 +1312,30 @@ const KANJI_NUMBER_RE = new RegExp(
   ')'
 );
 
+/**
+ * Extract a broadcaster-supplied season number from an EPG title.
+ * Broadcasters mark long-running series with `Season N` / `シーズンN`
+ * (and their zenkaku variants like `ｓｅａｓｏｎ１２`). When the same
+ * `#N` episode marker exists across many seasons (e.g. 相棒 has 20+
+ * seasons all with an E1), the `#N`-only heuristic — highest season on
+ * fresh airings, lowest on `[再]` reruns — picks arbitrarily. The
+ * explicit season hint disambiguates: return N and the caller filters
+ * candidate episodes to that season before applying the tiebreaker.
+ *
+ * Returns null when no explicit season marker is present.
+ */
+function parseTitleSeasonNumber(title: string): number | null {
+  const norm = zenkakuToHankaku(title);
+  // `season N` / `season.N` — case-insensitive. Word-boundary on the
+  // right so `season12` (no separator) still parses.
+  const en = norm.match(/season\s*\.?\s*(\d{1,3})/i);
+  if (en) return Number(en[1]);
+  // `シーズンN` / `シーズン N`.
+  const jp = norm.match(/シーズン\s*(\d{1,3})/);
+  if (jp) return Number(jp[1]);
+  return null;
+}
+
 function parseTitleEpisodeNumber(title: string): number | null {
   // Zenkaku → hankaku for digits and `＃`.
   const norm = title
@@ -1704,6 +1728,20 @@ export function findEpisodeForProgram(
   if (titleEp != null) {
     const candidates = episodes.filter((ep) => ep.e === titleEp);
     if (candidates.length > 0) {
+      // Explicit season hint in the title (`Season12` / `ｓｅａｓｏｎ１２` /
+      // `シーズン12`) pins the season directly — needed for long-running
+      // shows where the same `#N` collides across many seasons (相棒
+      // has 20+ E1s). Only honour the hint when the cached episode list
+      // actually carries that season, so a stale cache doesn't produce
+      // a spurious null.
+      const seasonHint = parseTitleSeasonNumber(programTitle);
+      const seasonHinted = seasonHint != null
+        ? candidates.filter((ep) => ep.s === seasonHint)
+        : [];
+      if (seasonHinted.length > 0) {
+        const pick = seasonHinted[0];
+        return { s: pick.s, e: pick.e, name: pick.name };
+      }
       // Fresh airings normally point at the current/latest cour, so the
       // highest season carrying e===N wins by default. When the title
       // explicitly carries a 再放送 marker (`[再]` / `［再］`), it's a

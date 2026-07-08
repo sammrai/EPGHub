@@ -1153,6 +1153,66 @@ describe('findEpisodeForProgram — BS11ガンダムアワー block-prefix regre
   });
 });
 
+describe('findEpisodeForProgram — 相棒 season-hint disambiguation (issue #53)', () => {
+  // svc-3272302072_2026-06-07T05:30:00.000Z. tvdb_id=188501 「相棒」.
+  // Long-running detective show with 20+ seasons on TVDB — every season
+  // has an E1. Title `相棒　ｓｅａｓｏｎ１２　＃１[再][解][字]` carries
+  // both a `＃１` marker AND a zenkaku `ｓｅａｓｏｎ１２` hint AND a
+  // `[再]` rerun flag. Before the fix, step 2 filtered candidates by
+  // `e===1` (20+ matches) and the `[再]` tiebreaker picked S1E1 — wrong.
+  // The season hint pins S12 directly.
+  const AIBOU_E1_EPISODES: Episode[] = [
+    { s: 0, e: 1, name: '刑事が警官を殺した!?', aired: '2000-06-03' },
+    { s: 1, e: 1, name: '警視総監室にダイナマイト男が乱入! 刑事が人質に!?犯罪の影に女あり…', aired: '2002-10-09' },
+    { s: 2, e: 1, name: 'ロンドンからの帰還〜ベラドンナの赤い罠', aired: '2003-10-08' },
+    { s: 11, e: 1, name: '聖域', aired: '2012-10-10' },
+    { s: 12, e: 1, name: 'ビリーバー', aired: '2013-10-23' },
+    { s: 22, e: 1, name: '合唱', aired: '2023-10-18' },
+  ];
+
+  test('zenkaku ｓｅａｓｏｎ１２ + ＃１ + [再] → S12E1 (not S1E1 nor S22E1)', () => {
+    const hit = findEpisodeForProgram(
+      AIBOU_E1_EPISODES,
+      '2026-06-07T05:30:00.000Z',
+      '相棒\u3000ｓｅａｓｏｎ１２\u3000＃１[再][解][字]',
+      ['相棒', 'Aibou'],
+    );
+    assert.deepEqual(hit, { s: 12, e: 1, name: 'ビリーバー' });
+  });
+
+  test('hankaku Season2 #1 → S2E1 (fresh airing, no [再])', () => {
+    const hit = findEpisodeForProgram(
+      AIBOU_E1_EPISODES,
+      '2026-06-07T05:30:00.000Z',
+      '相棒 Season2 #1',
+      ['相棒', 'Aibou'],
+    );
+    assert.deepEqual(hit, { s: 2, e: 1, name: 'ロンドンからの帰還〜ベラドンナの赤い罠' });
+  });
+
+  test('シーズン11 ＃１ → S11E1 (Japanese season word)', () => {
+    const hit = findEpisodeForProgram(
+      AIBOU_E1_EPISODES,
+      '2026-06-07T05:30:00.000Z',
+      '相棒 シーズン11 ＃１',
+      ['相棒', 'Aibou'],
+    );
+    assert.deepEqual(hit, { s: 11, e: 1, name: '聖域' });
+  });
+
+  test('season hint absent from cache falls back to #N tiebreaker (rerun → lowest)', () => {
+    // Season 99 doesn't exist in the cache — hint is ignored, [再]
+    // tiebreaker fires and picks S1E1.
+    const hit = findEpisodeForProgram(
+      AIBOU_E1_EPISODES,
+      '2026-06-07T05:30:00.000Z',
+      '相棒 Season99 #1[再]',
+      ['相棒', 'Aibou'],
+    );
+    assert.deepEqual(hit, { s: 1, e: 1, name: '警視総監室にダイナマイト男が乱入! 刑事が人質に!?犯罪の影に女あり…' });
+  });
+});
+
 describe('findEpisodeForProgram — desc-fallback episode-number cases (issue #43)', () => {
   // svc-3272502088_2026-05-19T16:59Z. tvdb_id=461513 「勇者のクズ」.
   // The original Sunday airing carries `#18` in the title, but the
