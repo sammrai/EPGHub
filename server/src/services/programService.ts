@@ -83,8 +83,16 @@ class DrizzleProgramService implements ProgramService {
     return rows.map((r) => rowToProgram(r.p, r.t));
   }
 
-  async upsertMany(list: Program[]): Promise<void> {
-    if (list.length === 0) return;
+  async upsertMany(input: Program[]): Promise<void> {
+    if (input.length === 0) return;
+    // Two events on the same channel + start time map to the same programs.id.
+    // ON CONFLICT rejects a statement that touches a row twice, which would
+    // fail the whole refresh, so the later row wins.
+    const byId = new Map(input.map((p) => [p.id, p]));
+    if (byId.size < input.length) {
+      console.warn(`[programs] dropped ${input.length - byId.size} rows with a duplicate id from upsert batch`);
+    }
+    const list = Array.from(byId.values());
     // Chunk to stay under Postgres' bind-parameter limit (<= 65535).
     // Each row binds ~10 params, so 500/batch is safe.
     const CHUNK = 500;
